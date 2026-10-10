@@ -1,15 +1,6 @@
-// Forage's moves and cascades, ported from the Puzzle Pirates client's controller for the puzzle
-// (duty/forage/client/o, with ForageController and the drop-puzzle loop in puzzle/drop/client/c).
-// board.ts holds the board; this plays moves on it and records each step's animation, with the
-// client's timings, for index.ts to draw.
-//
-// A move is a 2x2 turn or a tool. The board then settles by repeating the first of these that does
-// anything, waiting for each one's animation: gravity and refill, collecting crates that reach the
-// bottom row, clearing runs, spawning a crate the server asked for. Once nothing more happens the
-// ants take a step and the board settles again; then the move is over and its points are sent.
-//
-// Crates come from the server, which isn't in the client. How the simulator stands in for it is up
-// to the mode: see CrateSource.
+// Forage moves, cascades and animation steps. Each move turns a 2x2 group or uses a tool.
+// The board repeats gravity, collection, matching and crate placement until settled,
+// then advances the ants and settles again. CrateSource supplies each mode's crates.
 import {
   CRATE_SIZES,
   CratePoints,
@@ -41,36 +32,36 @@ export const CELL = 45;
  */
 export const looks = { random: Math.random };
 
-/** Animation timings in milliseconds, from the client. */
+/** Animation timings in milliseconds, from the game. */
 export const TIMING = {
-  /** A 2x2 turn: each piece slides straight to its new cell (client/o, 250L). */
+  /** A 2x2 turn: each piece slides straight to its new cell. */
   turn: 250,
-  /** Gravity: 45px x rows at 0.35 x 1.5 px/ms, truncated per piece (client/w). */
+  /** Gravity: 45px x rows at 0.35 x 1.5 px/ms, truncated per piece. */
   fall: (rows: number) => Math.trunc((CELL * rows) / Math.fround(Math.fround(0.35) * 1.5)),
   /** New chests drop in at the same speed as the pieces that refill the board, 85ms a row. */
   chestEntry: (rows: number) => Math.trunc((CELL * rows) / Math.fround(Math.fround(0.35) * 1.5)),
-  /** Earthquake: 45px x columns at 0.1 px/ms, plus up to 20% more at random (client/s). */
+  /** Earthquake: 45px x columns at 0.1 px/ms, plus up to 20% more at random. */
   slide: (columns: number) => {
     const t = Math.trunc((CELL * columns) / Math.fround(0.1));
     return Math.trunc(t + Math.floor(looks.random() * Math.trunc(t * 0.2)) - 0.1);
   },
-  /** The earthquake's pieces bob up and down 9px (a fifth of a cell) at 0.03 rad/ms (client/l). */
+  /** The earthquake's pieces bob up and down 9px (a fifth of a cell) at 0.03 rad/ms. */
   wobblePx: CELL / 5,
   wobbleRate: 0.03,
-  /** Ants walk 45px at 0.35 px/ms, then twice that (client/y). */
+  /** Ants walk 45px at 0.35 px/ms, then twice that. */
   antStep: Math.trunc(CELL / Math.fround(0.35)) * 2,
   /** A cleared piece fades from full to 20% at 0.04 a millisecond, then goes (ForageBoardView.a). */
   clear: 20,
-  /** Tool clears go outward from the tool, 50ms a cell (client/A). */
+  /** Tool clears go outward from the tool, 50ms a cell. */
   ripple: 50,
   /** The cleared piece's pop: 5 frames at 12-14 fps, not holding up the board (ForageBoardView.a(int)). */
   popFrames: 5,
   /** The monkey drops and leaves at 1 px/ms, dances 17 frames at 10 fps, and throws at 5 ms/px. */
   monkeyDance: 1700,
   monkeyThrow: 5,
-  /** Pieces fly on and off the board at 1 ms/px for the intro and outro (client/j). */
+  /** Pieces fly on and off the board at 1 ms/px for the intro and outro. */
   introPerPx: 1,
-  /** The outro starts a second after the "Great work!" (client/o.i). */
+  /** The outro starts a second after the "Great work!". */
   outroDelay: 1000,
 };
 
@@ -131,7 +122,7 @@ export interface Step {
 }
 
 export interface MoveResult {
-  /** The move's points as the client works them out for normal foraging. */
+  /** The move's points as the game works them out for normal foraging. */
   points: number;
   /** Gauntlet points: 1, 2 or 3 a crate by width (the simulator's cursed isle scoring). */
   gauntletPoints: number;
@@ -144,8 +135,7 @@ export interface MoveResult {
 }
 
 /**
- * Stands in for the server's crate requests. beforeMove runs as the player moves (where the client
- * applies a request), afterMove once the move has settled (the simulator's Gauntlet spawning).
+ * Stands in for the game's crate requests. beforeMove runs as the player moves, afterMove once the move has settled (the simulator's Gauntlet spawning).
  */
 export interface CrateSource {
   beforeMove?(game: Forage): void;
@@ -153,7 +143,7 @@ export interface CrateSource {
   afterMove?(game: Forage): boolean;
 }
 
-/** The moved piece for a 2x2 turn, in the client's order: bottom-left, top-left, top-right, bottom-right. */
+/** The moved piece for a 2x2 turn, in the game's order: bottom-left, top-left, top-right, bottom-right. */
 const TURN: Cell[] = [
   [0, 1],
   [0, 0],
@@ -170,7 +160,7 @@ export class Forage {
   cratesCollected = 0;
   /**
    * What's in each crate slot (ForageObject.crateCommodities), as the art tile for its size; the
-   * server fills these in.
+   * game fills these in.
    */
   crateArt = [0, 0, 0];
   private points = new CratePoints();
@@ -227,14 +217,14 @@ export class Forage {
     this.current?.sounds.push({ name, delay });
   }
 
-  /** A falling piece (client/w): pieces from above the board are made there and drop in. */
+  /** A falling piece: pieces from above the board are made there and drop in. */
   private fall = (piece: number, x: number, sy: number, tx: number, ty: number) => {
     const rows = Math.abs(ty - sy);
     const duration = sy < 0 && isCrate(piece) && !this.legacyChestTiming ? TIMING.chestEntry(rows) : TIMING.fall(rows);
     this.current?.sprites.push({ piece, from: [x, sy], to: [tx, ty], delay: 0, duration, path: 'line' });
   };
 
-  /** Clears a cell (client/A): it fades after `ripple` cells' delay, with a pop and one destroy sound per kind of piece and delay. */
+  /** Clears a cell: it fades after `ripple` cells' delay, with a pop and one destroy sound per kind of piece and delay. */
   private clearCell(x: number, y: number, ripple: number, heard: Map<number, Set<number>>): void {
     const piece = this.board.getPiece(x, y);
     if (piece !== EMPTY) {
@@ -258,7 +248,7 @@ export class Forage {
 
   /**
    * The player clicks with the cursor's top-left at (x, y): a tool there is used, otherwise the
-   * 2x2 turns, anticlockwise for `ccw` (client/o.a(int, int, boolean)). Four of the same turn
+   * 2x2 turns, anticlockwise for `ccw`. Four of the same turn
    * but aren't a move. Returns what happened; for a move, the board has then settled.
    */
   act(x: number, y: number, ccw: boolean): 'illegal' | 'same' | 'moved' {
@@ -303,7 +293,7 @@ export class Forage {
     this.end();
   }
 
-  /** Shovel: its cell and everything below it, crates skipped (client/o.a(int,int,int,HashMap)). */
+  /** Shovel: its cell and everything below it, crates skipped. */
   private shovel(x: number, y: number): void {
     this.begin();
     this.sound('shovel');
@@ -350,7 +340,7 @@ export class Forage {
 
   /**
    * Monkey: drops in over a 3x3 around itself, dances while it throws a new piece into every cell
-   * of the 5x5 around it (crates skipped), then climbs away (client/o.a(int, int), b(int, int)).
+   * of the 5x5 around it (crates skipped), then climbs away.
    * The new pieces come from getNextPiece without ants, and since nothing has matched yet this
    * move, they are always fruit.
    */
@@ -388,7 +378,7 @@ export class Forage {
   // ---- Settling ----
 
   /**
-   * Settles the board (client/o.o() and p()): gravity, crates, runs, spawns, until nothing happens;
+   * Settles the board: gravity, crates, runs, spawns, until nothing happens;
    * then the ants step and it settles again; then the move ends.
    */
   private settle(moved: boolean): void {
@@ -403,7 +393,7 @@ export class Forage {
       break;
     }
     if (!moved) return;
-    // The end of the move (client/o.p()).
+    // The end of the move.
     this.result.points = this.points.total;
     this.result.chained = this.points.chained;
     this.result.combo = this.board.comboCount;
@@ -428,7 +418,7 @@ export class Forage {
   }
 
   /**
-   * Crates whose bottom-left cell reaches the bottom row are collected (client/o.j()). Normal
+   * Crates whose bottom-left cell reaches the bottom row are collected. Normal
    * foraging scores them with CratePoints; the Gauntlet's flat points are worked out alongside.
    */
   private collectCrates(): boolean {
@@ -460,7 +450,7 @@ export class Forage {
     return any;
   }
 
-  /** Every run of three or more fruit goes at once (client/o.k()). */
+  /** Every run of three or more fruit goes at once. */
   private clearRuns(): boolean {
     const runs = this.board.findRuns();
     if (!runs.length) return false;
@@ -473,7 +463,7 @@ export class Forage {
     return true;
   }
 
-  /** A crate the server asked for (client/o.h()). */
+  /** A crate the game asked for. */
   private spawnCrate(): boolean {
     this.begin();
     const placed = this.board.spawnCrate(this.fall) > 0;
@@ -482,7 +472,7 @@ export class Forage {
     return placed;
   }
 
-  /** The ants step once a move (client/o.p(), ForageBoard.tickAnts). */
+  /** The ants step once a move. */
   private tickAnts(): void {
     if (!this.board.antsOnBoard()) return;
     const step = this.begin();
@@ -502,7 +492,7 @@ export class Forage {
     this.end();
   }
 
-  // ---- Crates from outside the client ----
+  // ---- Crates from outside the board ----
 
   /** Puts a crate of `size` in at column `x` of the top rows, as the simulator's Gauntlet does, dropping in. */
   dropCrate(size: number, x: number, key = 0): void {

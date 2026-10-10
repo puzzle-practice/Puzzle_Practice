@@ -1,5 +1,5 @@
 // Speed carp's small holes, from hole_calculator.py and HoleCreator.py in the Vampire Carp
-// simulator. Normal holes are the client's now (board.ts).
+// simulator. Normal holes are the game's now (board.ts).
 //
 // A hole is a 4×9 grid of numbers: 0 wood, 1 an empty cell, and +2 for every piece
 // covering a cell (so 3 is filled once, 5 overlapped). Edges mark the empty cells

@@ -1,8 +1,8 @@
-// Blacksmithing's rules, ported from the client (build 20260909165753), package
+// Blacksmithing's rules, ported from the game (build 20260909165753), package
 // com.threerings.piracy.puzzle.crafting.iron: IronBoard, Chain, Piece and the constants class
 // iron/a/a. No drawing here, so it can be tested.
 //
-// The board is 6x6, indexed [x][y] like the client (x is the column). Every square takes three
+// The board is 6x6, indexed [x][y] like the game (x is the column). Every square takes three
 // strikes; each strike cools it (hot, warm, cool, gone) and restamps it with a new random piece.
 // The piece just struck decides which squares may be struck next.
 
@@ -109,8 +109,7 @@ export function weightedIndex(weights: readonly number[], random: () => number):
 
 /**
  * Maps the puzzle difficulty the game is played at (1-4, as on YPPedia) to the board's
- * difficulty (IronBoard.createWithPuzzleDifficulty, which takes the server's 0-4 and squeezes
- * 2 and 3 together). 1: numbers 1-3. 2: adds rook, bishop and knight. 3: adds the four and the
+ * difficulty. 1: numbers 1-3. 2: adds rook, bishop and knight. 3: adds the four and the
  * queen. 4: as 3, plus rum jugs.
  */
 export function boardDifficulty(level: number): number {
@@ -124,7 +123,7 @@ const equivalent = (a: number, b: number) => a === b || a === WILD || b === WILD
 
 /**
  * The run of recent strikes that counts toward a combo: either a chain of one type ("Double!",
- * "Triple!", ...) or alternating complete sets of numbers and chess pieces.
+ * "Triple!",...) or alternating complete sets of numbers and chess pieces.
  */
 export class Chain {
   readonly piecesPerSet: number;

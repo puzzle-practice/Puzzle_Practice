@@ -1,13 +1,6 @@
-// Treasure Haul's rules, from the Puzzle Pirates client (duty/haul and the shared drop-puzzle
-// engine puzzle/drop, build 20260909165753), with no drawing so they can be tested.
-//
-// The board is 8x8 with y = 0 at the bottom (DropBoard, HaulConfig). Pieces "drop" towards the
-// top of the screen: everything floats up, and new pieces come in from below. You swap a piece
-// with the one under it; runs of three or more coins clear, a ruby clears its row and column and
-// an emerald its diagonals, and chests that float to the top row are hauled into the net.
-//
-// The client works out the points for each move and sends them to the server (haul/a/e, the
-// scorer); the server turns them into the duty performance, which isn't in the client.
+// Treasure Haul rules. The 8x8 board has y = 0 at the bottom. Pieces float up and refill
+// from below. Runs of three coins clear; rubies clear a cross and emeralds clear diagonals.
+// Chests are hauled when their top reaches the top row.
 
 export const W = 8;
 export const H = 8;
@@ -49,7 +42,7 @@ export interface Cleared {
   x: number;
   y: number;
   piece: number;
-  /** Gem blasts reach squares one after another, 50ms per square of distance (haul/client/k). */
+  /** Gem blasts reach squares one after another, 50ms per square of distance. */
   delay: number;
 }
 
@@ -75,7 +68,7 @@ export interface Message {
   sound: 'shiny' | 'big_combo' | null;
 }
 
-/** The client's messages (i18n/puzzle/haul.properties). */
+/** The game's messages (i18n/puzzle/haul.properties). */
 export const MESSAGES: Record<string, string> = {
   'm.combo4': 'Good',
   'm.combo5': 'Shiny!',
@@ -97,7 +90,7 @@ const RUN_POINTS = [3, 5, 8];
 const RUNS_MULTIPLIER = [1.0, 1.0, 1.25, 1.75, 2.5];
 
 /**
- * The scorer (haul/a/e and its client subclass k). Each square cleared adds a point (five for a
+ * The scorer. Each square cleared adds a point (five for a
  * chest square), but a step of matches is scored from its runs instead; each step closes with
  * finish(), which adds the step to the move's total and counts it towards the chain.
  */
@@ -137,7 +130,7 @@ export class Scorer {
   }
 }
 
-/** Which message a step of matches shows (haul/client/i.i()). Messages only exist for runs up to 5 long, so longer ones read as 5. */
+/** Which message a step of matches shows. Messages only exist for runs up to 5 long, so longer ones read as 5. */
 export function stepMessage(runs: readonly Run[], chain: number): Message | null {
   const key = (k: string) => MESSAGES[k] ?? k;
   const len = (r: Run) => Math.min(r.length, 5);
@@ -162,9 +155,79 @@ export function stepMessage(runs: readonly Run[], chain: number): Message | null
   return null;
 }
 
+/** Counts cleared coins toward chest awards, retaining the remainder. */
+export class ChestMeter {
+  coins = 0;
+  constructor(public perChest: number) {}
+
+  add(coins: number): number {
+    this.coins += coins;
+    let chests = 0;
+    while (this.coins >= this.perChest) {
+      this.coins -= this.perChest;
+      chests++;
+    }
+    return chests;
+  }
+}
+
 export interface Chest {
   value: number;
   size: number;
+}
+
+export const CHEST_DELAY_MS = 1000;
+
+/** Earned chests keep their own delay and wait for space in a later opening. */
+export class ChestSupply {
+  readonly meter: ChestMeter;
+  private readonly readyAt: number[];
+  private openings = 0;
+  private emptyAtMove = false;
+  private emptyReadyAt: number | null = null;
+
+  constructor(perChest: number, now: number, private readonly clearWhenEmpty = false) {
+    this.meter = new ChestMeter(perChest);
+    this.readyAt = clearWhenEmpty ? [] : [now + CHEST_DELAY_MS];
+  }
+
+  get waiting(): number { return this.readyAt.length || (this.emptyReadyAt !== null ? 1 : 0); }
+
+  addCleared(cleared: readonly Cleared[], now: number): void {
+    if (this.emptyAtMove && this.emptyReadyAt === null) {
+      const pieces = cleared.filter((c) => c.piece !== EMPTY && !isChest(c.piece));
+      if (pieces.length) this.emptyReadyAt = now + Math.min(...pieces.map((c) => c.delay)) + CHEST_DELAY_MS;
+    }
+    const coins = cleared.filter((c) => c.piece >= 0 && c.piece < COLOURS).sort((a, b) => a.delay - b.delay);
+    for (const coin of coins) {
+      if (this.meter.add(1)) this.readyAt.push(now + coin.delay + CHEST_DELAY_MS);
+    }
+  }
+
+  /** Space is reserved at the start of a move; hauling a full board cannot add space mid-cascade. */
+  beginMove(board: HaulBoard, limit: number): void {
+    const inPlay = board.cells.filter(isChestOrigin).length + board.chestList.length + board.pending.length;
+    this.openings = Math.min(1, Math.max(0, limit - inPlay));
+    this.emptyAtMove = this.clearWhenEmpty && limit === 2 && inPlay === 0;
+    if (inPlay > 0) this.emptyReadyAt = null;
+  }
+
+  release(board: HaulBoard, now: number, pickValue: () => number): void {
+    if (!this.openings) return;
+    if (this.emptyAtMove) {
+      // A vacant two-chest board needs a fresh clear, even when awards are banked.
+      if (this.emptyReadyAt === null || now < this.emptyReadyAt) return;
+      // Use a banked award first; otherwise provide the first chest without a coin threshold.
+      if (this.readyAt.length && now >= this.readyAt[0]) this.readyAt.shift();
+      this.emptyReadyAt = null;
+      this.emptyAtMove = false;
+    } else {
+      if (!this.readyAt.length || now < this.readyAt[0]) return;
+      this.readyAt.shift();
+    }
+    this.openings--;
+    board.chestList.push({ value: pickValue(), size: 0 });
+  }
 }
 
 export class HaulBoard {
@@ -172,9 +235,9 @@ export class HaulBoard {
   readonly scorer = new Scorer();
   /** Chests waiting to come in at the bottom, one per refill (HaulBoard.haulChestList). */
   readonly chestList: Chest[] = [];
-  /** Chests the server has announced; each move lets one through to chestList (HaulController.m, b()). */
+  /** Chests the game has announced; each move lets one through to chestList (HaulController.m, b()). */
   readonly pending: Chest[] = [];
-  /** Set by a move, so the move's points are paid out once the board settles (haul/client/i.c). */
+  /** Set by a move, so the move's points are paid out once the board settles. */
   moved = false;
 
   /** Percent chance per new piece; remaining chance is split evenly between coins. */
@@ -244,7 +307,7 @@ export class HaulBoard {
     return a === RUBY || a === EMERALD || b === RUBY || b === EMERALD || (a !== EMPTY && b !== EMPTY && !isChest(a) && !isChest(b));
   }
 
-  /** The cursor's action on the pair (x, y) and (x, y - 1) (haul/client/i.a(int, int)). */
+  /** The cursor's action on the pair (x, y) and (x, y - 1). */
   swap(x: number, y: number): SwapResult {
     if (y < 1 || y >= H || x < 0 || x >= W || !this.isLegalSwap(x, y)) return { kind: 'illegal' };
     const upper = this.get(x, y);
@@ -281,7 +344,7 @@ export class HaulBoard {
     return { kind: 'swap', upper, lower };
   }
 
-  /** A ruby: its whole row and column, setting off any gems in the way (haul/client/i.a(int, int, int, HashMap)). */
+  /** A ruby: its whole row and column, setting off any gems in the way. */
   private cross(x: number, y: number, dist: number, reach: Map<number, number>): void {
     const key = y * W + x;
     const was = reach.get(key);
@@ -291,7 +354,7 @@ export class HaulBoard {
     for (let xx = 0; xx < W; xx++) if (xx !== x) this.blast(xx, y, dist + Math.abs(x - xx), reach);
   }
 
-  /** An emerald: the four diagonals from it (haul/client/i.b(int, int, int, HashMap)). */
+  /** An emerald: the four diagonals from it. */
   private diagonals(x: number, y: number, dist: number, reach: Map<number, number>): void {
     const key = y * W + x;
     const was = reach.get(key);
@@ -304,7 +367,7 @@ export class HaulBoard {
     }
   }
 
-  /** One square in a blast's path: gems go off in turn; chests are passed over (haul/client/i.a(DropBoard, ...)). */
+  /** One square in a blast's path: gems go off in turn; chests are passed over. */
   private blast(x: number, y: number, dist: number, reach: Map<number, number>): void {
     const p = this.get(x, y);
     if (p === RUBY) this.cross(x, y, dist, reach);
@@ -317,7 +380,7 @@ export class HaulBoard {
   }
 
   /**
-   * One step of the board settling (haul/client/i.o()): pieces float up and new ones come in
+   * One step of the board settling: pieces float up and new ones come in
    * below; failing that, chests in the top row are hauled; failing that, runs clear. Null once
    * the board is still.
    */
@@ -329,7 +392,7 @@ export class HaulBoard {
     return this.match();
   }
 
-  /** Once the board is still: the move's points, which the client sends to the server (haul/client/i.p()). */
+  /** Banks the move's points once the board is still. */
   settle(): number {
     if (!this.moved) return 0;
     this.moved = false;
@@ -417,7 +480,7 @@ export class HaulBoard {
     return fits.length ? fits[this.nextInt(fits.length)] : -1;
   }
 
-  /** Chests whose top reached the top row go into the net (haul/client/i.h()). */
+  /** Chests whose top reached the top row go into the net. */
   private haul(): Step | null {
     const chests: { x: number; piece: number }[] = [];
     const cleared: Cleared[] = [];

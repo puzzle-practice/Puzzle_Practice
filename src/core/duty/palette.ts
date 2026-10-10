@@ -1,4 +1,4 @@
-// Dye and chroma colourisations from the client config/media/colordefs.xml.
+// Dye and chroma colourisations from the game config/media/colordefs.xml.
 export const hairDyes = {
   blue: [-0.387, 0, 0],
   pink: [-0.058, -0.147, 0.173],

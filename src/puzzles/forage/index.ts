@@ -1,13 +1,13 @@
-// Forage, rebuilt from the Puzzle Pirates client (duty/forage, build 20260909165753): the rules are
+// Forage, rebuilt from the Puzzle Pirates game (duty/forage, build 20260909165753): the rules are
 // in board.ts and engine.ts, and this file is ForagePanel and ForageBoardView with their helper
-// classes: the client's art, sounds and timings, the cursor, crates glowing and sparkling, cleared
+// classes: the game's art, sounds and timings, the cursor, crates glowing and sparkling, cleared
 // pieces popping, the monkey, ants, the earthquake's bob, the banana meter, the floating messages
 // and the intro and outro. The canvas is the 450x600 puzzle panel; settings and scores are in the
 // side panel.
 //
-// On top of the client's game are the Forage Simulator's modes: Puzzle (its hand-made boards, from
+// On top of the game are the Forage Simulator's modes: Puzzle (its hand-made boards, from
 // logic.ts and puzzles.ts), CI and Infinite (cursed isle foraging, with the simulator's chests and
-// flat 1/2/3 scoring, crates.ts) and Normal (normal foraging on the client's crate rules and points).
+// flat 1/2/3 scoring, crates.ts) and Normal.
 import { SessionPause } from '../../core/pause';
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
@@ -38,7 +38,7 @@ import {
   makeCrate,
   WIDTH,
 } from './board';
-import { GauntletChests, ServerRequests, CURSED_TILES } from './crates';
+import { GauntletChests, CrateRequests, CURSED_TILES } from './crates';
 import { keyMatches } from '../../core/controls';
 import { type Cell, CELL, type Effect, Forage, looks, type SoundName, type Sprite, type Step, TIMING } from './engine';
 import { CHEST_WEIGHTINGS, fillPuzzle, type Mode, parseBoard, randomizeColours, scramblePuzzle, type Settings } from './logic';
@@ -55,12 +55,12 @@ const VIEW_W = WIDTH * CELL;
 const VIEW_H = HEIGHT * CELL;
 /** The cursor's frame reaches 7px past its cells (ForageBoardView.j). */
 const CURSOR_PAD = 7;
-/** The banana meter (puzzle/client/d) at (20, 335): bananas 21px, stacked 19px apart from the bottom of nine. */
+/** The banana meter  at (20, 335): bananas 21px, stacked 19px apart from the bottom of nine. */
 const METER_X = 20;
 const METER_Y = 335;
 const BANANA = 21;
 const BANANA_STEP = 19;
-/** A banana fills in 500ms (puzzle/client/d: bananas x 500 / 100 ms a percent). */
+/** A banana fills in 500ms. */
 const BANANA_MS = 500;
 /** The game updates the board every 14ms (about 71 times a second). */
 const FRAME_MS = 14;
@@ -85,8 +85,8 @@ const RANDOM_POOL = Object.keys(PUZZLES)
 
 /**
  * CI and Infinite are cursed isle (Gauntlet) foraging: when a board's crates are all collected,
- * deal a new one (within the 2 minutes, for CI). Normal is normal foraging on the client's rules,
- * with no clock (the client has none), and is one board: it ends when the banana meter is full,
+ * deal a new one (within the 2 minutes, for CI). Normal is normal foraging in the game's rules,
+ * with no clock, and is one board: it ends when the banana meter is full,
  * or when the player dismisses it.
  */
 const MODES: Option<Mode>[] = [
@@ -142,10 +142,10 @@ interface ForageReplaySeed {
   boards: string[];
 }
 
-/** The simulator's letters as client pieces. Colours u-y are dirt, wood, grass, sand and stone. */
+/** The simulator's letters as game pieces. Colours u-y are dirt, wood, grass, sand and stone. */
 const LETTER_PIECES: Record<string, number> = { u: 0, v: 4, w: 1, x: 2, y: 3, n: 5, m: 6, p: 7, o: 8, z: EMPTY };
 
-/** A puzzle board in the simulator's letters, as client cells (crates as cursed ones). */
+/** A puzzle board in the simulator's letters, as game cells (crates as cursed ones). */
 function lettersToCells(board: string[][]): number[] {
   const cells: number[] = [];
   for (let y = 0; y < HEIGHT; y++) {
@@ -284,7 +284,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return [settings.bb ? w[0] : 0, settings.fj ? w[1] : 0, settings.cc ? w[2] : 0];
   }
 
-  /** A fresh client board from a random seed, with the mode's crates and the chosen specials. */
+  /** A fresh game board from a random seed, with the mode's crates and the chosen specials. */
   function newGame(): Forage {
     const seed = replay
       ? BigInt(sessionSeed?.boards[nextReplayBoard++] ?? 0)
@@ -295,7 +295,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
     const source =
       settings.mode === 'normal'
-        ? new ServerRequests(rng, crateWeights(), BANANAS)
+        ? new CrateRequests(rng, crateWeights(), BANANAS)
         : settings.mode === 'puzzle'
           ? {}
           : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock());
@@ -351,7 +351,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     timePassed = 0;
   }
 
-  /** Pieces fly in from beyond the nearest corner, 1 ms a pixel along an arc (client/j). */
+  /** Pieces fly in from beyond the nearest corner, 1 ms a pixel along an arc. */
   function intro(restartClock: boolean): void {
     if (!replays?.isSeeking) sounds.play(cursed() ? 'cursed_intro' : 'intro');
     flight = { pieces: flyingPieces(), start: clock(), out: false };
@@ -416,7 +416,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         : { score: final, clockwise, anticlockwise, ...duty.fields(report), ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? '' } : {}) });
     }
     bestScore = Math.max(bestScore ?? 0, final);
-    // A full meter is "Great work!" in the client, and the pieces fly off a second later.
+    // A full meter is "Great work!" in the game, and the pieces fly off a second later.
     if (settings.mode === 'normal' && boardDone()) {
       timed.push({ effect: { kind: 'text', text: 'Great work!', size: 32, delay: 0 }, start: clock() });
       outro(TIMING.outroDelay);
@@ -444,7 +444,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** The board can take a click: playing, not mid-cascade, not flying in or out. */
   const inPlay = () => boardActive && !playing.length && clock() >= settledAt && !flight && (isPuzzle() || !roundSeconds() || clock() - startTime < roundDuration());
 
-  /** A turn or tool with the cursor's top-left at `cell`; clicks during a cascade are dropped, as in the client. */
+  /** A turn or tool with the cursor's top-left at `cell`; clicks during a cascade are dropped, as in the game. */
   function act(cell: Cell, ccw: boolean, replayed = false): void {
     if (!replayed && !inPlay()) return;
     game.steps = [];
@@ -466,7 +466,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       else if (settings.mode !== 'puzzle') score += result.gauntletPoints;
       crates += result.collected[0] + result.collected[1] + result.collected[2];
       sessionCrates = sessionCrates.map((n, i) => n + result.collected[i]);
-      // The score sound, by the move's client points (client/o.p()).
+      // The score sound, by the move's game points.
       if (result.points > 0 && !(settings.mode === 'normal' && crates >= BANANAS)) {
         const last = game.steps[game.steps.length - 1];
         last.sounds.push({ name: result.points > 14 ? 'score_big' : result.points > 7 ? 'score_medium' : 'score_small', delay: last.duration });
@@ -591,7 +591,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     replays.drawOverlay(ctx);
   }
 
-  // ---- Cursor (ForageBoardView.d, w, e; client/o.a(int)) ----
+  // ---- Cursor  ----
 
   const toolAt = (x: number, y: number) => isTool(game.board.getPiece(x, y));
 
@@ -1076,7 +1076,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     meterShown = Math.min(target, meterShown + (elapsed * 100) / (BANANAS * BANANA_MS));
   }
 
-  /** bananas.png: empty, full, outline. The fill spreads over the bananas from the bottom up (puzzle/client/d, h). */
+  /** bananas.png: empty, full, outline. The fill spreads over the bananas from the bottom up. */
   function drawBananas(): void {
     const sheet = img('bananas');
     const total = meterShown * BANANAS;
@@ -1181,7 +1181,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       if (boardActive && overBoard(pointer)) cursorFromMouse(pointer);
       // While watching a replay the player's own clicks and keys don't reach the board.
       for (const event of replay ? [] : events) {
-        // The client acts as the button goes down; left is anticlockwise, right clockwise.
+        // The game acts as the button goes down; left is anticlockwise, right clockwise.
         if (event.type === 'mousedown' && (event.button === 1 || event.button === 3) && boardActive && overBoard(event.pos)) {
           replays.action({ type: 'forage-click', data: { button: event.button, x: Math.round(event.pos[0]), y: Math.round(event.pos[1]) } });
           cursorFromMouse(event.pos);

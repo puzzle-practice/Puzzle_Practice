@@ -1,12 +1,12 @@
-// Vampire Carp: the Vampire Lair's carpentry, rebuilt from the Puzzle Pirates client (duty/carpentry
+// Vampire Carp: the Vampire Lair's carpentry, rebuilt from the Puzzle Pirates game (duty/carpentry
 // in vampirate mode, build 20260909165753). The rules are in board.ts and game.ts; this file is
-// CarpentryPanel and CarpentryBoardView with their sprites: the client's art, the wood deck that
+// CarpentryPanel and CarpentryBoardView with their sprites: the game's art, the wood deck that
 // scrolls, holes with splintered ends that blink and grow, pieces cut from the wood textures and
 // outlined by state, the putty bucket and its blood, rattling and flying pieces, the floating
 // ratings and the star meter. The canvas is the 450x600 puzzle panel; settings and scores are in
 // the side panel.
 //
-// On top of the client's game are the Vampire Carp simulator's modes and features: two-minute
+// On top of the game are the Vampire Carp simulator's modes and features: two-minute
 // sessions scored +2 / +1 / -1, Ghost (placed pieces hidden), Speed (small holes, see game.ts),
 // Unlimited, seeds, cheat pieces, pause, Dismiss, best scores, and the end-of-session stats.
 import { Images } from '../../core/assets';
@@ -65,7 +65,7 @@ const LOOKS: Record<Look, { suffix: string; outlines: string[]; putty: string }>
   vampire: { suffix: '_vampirate', outlines: ['#7c6200', '#ebd7aa', '#c273ff', '#ff0000', '#8750b2', '#030303'], putty: 'rgb(92, 11, 20)' },
   normal: { suffix: '', outlines: ['#7c6200', '#ffff00', '#00afef', '#ff0000', '#005574', '#030303'], putty: 'rgb(198, 145, 104)' },
 };
-/** The star meter (puzzle/client/d) at (5, 185) in the view: 9 stars of 21px, 19px apart. */
+/** The star meter  at (5, 185) in the view: 9 stars of 21px, 19px apart. */
 const STAR = 21;
 const STAR_STEP = 19;
 const STARS = 9;
@@ -85,7 +85,7 @@ const SESSION_LONG = 999999999999999999;
 /** Board seeds are 48-bit, like java.util.Random's. */
 const MAX_SEED = 2 ** 48 - 1;
 
-/** Jared's sounds besides the client's: the 15-second warning, a new best, and option changes. */
+/** Jared's sounds besides the game's: the 15-second warning, a new best, and option changes. */
 type ExtraSound = 'warning' | 'audio_pb_sound' | 'audio_options_change';
 
 /** Cheat pieces in the layout of the simulator's cheats_ui.png, the putty ('b') on a row of its own. */
@@ -263,7 +263,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     sounds.play(name.startsWith('audio_') || name === 'warning' ? name : `audio_${name}`);
   }
 
-  /** The board for this point in the session: seeded sessions deal seed, seed + 1, ... */
+  /** The board for this point in the session: seeded sessions deal seed, seed + 1,... */
   function newBoard(): void {
     const boardSeed = replayBoardSeeds?.[boardIndex] ?? (seeded ? seedAtStart + boardIndex : Math.floor(Math.random() * MAX_SEED));
     recordedBoardSeeds.push(boardSeed);
@@ -601,7 +601,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     ctx.restore();
   }
 
-  /** stars.png: tile 0 the empty star, tile 1 the fill, which rises from the bottom (puzzle/client/d, h). */
+  /** stars.png: tile 0 the empty star, tile 1 the fill, which rises from the bottom. */
   function drawStars(): void {
     const sheet = img('stars');
     const target = game ? game.meter : 0;
@@ -844,7 +844,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   };
   historyGroup(panel, () => store.history(scoresKey()), [{ label: 'Score', value: (g) => String(g.score) }], 'Past games', replayAction);
 
-  // Seeded: the board's own seed (the client's java.util.Random), so it deals what the game would.
+  // Seeded: the board's own seed, so it deals what the game would.
   const seedGroup = panel.group('Seed', { hidden: () => !seeded });
   seedGroup.text(
     'Seed',

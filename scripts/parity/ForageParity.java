@@ -1,10 +1,9 @@
-// Writes src/puzzles/forage/forage-parity.json by playing random games on the real client's Forage
+// Writes src/puzzles/forage/forage-parity.json by playing random games on the real game's Forage
 // board classes (ForageBoard, the drop engine's dropper and run finder, and Forage's crate spawner,
-// sideways dropper and crate points), driven the way the client's controller (duty/forage/client/o)
+// sideways dropper and crate points), driven the way the game's controller
 // drives them. board.test.ts replays the same moves on the TypeScript port and checks every board.
 //
 // Build 20260909165753. From D:\Documents\PP_Clone (Git Bash):
-//   JB=tools/jdk21/jdk-21.0.12.1+1/bin; CP=client/app/code/yoclient-dop.jar
 //   "$JB/javac.exe" -cp $CP -d /tmp/fp work/pp-forage/scripts/parity/ForageParity.java
 //   "$JB/java.exe" -cp "$CP;/tmp/fp" ForageParity > work/pp-forage/src/puzzles/forage/forage-parity.json
 //
@@ -66,7 +65,7 @@ public class ForageParity {
     return c;
   }
 
-  // client/o.a(int,int,int,int,int,int,boolean): the 2x2 turn.
+  // game/o.a(int,int,int,int,int,int,boolean): the 2x2 turn.
   static void turn(ForageBoard b, int x, int y, boolean ccw) {
     int bl = b.possiblyRotateAnts(x, y + 1, ccw), tl = b.possiblyRotateAnts(x, y, ccw);
     int tr = b.possiblyRotateAnts(x + 1, y, ccw), br = b.possiblyRotateAnts(x + 1, y + 1, ccw);
@@ -76,7 +75,7 @@ public class ForageParity {
 
   int collected;
 
-  // client/o.j(): crates on the bottom row.
+  // game/o.j(): crates on the bottom row.
   boolean collect(ForageBoard b) throws Exception {
     boolean any = false;
     for (int x = 0; x < W; x++) {
@@ -129,7 +128,7 @@ public class ForageParity {
       ForageParity game = new ForageParity();
       ForageBoard b = new ForageBoard(W, H, difficulties[s]);
       b.initializeSeed(seeds[s]);
-      // A new game forgets any crate size still waiting to fit (client/o.c()).
+      // A new game forgets any crate size still waiting to fit ).
       resetSpawner.invoke(dropper);
       Random r = new Random(seeds[s] * 31 + 5);
       out.append(s > 0 ? "," : "").append("{\"seed\":\"").append(seeds[s]).append("\",\"difficulty\":").append(difficulties[s])
@@ -151,7 +150,7 @@ public class ForageParity {
           if (!good.isEmpty()) { int[] t = good.get(r.nextInt(good.size())); x = t[0]; y = t[1]; ccw = t[2] == 0; }
         }
         if (!tool(b.getPiece(x, y))) { x = Math.min(x, W - 2); y = Math.min(y, H - 2); }
-        // The server's crate request, applied as the player moves (ForageController.b).
+        // The game's crate request, applied as the player moves (ForageController.b).
         int bonus = 0;
         if (b.getBonusMode() == 0 && b.getCrates() < 3 && b.getCrateArea() < 9 && r.nextInt(3) > 0) {
           int roll = r.nextInt(20), size = roll < 11 ? 0 : roll < 18 ? 1 : 2;
@@ -182,7 +181,7 @@ public class ForageParity {
             slide.invoke(slider, b, null, !ccw);
           } else turn(b, x, y, ccw);
           endStep.invoke(points);
-          // client/o.o() until stable, the ants, then again.
+          // game/o.o() until stable, the ants, then again.
           boolean ants = true;
           for (;;) {
             if ((Integer) drop.invoke(dropper, b, null) > 0 || game.collect(b) || game.runs(b) || (Integer) spawn.invoke(dropper, b, null) > 0) continue;

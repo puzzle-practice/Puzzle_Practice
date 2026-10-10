@@ -3,7 +3,7 @@ import { BrewBoard, BURNT } from './logic';
 import {
   convert_seed,
   fromColumns,
-  toClientPiece,
+  toBrewPiece,
   toColumns,
   create_junk_board,
   emptyBoard,
@@ -49,15 +49,15 @@ describe('board generation matches the Python version', () => {
   });
 });
 
-describe('simulator boards on the client engine', () => {
-  it('converts a board seed to client columns and back', () => {
+describe('simulator boards on the puzzle engine', () => {
+  it('converts a board seed to puzzle columns and back', () => {
     const text = '94104140411011314444114101143140100114400000014011414440114000141041140411040404444140';
     const [board] = import_board(convert_seed(text));
     const columns = toColumns(board);
     // A board seed starting 9 has a tall furnace column, so even columns are short.
     expect(columns.map((c) => c.length)).toEqual([8, 9, 8, 9, 8, 9, 8, 9, 8, 9]);
-    // Simulator 4 (white) is the client's 0, and 0 (black) the client's 2.
-    expect(columns[0][0]).toBe(toClientPiece(4));
+    // Simulator 4 (white) is the game's 0, and 0 (black) the game's 2.
+    expect(columns[0][0]).toBe(toBrewPiece(4));
     expect(get_create_seed(fromColumns(columns))).toBe(text);
   });
 

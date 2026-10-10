@@ -5,6 +5,8 @@ import { Store, exportAll } from '../core/storage';
 import { replayWrites, listReplayFiles } from '../core/replay-storage';
 import type { ReplayRecorder } from '../core/replay';
 import type { PuzzleContext, PuzzleFactory } from '../core/puzzle';
+import { createDrill } from './treasure-haul/training';
+import { HaulBoard } from './treasure-haul/logic';
 
 const captured = vi.hoisted(() => ({ recorders: [] as ReplayRecorder[] }));
 vi.mock('../core/replay', async (original) => {
@@ -204,6 +206,55 @@ afterEach(async () => {
   vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
+describe('preset Treasure Haul drills', () => {
+  it.each(['emeralds', 'edges'] as const)('%s starts immediately and reproduces its moves during replay', async (pack) => {
+    vi.spyOn(PyRandom.prototype, 'seedFromCrypto').mockImplementation(function (this: PyRandom) { this.seed(1234); });
+    const store = new Store('treasure-haul');
+    store.set('mode', 'clear');
+    store.set('clearPack', pack);
+    store.set('round', 30);
+    // Difficult edge drills must override saved ruby rates, including on refills.
+    store.set('gemRates', [100, 0]);
+    const { panel, buttons, buttonStates, stats } = panelHarness();
+    let now = 100;
+    const input = { mouse: [-1, -1] };
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const context = { screen, input, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext;
+    const factory = (await import('./treasure-haul/index')).default;
+    const instance = await factory(context);
+    const rng = new PyRandom(1234);
+    const expected = createDrill(() => rng.random(), pack);
+    buttons.get('Play::Start')!();
+    expect(buttonStates.get('Play::Dismiss')!.disabled!()).toBe(false);
+    const swaps = vi.spyOn(HaulBoard.prototype, 'swap');
+    const moves = expected.solution ?? [[0, 7]];
+    for (const [x, y] of moves) {
+      input.mouse = [44 + x * 45 + 10, 205 + (8 - y) * 45 + 10];
+      const before = swaps.mock.calls.length;
+      instance.frame([{ type: 'mousedown', button: 1, pos: input.mouse as [number, number] }]);
+      expect(swaps.mock.calls[before]).toEqual([x, y]);
+      for (let frame = 0; frame < 150; frame++) { now += 50; instance.frame([]); }
+    }
+    now = 60100;
+    for (let frame = 0; frame < 300; frame++) { now += 50; instance.frame([]); }
+    await replayWrites.idle();
+    const finalStats = stats();
+    if (pack === 'edges') expect(finalStats[0]).toContainEqual(['Chests cleared', '1', expect.any(String)]);
+    const [replay] = await listReplayFiles('treasure-haul');
+    expect(replay.settingsVersion).toBe(3);
+    const data = JSON.parse(exportAll()).data;
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await captured.recorders[0].playAt(replay.at, replay.runId)).toBe(true);
+    perf.mockReturnValue(replay.duration);
+    instance.frame([]);
+    expect(stats()).toEqual(finalStats);
+    expect(JSON.parse(exportAll()).data).toEqual(data);
+    buttons.get('History:Replays:Stop')!();
+    instance.dispose?.();
+  });
+});
+
 describe('puzzle completion during replay', () => {
   it.each([
     ['blacksmithing', 500, 20, { mode: 'perfect', perfectTimer: 100 }],
@@ -273,12 +324,14 @@ describe('puzzle completion during replay', () => {
     }
     if (puzzle === 'treasure-haul') {
       const result = results()[0] as { report: { score: {label: string; value: string}; cleared: {items: {icon: string; count: number}[]}[] }; rows: string[][] };
-      expect(result.report.score.label).toBe('Chests cleared');
+      expect(result.report.score.label).toBe('Chests hauled');
       expect(Number(result.report.score.value)).toBe(result.report.cleared[0].items.reduce((sum, i) => sum + i.count, 0));
       expect(result.report.cleared[0].items.map((i) => i.icon)).toEqual(['vampirate-chest-small', 'vampirate-chest-medium', 'vampirate-chest-large']);
       expect(result.rows.some(([label]) => label === 'Best move')).toBe(false);
       expect(Number(result.rows.find(([label]) => label === 'Rubies spawned')![1])).toBeGreaterThan(0);
       expect(Number(result.rows.find(([label]) => label === 'Emeralds spawned')![1])).toBeGreaterThan(0);
+      const coins = Number(result.rows.find(([label]) => label === 'Coins')![1]);
+      expect(result.rows).toContainEqual(['Coins toward next chest', `${coins % 150} / 150`]);
     }
     if (puzzle === 'swordfight') {
       buttons.get('Play::View stats')!();

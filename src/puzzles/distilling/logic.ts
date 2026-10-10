@@ -1,4 +1,4 @@
-// Distilling's rules, ported from the Puzzle Pirates client (crafting/brew, build 20260909165753):
+// Distilling's rules, ported from the Puzzle Pirates game (crafting/brew, build 20260909165753):
 // BrewBoard (the board, swaps and column scoring), BrewController (the furnace timer, burning
 // and the end of the session) and the board's seeded random generator (puzzle/data/Board$BoardRandom).
 // Nothing here draws; index.ts is the board view.
@@ -11,7 +11,7 @@
 export const WIDTH = 10;
 export const HEIGHT = 9;
 
-/** Piece types, as the client numbers them. */
+/** Piece types, as the game numbers them. */
 export const LIGHT = 0;
 export const MEDIUM = 1;
 export const HEAVY = 2;
@@ -30,10 +30,10 @@ export const BURN_TICKS = 49;
 export const WARNING_TICK = BURN_TICKS - Math.trunc(3000 / TICK_MS);
 /** The session ends once 100 pieces have gone into the jug... */
 export const JUG_PIECES = 100;
-/** ...unless the column that got there was the 12th or later Crystal Clear in a row. */
+/**...unless the column that got there was the 12th or later Crystal Clear in a row. */
 export const ENDLESS_STREAK = 12;
 
-/** Cell directions for neighbours: up-right, up-left, down-left, down-right (client/j.a(int, Point)). */
+/** Cell directions for neighbours: up-right, up-left, down-left, down-right. */
 export const UP_RIGHT = 0;
 export const UP_LEFT = 1;
 export const DOWN_LEFT = 2;
@@ -70,7 +70,7 @@ export function pieceScore(piece: number): number {
 }
 
 /**
- * java.util.Random with the client's tweaks (Board$BoardRandom): the same 48-bit generator, so the
+ * java.util.Random with the game's tweaks (Board$BoardRandom): the same 48-bit generator, so the
  * same seed gives the same board as the game. Seeds are 48-bit; JS numbers can't multiply those
  * exactly, so this uses BigInt.
  */
@@ -117,7 +117,7 @@ export interface ColumnResult {
   bonus: number;
   /** For a Crystal Clear, how many in a row this makes (0 for the first, which shows no number). */
   streak: number;
-  /** The message the client shows: 'clear', 'smooth', 'blecch', 'burnt' or none. */
+  /** The message the game shows: 'clear', 'smooth', 'blecch', 'burnt' or none. */
   verdict: 'clear' | 'smooth' | 'blecch' | 'burnt' | null;
   /** 'spicy', 'wasted_spice' or none. */
   spice: 'spicy' | 'wasted_spice' | null;
@@ -135,7 +135,7 @@ export class BrewBoard {
   readonly rando: BoardRandom;
   /** Practice modes can replace how new pieces are picked, one at a time... */
   pickPiece: (() => number) | null = null;
-  /** ...or a column at a time (top to bottom, the length asked for). Burnt whites owed still replace whites. */
+  /**...or a column at a time (top to bottom, the length asked for). Burnt whites owed still replace whites. */
   makeColumn: ((tall: boolean) => number[]) | null = null;
 
   constructor(seed: number | bigint) {
@@ -182,7 +182,7 @@ export class BrewBoard {
     return true;
   }
 
-  /** The neighbour in a direction (UP_RIGHT...), or null off the board (client/j.a(int, Point)). */
+  /** The neighbour in a direction (UP_RIGHT...), or null off the board. */
   neighbour(x: number, y: number, dir: number): [number, number] | null {
     const tall = this.isTallColumn(x);
     const nx = dir === UP_RIGHT || dir === DOWN_RIGHT ? x + 1 : x - 1;
@@ -191,7 +191,7 @@ export class BrewBoard {
     return [nx, ny];
   }
 
-  /** Bit d is set if the piece can swap in direction d; the piece's art lights that corner (client/j.c). */
+  /** Bit d is set if the piece can swap in direction d; the piece's art lights that corner. */
   swapMask(x: number, y: number): number {
     if (this.columns[x][y] === SPICE) return 0;
     let mask = 0;
@@ -325,7 +325,7 @@ export type FurnaceEvent = { type: 'warning' } | { type: 'burn'; result: ColumnR
  * waiting for swaps in flight, burning early on request, and the totals in the jug.
  */
 export interface GameOptions {
-  /** Milliseconds per furnace tick; 50 ticks burn a column. The client's is 306 (15.3 s a column). */
+  /** Milliseconds per furnace tick; 50 ticks burn a column. The game's is 306 (15.3 s a column). */
   tickMs?: number;
   /** No furnace clock: columns burn only when asked (X or right-click). */
   timerless?: boolean;
@@ -342,7 +342,7 @@ export class BrewGame {
   pausedAt: number | null = null;
   /** Furnace ticks since the last burn (BrewController.u); the furnace art shows 49 - furnace. */
   furnace = 0;
-  /** Highest the furnace got (BrewController.w; the client reports anything over 60 as a bug). */
+  /** Highest the furnace got. */
   maxFurnace = 0;
   /** A burn is due but waiting for swaps to finish (BrewController.p). */
   burnDue = false;
@@ -353,7 +353,7 @@ export class BrewGame {
   /** Whites and blacks (including burnt whites) in the jug, for the vial's colour. */
   jugLights = 0;
   jugHeavies = 0;
-  /** The points the client sends to the server for each column (128 + score + bonus, less the 128). */
+  /** Points for each column (128 + score + bonus, less the 128). */
   points = 0;
   /** Longest Crystal Clear chain reached during this session. */
   longestCrystalChain = 0;
@@ -448,7 +448,7 @@ export class BrewGame {
       this.jugHeavies += result.heavies;
     }
     this.points += result.score + result.bonus;
-    // The streak number the client checks is 1 + bonus / 4, or 0 with no bonus.
+    // The streak number the game checks is 1 + bonus / 4, or 0 with no bonus.
     const level = result.bonus === 0 ? 0 : 1 + result.bonus / 4;
     const finished = !this.endless && this.distilled >= JUG_PIECES && level < ENDLESS_STREAK;
     if (finished) this.finished = true;

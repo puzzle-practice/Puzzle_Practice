@@ -1,5 +1,5 @@
 // The shell: a landing page listing every puzzle, and a page per puzzle.
-// Routing uses the URL hash (#/forage) so it works on GitHub Pages without server rewrites.
+// Routing uses the URL hash (#/forage) so it works on GitHub Pages without game rewrites.
 import './style.css';
 import { runPuzzle, type RunningPuzzle } from './core/host';
 import { puzzles } from './core/registry';

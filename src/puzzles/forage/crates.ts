@@ -1,20 +1,12 @@
-// Where crates come from. In the real game the server decides, and the server isn't in the client,
-// so each mode stands in for it:
-//
-// - Normal foraging: the client's own rules (ForageBoard.findCratePosition, forage/a/d) place the
-//   crate, with a spawn chance that drops as the board fills with crates. The server's part is only
-//   to ask for one (the "bonus_mode" message) and say what size; here a request goes in whenever the
-//   board has room for another crate and no request is waiting, sized by the chest ratios, until the
-//   board has asked for one crate per banana.
-// - Gauntlet (cursed isle) foraging, for CI and Infinite: the desktop Forage Simulator's chest
-//   spawning (board_calc.try_spawn_chest and the CI loop in app.pyw), draw for draw with its random.
+// Crate scheduling for normal and Gauntlet modes. Normal mode requests crates while
+// space and banana allowances remain. Gauntlet mode uses its own size and pacing rules.
 import type { PyRandom } from '../../core/pyrandom';
 import { COLOURS, CRATE_SIZES, isAnts, isCrate, isCrateAnchor, isTool, MAX_CRATE_AREA, MAX_CRATES, crateSize, WIDTH } from './board';
 import type { CrateSource, Forage } from './engine';
 
-/** Moves go to the game's server in a batch every 2 seconds. */
+/** Paced chest eligibility is evaluated in two-second batches. */
 export const MOVE_BATCH_MS = 2000;
-/** Time for the server to hear a batch and its answer to come back. */
+/** Additional delivery delay after each batch. */
 export const ROUND_TRIP_MS = 120;
 
 /** Crate art (crate1x1.png etc.): fruit 0-4 for small and medium crates; 3x2 gems 0 or gold 1. */
@@ -22,8 +14,8 @@ const FRUIT_TILES = COLOURS;
 /** The cursed isle's bone box, fetish jar and cursed chest. */
 export const CURSED_TILES = [6, 6, 3];
 
-/** Normal foraging: the client spawns crates the server asks for. */
-export class ServerRequests implements CrateSource {
+/** Normal foraging: requests crates while board space remains. */
+export class CrateRequests implements CrateSource {
   /** Crates asked for so far. */
   requested = 0;
   private nextKey = 0;
@@ -82,7 +74,7 @@ export class GauntletChests implements CrateSource {
      * chance that falls as the board fills, in any column whose top cells are clear.
      */
     private readonly paced = false,
-    /** Paced: the game clock in milliseconds, for when the server hears about a move. */
+    /** Paced: the game clock in milliseconds, used to schedule delivery. */
     private readonly now: () => number = () => 0,
   ) {
     this.budget = budget;
@@ -154,8 +146,7 @@ export class GauntletChests implements CrateSource {
 
   private trySpawn(game: Forage): boolean {
     if (this.paced) {
-      // The game sends moves to its server in a batch every 2 seconds, so the server only sees
-      // this move at the next send, and its answer takes a round trip to come back.
+      // Eligible chests wait for the next two-second batch and an additional delivery delay.
       this.waiting = this.next - 1;
       this.readyAt = (Math.floor(this.now() / MOVE_BATCH_MS) + 1) * MOVE_BATCH_MS + ROUND_TRIP_MS;
       this.budget--;

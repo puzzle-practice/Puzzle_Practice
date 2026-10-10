@@ -64,8 +64,8 @@ export function faceOptions(female: boolean) {
 }
 
 export const DEFAULT_FACE: FaceSpec = {
-  female: false, skin: 'tan', hair: 'messy_short', hairColour: 'darkBrown', beard: '', eyepatch: false,
-  hat: 'bandana', hatColour: 'red', trimColour: 'gold',
+  female: false, skin: 'medium', hair: 'messy_short', hairColour: 'darkBrown', beard: 'handlebar_moustache', eyepatch: true,
+  hat: '', hatColour: 'red', trimColour: 'gold',
 };
 
 /** A face with every part one the game has, falling back to the defaults part by part. */
@@ -81,8 +81,8 @@ export function sanitizeFace(value: unknown): FaceSpec {
     skin: one(v.skin, options.skin, DEFAULT_FACE.skin),
     hair: one(v.hair, options.hair, fallbackHair, true),
     hairColour: one(v.hairColour, options.hairColour, DEFAULT_FACE.hairColour),
-    beard: one(v.beard, options.beard, '', true),
-    eyepatch: v.eyepatch === true,
+    beard: one(v.beard, options.beard, options.beard.includes(DEFAULT_FACE.beard) ? DEFAULT_FACE.beard : '', true),
+    eyepatch: typeof v.eyepatch === 'boolean' ? v.eyepatch : DEFAULT_FACE.eyepatch,
     hat: one(v.hat, options.hat, options.hat.includes(DEFAULT_FACE.hat) ? DEFAULT_FACE.hat : '', true),
     hatColour: one(v.hatColour, options.cloth, DEFAULT_FACE.hatColour),
     trimColour: one(v.trimColour, options.trimCloth, DEFAULT_FACE.trimColour),

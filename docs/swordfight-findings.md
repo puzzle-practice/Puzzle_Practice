@@ -8,21 +8,21 @@ YPPedia's Swordfighting pages. The practice version is `src/puzzles/swordfight/`
 
 ## Part 1: what I couldn't get from the game (where your help is needed)
 
-The server's code (`SwordManager`) isn't available, so everything it decides is missing. I made a
+The game's code (`SwordManager`) isn't available, so everything it decides is missing. I made a
 choice for each of these so the puzzle plays; each one is easy to change.
 
 1. **How fast the pair falls at the start.** The game starts it at `0.01 x (difficulty + 1)`
-   pixels per ms (rows are 40px), where the server sends the difficulty. Difficulty 0 is 4
+   pixels per ms (rows are 40px), where the game sends the difficulty. Difficulty 0 is 4
    seconds a row and 9 is 400ms. I don't know which difficulty real fights use, or whether it
    depends on the opponent. Nothing in the game's files sets it for swordfights: the other puzzles
    have difficulty levels 0 to 8 that players pick in their options (capped by experience), but
    Swordfight isn't one of them. **Default here: 1, which is 2 seconds a row, from Jared's memory of
    the game.** The setting offers 0 (4 seconds) to 9 (400ms).
-2. **How pairs are dealt.** The server sends the pieces, six pairs at a time. I don't know the
+2. **How pairs are dealt.** The game sends the pieces, six pairs at a time. I don't know the
    colour odds, how often a breaker comes, or whether everyone in a fight gets the same pairs.
    **Here: each piece is one of the four colours at random, 12.5% are breakers (a setting), and
    everyone gets the same pairs in the same order.** Does that feel right to you?
-3. **Attack sizes.** The server works these out. I followed YPPedia exactly: a block sends a sword
+3. **Attack sizes.** The game works these out. I followed YPPedia exactly: a block sends a sword
    of its own size (2x2 sends 1x4, 3x3 sends 2x4, extra width on an upright sword or extra height
    on a flat one turns into length), every two loose pieces of a break send a sprinkle, and the
    nth clear of a chain multiplies sprinkles by n and a block's longest side by n. Two things
@@ -32,13 +32,13 @@ choice for each of these so the puzzle plays; each one is easy to change.
    - what happens to a sword longer than the board (here: it's sent whole and the part that
      doesn't fit is cut off, as the game does when it draws it).
 4. **When an attack is sent.** I send one attack when your board has finished settling, with
-   everything from the whole chain in it. The server might send one per clear instead. Since
+   everything from the whole chain in it. The game might send one per clear instead. Since
    the game only lands one attack per pair you place, this changes how quickly a big chain
    hurts your opponent.
-5. **Strike and attack numbers.** Each sword the server sends has an id, and the game uses it
+5. **Strike and attack numbers.** Each sword the game sends has an id, and the game uses it
    to pick the column an upright sword starts in and which way it looks for room. I give them
    random ids, so placement looks varied, but real ids may follow a pattern.
-6. **How the game's own opponents play.** Their AI is on the server. The game's settings object
+6. **How the game's own opponents play.** Their full AI behavior is unavailable. The game's settings object
    tells us a little: there's an AI skill level, a "destruction percentage" for skill 0, 10, 20 ... 100
    (base 7% to 60%, maximum 10% to 70%), a 40% chance that a skill-100 AI chains a
    strike block, and AIs play more slowly once 1 to 4 players are targeting them. So the real AI
@@ -122,7 +122,7 @@ and what you want the opponent to be like.
 - The clear's check for "is this square in a block I've already counted" compares the left edge
   the wrong way round. With two separate same-coloured blocks side by side in the same rows, a
   clear that reaches the right one first still shatters the left one, but counts its squares as
-  loose pieces rather than as a block. If the server uses the same code (it's in a shared
+  loose pieces rather than as a block. If the game uses the same code (it's in a shared
   package), the left block sends sprinkles instead of a sword. I kept it.
 
 ### Incoming attacks

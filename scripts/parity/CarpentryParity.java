@@ -1,11 +1,10 @@
 // Writes src/puzzles/vampire-carp/carpentry-parity.json by playing random vampire carpentry games on
-// the real client's CarpentryBoard, Hole and piece (carpentry/q) classes, driven the way the client's
+// the real game's CarpentryBoard, Hole and piece (carpentry/q) classes, driven the way the game's
 // CarpentryController drives them: the neglect count and the next toolbox piece come first, then the
 // piece is nailed in, then a finished hole may bring new ones. board.test.ts replays the same moves
 // on the TypeScript port and checks the toolbox and every hole after each one.
 //
 // Build 20260909165753. From D:\Documents\PP_Clone (Git Bash):
-//   JB=tools/jdk21/jdk-21.0.12.1+1/bin; CP=client/app/code/yoclient-dop.jar
 //   "$JB/javac.exe" -cp $CP -d /tmp/cp work/pp-carpentry/scripts/parity/CarpentryParity.java
 //   "$JB/java.exe" -cp "$CP;/tmp/cp" CarpentryParity > work/pp-carpentry/src/puzzles/vampire-carp/carpentry-parity.json
 import com.threerings.piracy.puzzle.duty.carpentry.CarpentryBoard;

@@ -1,14 +1,14 @@
-// Carpentry's board, ported from the Puzzle Pirates client (duty/carpentry, build 20260909165753):
+// Carpentry's board, ported from the Puzzle Pirates game (duty/carpentry, build 20260909165753):
 // CarpentryBoard, Hole and the piece class (carpentry/q). Class names in comments are the decompiled
-// client's. Nothing here draws or keeps time; game.ts plays moves on it.
+// game's. Nothing here draws or keeps time; game.ts plays moves on it.
 //
-// The client and the server run the same board from the same seed, so the board's random draws
-// happen here in the client's order. Vampire carpentry (the Vampire Lair's carpentry,
-// CarpentryMode "_vampirate") is difficulty 8 with every hole size 5 (vampirelair/client/a).
+// The game run the same board from the same seed, so the board's random draws
+// happen here in the game's order. Vampire carpentry (the Vampire Lair's carpentry,
+// CarpentryMode "_vampirate") is difficulty 8 with every hole size 5.
 //
 // Holes are read as (x, y), x across and y down, with (0, 0) the top-left of the hole's own box.
 
-/** Pieces in the client's order (q.g); '0' is the bucket of putty. */
+/** Pieces in the game's order (q.g); '0' is the bucket of putty. */
 export const PIECE_LETTERS = ['f', 'i', 'l', 'p', 'n', 't', 'u', 'v', 'w', 'x', 'y', 'z', '0'] as const;
 /** How often each piece is dealt, out of 95 (q.h). */
 export const PIECE_WEIGHTS = [14, 2, 8, 22, 8, 7, 4, 4, 4, 3, 14, 4, 1] as const;
@@ -59,7 +59,7 @@ const MAX_ROWS = [-1, -1, -1, 3, 4, 4, 5, 6, 6, 7, 8, 9, 10, 10, 10];
 const PIECE_PICKING = PIECE_WEIGHTS.reduce<number[]>((acc, w) => [...acc, (acc.at(-1) ?? 0) + w], []);
 
 /**
- * The client's seeded random (puzzle/data/Board$BoardRandom, a java.util.Random), so a seed deals
+ * The game's seeded random (puzzle/data/Board$BoardRandom, a java.util.Random), so a seed deals
  * the same holes and pieces as the game.
  */
 export class BoardRandom {
@@ -378,7 +378,7 @@ export class Hole {
     return this.piecesUsed < this.size * 2 ? 3 : 4;
   }
 
-  /** The hole as the client logs it (Hole.dumpHole): '0' open, 'X' covered, '_' wood. */
+  /** The hole as the game logs it (Hole.dumpHole): '0' open, 'X' covered, '_' wood. */
   dump(): string {
     let s = '';
     for (let y = 0; y < this.height; y++) {

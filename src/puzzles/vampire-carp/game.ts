@@ -1,11 +1,11 @@
-// Vampire carpentry's play, from the client's CarpentryController and CarpentryBoardView with their
+// Vampire carpentry's play, from the game's CarpentryController and CarpentryBoardView with their
 // sprites (carpentry/p holes, r pieces, s putty): picking pieces from the toolbox, the tentative
 // placement you can still nudge, nailing pieces in, neglect (rattling and flying pieces, blinking
 // and growing holes), hole ratings, and the board scrolling in new holes. Nothing here draws;
 // index.ts draws what's here. Positions are in the board view's pixels, 414x558 at (18, 34) on
 // the panel; the board's own pixels ("world") move under it when it scrolls.
 //
-// Speed is the Vampire Carp simulator's mode (not in the client): small holes that a set number of
+// Speed is the Vampire Carp simulator's mode: small holes that a set number of
 // pieces fill, dealt with the pieces to fill them, without neglect or scrolling.
 import { PyRandom } from '../../core/pyrandom';
 import {
@@ -797,7 +797,7 @@ export class Game {
     this.flyers.push({ sprite: lost.sprite, from, to: [tx, ty], start: this.now });
   }
 
-  /** A message rising from the middle of hole `index` (CarpentryBoardView.a(String, ...)). */
+  /** A message rising from the middle of hole `index` (CarpentryBoardView.a(String,...)). */
   private text(text: string, colour: string, size: number, index: number): void {
     const hole = this.board.holes[index];
     const hs = hole ? this.spriteFor(hole) : undefined;

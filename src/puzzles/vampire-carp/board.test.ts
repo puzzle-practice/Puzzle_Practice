@@ -41,8 +41,8 @@ function state(board: CarpentryBoard, scroll: [number, number]): State {
   };
 }
 
-describe('carpentry board matches the client', () => {
-  // Games played on the real client classes by scripts/parity/CarpentryParity.java.
+describe('carpentry board matches reference fixtures', () => {
+  // Games played on the real game classes by scripts/parity/CarpentryParity.java.
   for (const game of parity as { seed: number; start: State; moves: Move[] }[]) {
     it(`seed ${game.seed}`, () => {
       const board = new CarpentryBoard(game.seed);

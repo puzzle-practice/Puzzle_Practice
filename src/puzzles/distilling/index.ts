@@ -1,16 +1,5 @@
-// Distilling, rebuilt from the Puzzle Pirates client (crafting/brew, build 20260909165753): the rules
-// are in logic.ts, and this file is BrewBoardView, BrewPanel and BrewIndicator with their helper
-// classes (client/a-j): the pieces with their lit corners, swaps, the furnace filling with heat,
-// columns rising into the jug or dropping into the furnace, burnt whites rolling back along the pipe,
-// the vial filling up, and the floating messages, with the client's art, sounds and timings.
-// The canvas is the 450x600 puzzle panel; settings and scores are in the side panel.
-//
-// The client works out each column's points and sends them to the server, so the panel shows those,
-// but the duty rating (Poor ... Incredible) is decided on the server, so there's no rating yet.
-//
-// On top of the client's game are the Distilling Simulator's practice modes (boards.ts, practice.ts):
-// Standard with your own spawn rates, Seeded, Create (paint a board) and Practice (set drills),
-// plus a burn timer you can change or turn off, and pause.
+// Distilling presentation and practice controls: swaps, lit corners, furnace heat,
+// column burns, vial fill and messages. Board rules live in logic.ts.
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
 import { copyText, pasteText } from '../../core/clipboard';
@@ -41,7 +30,7 @@ import {
   random as simRandom,
   type Seed,
   fromColumns,
-  toClientPiece,
+  toBrewPiece,
   toColumns,
 } from './boards';
 import { practiceAvailable, practiceGroupNames, practiceNames } from './practice';
@@ -105,7 +94,7 @@ const VIAL_X = 235;
 const VIAL_Y = 55;
 const VIAL_W = 42;
 const VIAL_H = 75;
-/** Message fonts (roister/client/a): size 1 for most, 0 for spice and burnt. */
+/** Message fonts: size 1 for most, 0 for spice and burnt. */
 const FONT_SIZES = [24, 30];
 const FONT = 'Delarobb';
 /** Floating messages drift 30px over 1.5 s, fading in the second half (nenya FloatingTextAnimation). */
@@ -119,7 +108,7 @@ const N = 3;
 const NE = 4;
 const SE = 6;
 const S = 7;
-/** Keys from the client's key map for Distilling (puzzle/client/w, case 14), with the number pad both ways. */
+/** Keys from the game's key map for Distilling, with the number pad both ways. */
 const KEY_MOVES: Record<string, number> = {
   arrowleft: SW,
   '1': SW,
@@ -200,7 +189,7 @@ interface Piece {
   type: number;
   col: number;
   row: number;
-  /** Corners lit for the directions it can swap (client/j.g). */
+  /** Corners lit for the directions it can swap. */
   mask: number;
   x: number;
   y: number;
@@ -375,7 +364,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     return Math.ceil(w) + 4;
   }
 
-  /** A message centred on the board, moved clear of others still showing (BrewBoardView.a(String, ...)). */
+  /** A message centred on the board, moved clear of others still showing (BrewBoardView.a(String,...)). */
   function say(text: string, opts: { orange?: boolean; down?: boolean; wait?: boolean } = {}): Message {
     const px = FONT_SIZES[opts.orange || opts.down ? 0 : 1];
     const w = measure(text, px);
@@ -438,11 +427,11 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     return { spawn: [...spawnRates], difficulty, interval: timed ? Math.round(timerSeconds * 1000) : null };
   }
 
-  /** A new game on a simulator board, played on the client's rules. */
+  /** A new game on a simulator board, played in the game's rules. */
   function newGame(now = ticks()): BrewGame {
     const run = runSettings();
     const options: GameOptions = { tickMs: run.interval ? run.interval / 50 : TICK_MS, timerless: run.interval === null, endless: mode === 'Create' };
-    const clientSeed = BigInt.asIntN(64, BigInt(Math.floor(Math.random() * 2 ** 48)));
+    const boardSeed = BigInt.asIntN(64, BigInt(Math.floor(Math.random() * 2 ** 48)));
     const text = seedText.trim();
     // The simulator's modes. A seed is [piece sequence, rng decider] (boards.ts convert_seed).
     let board: Board;
@@ -480,7 +469,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       simSeed: [simSeed[0], ''],
       randomState: simRandom.snapshot(),
     };
-    const brew = BrewBoard.withColumns(toColumns(board), clientSeed);
+    const brew = BrewBoard.withColumns(toColumns(board), boardSeed);
     // New columns: the rest of a seeded piece sequence, then the spawn rates (activate_furnace).
     const seeded = mode === 'Seeded';
     brew.makeColumn = (tall) => {
@@ -488,7 +477,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       let column: number[];
       if (seeded) [column, simSeed] = generate_seeded_column(run.spawn, run.difficulty, simSeed, height);
       else [column, simSeed] = generate_column(run.spawn, run.difficulty, simSeed);
-      return column.filter((p) => p !== -1).slice(0, height).map(toClientPiece);
+      return column.filter((p) => p !== -1).slice(0, height).map(toBrewPiece);
     };
     return new BrewGame(brew, now, options);
   }
@@ -620,7 +609,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     sounds.play(pa[1] > pb[1] ? 'swap_down' : 'swap_up');
     const done = dragMode ? null : waitFor();
     // A piece dragged on before its last swap landed changes course: the old move is cancelled,
-    // which counts it off without settling the board (client/f's pathCancelled).
+    // which counts it off without settling the board.
     const swapPath = (p: Piece, to: Point, onEnd: () => void): Path => ({
       ...linePath([p.x, p.y], to, SWAP_MS, onEnd),
       onCancel: () => {
@@ -655,7 +644,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     }
   }
 
-  /** A swap lands: relight it and its resting neighbours, and let a due burn go once all swaps are done (client/f). */
+  /** A swap lands: relight it and its resting neighbours, and let a due burn go once all swaps are done. */
   function swapEnded(p: Piece): void {
     refreshMask(p);
     for (let dir = 0; dir < 4; dir++) {
@@ -929,7 +918,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         }
       }
       if (input.mouse[0] !== lastMouse[0] || input.mouse[1] !== lastMouse[1]) {
-        // The client gets every mouse move; a frame here can cover several, so step along the line
+        // The game gets every mouse move; a frame here can cover several, so step along the line
         // between them, a few pixels at a time, so a quick drag doesn't skip pieces.
         const [x0, y0] = lastMouse[0] < 0 ? input.mouse : lastMouse;
         const steps = mouseHeld ? Math.max(1, Math.ceil(Math.hypot(input.mouse[0] - x0, input.mouse[1] - y0) / 4)) : 1;

@@ -1,8 +1,8 @@
-// Forage's board, ported from the Puzzle Pirates client (build 20260909165753): ForageBoard and the
+// Forage's board, ported from the Puzzle Pirates game (build 20260909165753): ForageBoard and the
 // shared drop-puzzle engine it sits on (com.threerings.puzzle.drop: DropBoard, the piece dropper and
 // the run finder), with Forage's own helpers from duty/forage/a (piece encoding, crate edges, the
 // earthquake's sideways drop, crate spawning and crate points). Class names in comments are the
-// decompiled client's. Nothing here draws or keeps time; engine.ts plays moves on it.
+// reference implementation's. Nothing here draws or keeps time; engine.ts plays moves on it.
 //
 // The board is 7 wide and 10 high, read as (x, y) with y = 0 the top row. A cell holds one int:
 //   -1         empty
@@ -63,9 +63,9 @@ export const isOrdinary = (p: number) => !isCrate(p) && !isAnts(p) && p !== EMPT
 export const isTool = (p: number) => TOOLS.includes(p);
 
 /**
- * The client's seeded random (puzzle/data/Board$BoardRandom): java.util.Random's 48-bit generator,
- * so a seed makes the same board and the same refills as in the game. The server and client both
- * draw from it, in the same order, so every draw here is in the client's order.
+ * The game's seeded random (puzzle/data/Board$BoardRandom): java.util.Random's 48-bit generator,
+ * so a seed makes the same board and the same refills as in the game. The rules
+ * draw from it, in the same order, so every draw here is in the game's order.
  */
 export class BoardRandom {
   private seed: bigint;
@@ -125,13 +125,13 @@ export class ForageBoard {
   comboCount = 0;
   /** 0-8: which specials appear (ForageBoard._difficulty). */
   difficulty: number;
-  /** The server's crate request (bit 64 = spawn one; bits 0-1 size; bits 2-3 key), or 0. */
+  /** The game's crate request (bit 64 = spawn one; bits 0-1 size; bits 2-3 key), or 0. */
   bonusMode = 0;
   crates = 0;
   crateArea = 0;
   /**
    * Which specials can appear, in SPECIAL_PIECE_WEIGHTS order (shovel, machete, monkey,
-   * earthquake, ants). Not in the client, which always allows all five past difficulty 1; the
+   * earthquake, ants). Not in the game, which always allows all five past difficulty 1; the
    * simulator lets you turn them off.
    */
   allowed: readonly boolean[] = [true, true, true, true, true];
@@ -196,7 +196,7 @@ export class ForageBoard {
   private pickSpecial(cut: number): number {
     const weights = this.specialWeights(cut);
     // With every special turned off in the simulator, a special roll gives an ordinary piece
-    // rather than always piece 4 (which is what the client's difficulty 0 does).
+    // rather than always piece 4.
     if (cut > 0 && weights.every((w) => w === 0)) return this.rng.nextInt(COLOURS);
     return weightedIndex(weights, this.rng) + 5;
   }
@@ -324,7 +324,7 @@ export class ForageBoard {
     return this.crateArea + area <= MAX_CRATE_AREA;
   }
 
-  /** Counts a crate in; the client warns and doesn't count past 3. */
+  /** Counts a crate in; the game warns and doesn't count past 3. */
   unlimitedCrates = false;
 
   increaseCrates(): void {
@@ -348,7 +348,7 @@ export class ForageBoard {
   /**
    * How far a crate cell's block reaches: 0 left, 1 right, 2 down, 3 up. The left and right edges
    * follow "part 1" cells, read from bits that ants use for their count, so a set of 1 or 5 ants
-   * just right of a crate's bottom row counts as part of it (the client does this too). The up and
+   * just right of a crate's bottom row counts as part of it. The up and
    * down edges follow any crate cells, up to this crate's height.
    */
   constrainedEdge(x: number, y: number, dir: number): number {
@@ -520,7 +520,7 @@ export class ForageBoard {
   practice = false;
 
   /**
-   * If the server has asked for a crate, tries to drop one in at the top (overwriting what's there).
+   * If the game has asked for a crate, tries to drop one in at the top (overwriting what's there).
    * `overwritten` hears about each top cell it replaces, `move` about each crate cell coming in.
    * Returns how many crate cells came in.
    */
@@ -566,7 +566,7 @@ export class ForageBoard {
 /**
  * Crate points for normal foraging (forage/a/g): width² x a bonus for each earlier cascade step of
  * the move that collected crates (1, 1.5, 2) x a bonus for each crate already collected in this step
- * (1, 2, 4). The client indexes those tables up to 3, past their end, so a fourth step of a move
+ * (1, 2, 4). The game indexes those tables up to 3, past their end, so a fourth step of a move
  * that collects crates would throw; with at most 3 crates on the board it would need a crate to
  * spawn and land within one move. Here the bonuses stop at the last entry instead.
  */

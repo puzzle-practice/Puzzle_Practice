@@ -1,4 +1,4 @@
-// What a clear sends to the opponent. The game server decides this and its code isn't available, so it
+// What a clear sends to the opponent. Attack construction follows the documented swordfighting rules, so it
 // follows YPPedia's Swordfighting page:
 //   - every shattered fused block sends a sword strike of the same size, upright when the block is
 //     square or taller, lying flat when wider; a 2x2 sends a 1x4 sword and a 3x3 a 2x4 sword;

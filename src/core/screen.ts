@@ -95,11 +95,11 @@ export class Screen {
   }
 }
 
-/** Converts a client-space mouse position into the screen's logical pixels. */
-export function toScreen(screen: Screen, clientX: number, clientY: number): [number, number] {
+/** Converts a viewport mouse position into the screen's logical pixels. */
+export function toScreen(screen: Screen, viewportX: number, viewportY: number): [number, number] {
   const rect = screen.canvas.getBoundingClientRect();
   return [
-    Math.floor(((clientX - rect.left) * screen.width) / rect.width),
-    Math.floor(((clientY - rect.top) * screen.height) / rect.height),
+    Math.floor(((viewportX - rect.left) * screen.width) / rect.width),
+    Math.floor(((viewportY - rect.top) * screen.height) / rect.height),
   ];
 }

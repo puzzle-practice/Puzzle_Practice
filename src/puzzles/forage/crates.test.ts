@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PyRandom } from '../../core/pyrandom';
 import { CRATE_SIZES, crateSize, HEIGHT, isCrate, isCrateAnchor, isTool, WIDTH } from './board';
-import { GauntletChests, ServerRequests } from './crates';
+import { GauntletChests, CrateRequests } from './crates';
 import { Forage, TIMING } from './engine';
 
 /** Plays random clicks, favouring tools, and checks the board stays whole. */
@@ -65,7 +65,7 @@ describe('crate sources', () => {
     expect(older.steps[0].duration).toBe(TIMING.fall(2));
   });
   it('normal foraging asks for at most one crate per banana, and never more than 3 at once', () => {
-    const source = new ServerRequests(new PyRandom(3), [0.6, 0.35, 0.05], 9);
+    const source = new CrateRequests(new PyRandom(3), [0.6, 0.35, 0.05], 9);
     const game = new Forage(11n, source);
     play(game, 1500, 1);
     expect(source.requested).toBeGreaterThan(2);
@@ -113,8 +113,8 @@ describe('paced Gauntlet chests', () => {
   });
 });
 
-describe('paced chests and the server', () => {
-  it('only reach the board once the server has had the move, a 2 second batch and a round trip later', () => {
+describe('paced chest timing', () => {
+  it('wait for the next two-second batch and delivery delay', () => {
     let now = 0;
     const source = new GauntletChests(new PyRandom(8), [0.5, 0.35, 0.15], 9, false, true, () => now);
     const game = new Forage(21n, source);

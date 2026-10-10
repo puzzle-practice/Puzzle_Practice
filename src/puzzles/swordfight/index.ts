@@ -911,7 +911,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
   }, (seed) => typeof (seed as { seed?: unknown })?.seed === 'number', setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
 
-  // For driving the game from tests in the dev server.
+  // For driving the game from tests during development.
   if (import.meta.env.DEV) (window as unknown as { __sf: unknown }).__sf = { get match() { return match; } };
 
   return { frame, dispose: () => { replays.dispose(); sounds.dispose(); } };

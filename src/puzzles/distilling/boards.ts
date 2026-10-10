@@ -1,7 +1,7 @@
 // Board making for the practice modes (Standard, Seeded, Create and Practice), kept from the
 // Distilling Simulator (Distilling_Sim.pyw) function for function so its seeds and practice boards
 // still give the same boards. Names and data shapes mirror the Python. The game itself runs on the
-// client's rules in logic.ts; toColumns and fromColumns convert between the two piece numberings.
+// game's rules in logic.ts; toColumns and fromColumns convert between the two piece numberings.
 import { PyRandom } from '../../core/pyrandom';
 import { contains, deepcopy, eq, range } from '../../core/py';
 import { BURNT, HEAVY, HEIGHT, LIGHT, MEDIUM, SPICE } from './logic';
@@ -273,24 +273,24 @@ export function get_practice_board(
   return generate_board(board, spawn_rates, furnace_height, difficulty, seed);
 }
 
-/** Simulator piece numbers (0 black, 1 brown, 2 burnt, 3 spice, 4 white) to the client's (logic.ts). */
-const TO_CLIENT: Record<number, number> = { 0: HEAVY, 1: MEDIUM, 2: BURNT, 3: SPICE, 4: LIGHT };
+/** Simulator piece numbers (0 black, 1 brown, 2 burnt, 3 spice, 4 white) to the game's (logic.ts). */
+const TO_BREW: Record<number, number> = { 0: HEAVY, 1: MEDIUM, 2: BURNT, 3: SPICE, 4: LIGHT };
 const TO_SIM: Record<number, number> = { [HEAVY]: 0, [MEDIUM]: 1, [BURNT]: 2, [SPICE]: 3, [LIGHT]: 4 };
 
-export function toClientPiece(piece: number): number {
-  return TO_CLIENT[piece];
+export function toBrewPiece(piece: number): number {
+  return TO_BREW[piece];
 }
 
 export function toSimPiece(piece: number): number {
   return TO_SIM[piece];
 }
 
-/** A simulator board (9 rows, -1 below short columns) as the client's columns. */
+/** A simulator board (9 rows, -1 below short columns) as the game's columns. */
 export function toColumns(board: Board): number[][] {
-  return board.map((column) => column.filter((p) => p !== -1).map(toClientPiece));
+  return board.map((column) => column.filter((p) => p !== -1).map(toBrewPiece));
 }
 
-/** The client's columns as a simulator board. */
+/** The game's columns as a simulator board. */
 export function fromColumns(columns: number[][]): Board {
   return columns.map((column) => {
     const out = column.map(toSimPiece);
