@@ -192,10 +192,10 @@ export class ChestSupply {
    * 'cycle': every chest starts a fresh cycle. At the start, after a haul leaves no chest, and
    * once the coin criteria is met, the chest waits for the next clear and a second after it.
    */
-  constructor(perChest: number, now: number, private readonly emptyRule: 'initial' | 'clear' | 'wait' | 'cycle' = 'initial') {
+  constructor(perChest: number, now: number, private readonly emptyRule: 'initial' | 'clear' | 'wait' | 'cycle' = 'initial', private readonly delayMs = CHEST_DELAY_MS) {
     this.meter = new ChestMeter(perChest);
-    this.readyAt = emptyRule === 'initial' ? [now + CHEST_DELAY_MS] : [];
-    if (emptyRule === 'wait') this.emptyReadyAt = now + CHEST_DELAY_MS;
+    this.readyAt = emptyRule === 'initial' ? [now + delayMs] : [];
+    if (emptyRule === 'wait') this.emptyReadyAt = now + delayMs;
   }
 
   get waiting(): number { return this.readyAt.length + this.armed || (this.emptyReadyAt !== null ? 1 : 0); }
@@ -203,21 +203,21 @@ export class ChestSupply {
   addCleared(cleared: readonly Cleared[], now: number): void {
     if ((this.emptyRule === 'clear' || this.emptyRule === 'cycle') && this.emptyAtMove && this.emptyReadyAt === null) {
       const pieces = cleared.filter((c) => c.piece !== EMPTY && !isChest(c.piece));
-      if (pieces.length) this.emptyReadyAt = now + Math.min(...pieces.map((c) => c.delay)) + CHEST_DELAY_MS;
+      if (pieces.length) this.emptyReadyAt = now + Math.min(...pieces.map((c) => c.delay)) + this.delayMs;
     }
     const coins = cleared.filter((c) => c.piece >= 0 && c.piece < COLOURS).sort((a, b) => a.delay - b.delay);
     if (this.emptyRule === 'cycle') {
       // A chest earned earlier waits for this, the next clear, then a second.
       const pieces = cleared.filter((c) => c.piece !== EMPTY && !isChest(c.piece));
       if (this.armed && pieces.length) {
-        const at = now + Math.min(...pieces.map((c) => c.delay)) + CHEST_DELAY_MS;
+        const at = now + Math.min(...pieces.map((c) => c.delay)) + this.delayMs;
         for (; this.armed > 0; this.armed--) this.readyAt.push(at);
       }
       for (const _ of coins) if (this.meter.add(1)) this.armed++;
       return;
     }
     for (const coin of coins) {
-      if (this.meter.add(1)) this.readyAt.push(now + coin.delay + CHEST_DELAY_MS);
+      if (this.meter.add(1)) this.readyAt.push(now + coin.delay + this.delayMs);
     }
   }
 
@@ -229,7 +229,7 @@ export class ChestSupply {
   observe(board: HaulBoard, now: number): void {
     if (this.emptyRule !== 'wait') return;
     if (this.inPlay(board) > 0) this.emptyReadyAt = null;
-    else this.emptyReadyAt ??= now + CHEST_DELAY_MS;
+    else this.emptyReadyAt ??= now + this.delayMs;
   }
 
   /** Space is reserved at the start of a move; hauling a full board cannot add space mid-cascade. */
