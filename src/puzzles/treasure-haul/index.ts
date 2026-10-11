@@ -1298,10 +1298,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }, { disabled: () => running, title: 'At the start, after you haul your last chest, and once you have cleared enough coins, the next chest only comes a second after your next clear.' });
   const timing = panel.settings.group('Timings', { columns: 2 });
   ([
-    ['swapMs', 'Swap (ms)', 'How long two pieces take to trade places. The game uses 250.'],
-    ['riseMs', 'Rise per square (ms)', 'How long pieces and chests take to float up one square. The game uses about 85.7.'],
-    ['blastMs', 'Blast per square (ms)', 'How long a ruby or emerald blast takes to reach the next square. The game uses 50.'],
-    ['chestDelayMs', 'Chest delay (ms)', 'The wait between a clear and a chest coming in. The game uses 1000.'],
+    ['swapMs', 'Swap (ms)', 'How long two pieces take to trade places. The default is 250.'],
+    ['riseMs', 'Rise per square (ms)', 'How long pieces and chests take to float up one square. The default is about 85.7.'],
+    ['blastMs', 'Blast per square (ms)', 'How long a ruby or emerald blast takes to reach the next square. The default is 50.'],
+    ['chestDelayMs', 'Chest delay (ms)', 'The wait between a clear and a chest coming in. The default is 1000.'],
   ] as const).forEach(([key, label, title]) => timing.number(label, () => Math.round(timings[key] * 10) / 10, (v) => {
     timings = { ...timings, [key]: Math.max(0, v) };
     store.set('timings', timings);
