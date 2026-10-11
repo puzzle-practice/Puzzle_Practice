@@ -1,4 +1,5 @@
 // Runs one puzzle on a canvas: builds its context, then calls frame() at up to 60 fps.
+import { FrameClock } from './frame-clock';
 import { loadPygameFont } from './fonts';
 import { Input } from './input';
 import { Panel } from './panel';
@@ -26,14 +27,8 @@ export async function runPuzzle(
   panel.onUsed = () => canvas.focus();
   await loadPygameFont();
   const start = performance.now();
-  const realTicks = () => Math.floor(performance.now() - start);
-  let replayTime: number | null = null;
-  let liveOffset = 0;
-  const ticks = () => replayTime ?? realTicks() + liveOffset;
-  const setReplayTime = (milliseconds: number | null) => {
-    if (milliseconds === null && replayTime !== null) liveOffset = replayTime - realTicks();
-    replayTime = milliseconds;
-  };
+  const clock = new FrameClock(() => Math.floor(performance.now() - start));
+  const { ticks, setReplayTime } = clock;
 
   let instance: PuzzleInstance;
   try {
@@ -52,7 +47,7 @@ export async function runPuzzle(
     // Hold high-refresh displays to 60 fps: several games step animations once per frame.
     if (now - last < FRAME_MS - 2) return;
     last = now;
-    instance.frame(input.drain());
+    clock.frame(() => instance.frame(input.drain()));
     panel.sync();
   };
   handle = requestAnimationFrame(loop);
