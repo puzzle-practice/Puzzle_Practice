@@ -411,7 +411,7 @@ describe('preset Treasure Haul drills', () => {
     const { readReplayFile } = await import('../core/replay-storage');
     const { decodeReplayBlob } = await import('../core/replay');
     const tape = (await decodeReplayBlob((await readReplayFile(replay))!))!;
-    expect(tape).toMatchObject({ settingsVersion: 12, settings: { trainingRules: 8, impossibleChests: true } });
+    expect(tape).toMatchObject({ settingsVersion: 14, settings: { trainingRules: 8, impossibleChests: true } });
     toggles.get(setting)!(false);
     const data = JSON.parse(exportAll()).data;
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
@@ -470,7 +470,7 @@ describe('preset Treasure Haul drills', () => {
     const finalStats = stats();
     if (pack === 'edges') expect(finalStats[0]).toContainEqual(['Chests cleared', '1', expect.any(String)]);
     const [replay] = await listReplayFiles('treasure-haul');
-    expect(replay.settingsVersion).toBe(12);
+    expect(replay.settingsVersion).toBe(14);
     const data = JSON.parse(exportAll()).data;
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     expect(await captured.recorders[0].playAt(replay.at, replay.runId)).toBe(true);
@@ -630,7 +630,7 @@ describe('Rubies spawn mode', () => {
     expect((results()[0] as { rows: string[][] }).rows).toContainEqual(['Ruby score', String(points)]);
     await replayWrites.idle();
     const [replay] = await listReplayFiles('treasure-haul');
-    expect(replay.settingsVersion).toBe(12);
+    expect(replay.settingsVersion).toBe(14);
     const data = JSON.parse(exportAll()).data;
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     const recorder = captured.recorders[0];
@@ -666,7 +666,7 @@ describe('Treasure Haul vacant-board chest wait', () => {
       return result;
     });
     const store = new Store('treasure-haul'); store.set('mode', 'chests2'); store.set('gemRates', [0, 0]);
-    store.set('showWaitingChests', true);
+    store.set('showWaitingChests', true); store.set('chestCycle', false);
     const { panel, buttons, stats, setters } = panelHarness();
     const input = { mouse: [-1, -1] };
     const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
@@ -705,7 +705,7 @@ describe('Treasure Haul vacant-board chest wait', () => {
     const expectedStats = stats();
     await replayWrites.idle();
     const [replay] = await listReplayFiles('treasure-haul');
-    expect(replay.settingsVersion).toBe(12);
+    expect(replay.settingsVersion).toBe(14);
     const data = JSON.parse(exportAll()).data;
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     const recorder = captured.recorders[0];

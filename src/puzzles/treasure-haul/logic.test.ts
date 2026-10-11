@@ -152,6 +152,50 @@ describe('earned chest supply', () => {
     expect(supply.waiting).toBe(0);
   });
 
+  it('cycle rules: the start and each earned chest wait for the next clear and a second after it', () => {
+    const b = boardFrom(QUIET, () => 0.3);
+    const supply = new ChestSupply(3, 0, 'cycle');
+    const clear = (n: number, at: number) => supply.addCleared(Array.from({ length: n }, (_, i) => ({ x: i, y: 0, piece: 0, delay: 0 })), at);
+    // At the start nothing comes until a clear, then a second.
+    supply.beginMove(b, 2, 0);
+    supply.release(b, 5000, () => 0);
+    expect(b.chestList).toHaveLength(0);
+    clear(1, 6000);
+    supply.release(b, 6999, () => 0);
+    expect(b.chestList).toHaveLength(0);
+    supply.release(b, 7000, () => 0);
+    expect(b.chestList).toHaveLength(1);
+    // The coin criteria (3) is met during a clear; the chest waits for the next clear.
+    supply.beginMove(b, 2, 8000);
+    clear(2, 8000);
+    expect(supply.waiting).toBe(1);
+    supply.release(b, 20000, () => 0);
+    expect(b.chestList).toHaveLength(1);
+    supply.beginMove(b, 2, 21000);
+    clear(1, 21000);
+    supply.release(b, 21999, () => 0);
+    expect(b.chestList).toHaveLength(1);
+    supply.release(b, 22000, () => 0);
+    expect(b.chestList).toHaveLength(2);
+  });
+
+  it('cycle rules: after the last chest is hauled the next one waits for a clear', () => {
+    const b = boardFrom(QUIET, () => 0.3);
+    const supply = new ChestSupply(150, 0, 'cycle');
+    supply.beginMove(b, 1, 0);
+    supply.addCleared([{ x: 0, y: 0, piece: 0, delay: 0 }], 0);
+    supply.release(b, 1000, () => 0);
+    expect(b.chestList).toHaveLength(1);
+    // The chest is hauled; the board is empty again.
+    b.chestList.length = 0;
+    supply.beginMove(b, 1, 5000);
+    supply.release(b, 9000, () => 0);
+    expect(b.chestList).toHaveLength(0);
+    supply.addCleared([{ x: 0, y: 0, piece: 1, delay: 0 }], 9000);
+    supply.release(b, 10000, () => 0);
+    expect(b.chestList).toHaveLength(1);
+  });
+
   it('preserves every award and the coin remainder while full, releasing one per move', () => {
     const b = boardFrom(QUIET, () => 0.3);
     const supply = new ChestSupply(150, 0);

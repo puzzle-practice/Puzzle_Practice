@@ -56,6 +56,16 @@ const MINI = 23;
 /** Floating up: 0.35px/ms, half again as fast when settling. */
 const RISE_PX_PER_MS = 0.35 * 1.5;
 const SWAP_MS = 250;
+/** Gem blasts reach each square this long after the last (haul/client/k). */
+const BLAST_MS = 50;
+/**
+ * The game's timings, which players can change in Settings to experiment: a swap, a piece rising
+ * one square, a gem blast moving one square, and the wait between a clear and a chest coming in.
+ */
+interface Timings { swapMs: number; riseMs: number; blastMs: number; chestDelayMs: number }
+const DEFAULT_TIMINGS: Timings = { swapMs: SWAP_MS, riseMs: CELL / RISE_PX_PER_MS, blastMs: BLAST_MS, chestDelayMs: CHEST_DELAY_MS };
+const validTimings = (t: unknown): t is Timings => !!t && typeof t === 'object' &&
+  (['swapMs', 'riseMs', 'blastMs', 'chestDelayMs'] as const).every((k) => Number.isFinite((t as Timings)[k]) && (t as Timings)[k] >= 0);
 /** Spawn mode: the pieces above a chest that comes in on the bottom two rows, which must all clear to haul it. */
 const MAX_ABOVE = 2 * (H - 2);
 /** Spawn mode: points for a chest in the middle four columns, and for one anywhere else. */
@@ -275,7 +285,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let chestMeter = new ChestMeter(coinsPerChest);
   /** Chests modes: a chest earned while the board already has its limit, waiting for room. */
   let chestEarned = false;
-  let chestRules: 1 | 2 | 3 | 4 = 4;
+  /** 5: each chest waits for a clear and a second after it (see ChestSupply 'cycle'); 4: the earlier rules. */
+  let chestRules: 1 | 2 | 3 | 4 | 5 = store.get<boolean>('chestCycle', true) ? 5 : 4;
   let trainingRules: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 = 8;
   /** Colour Cleanup: the colour this scenario is about (or null in other drills), and the chest's column. */
   let colourGoal: number | null = null;
@@ -283,6 +294,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let dismissRules: 1 | 2 = 2;
   let dismissRequested = false;
   let chestSupply = new ChestSupply(coinsPerChest, ticks());
+  const savedTimings = store.get<Timings>('timings', DEFAULT_TIMINGS);
+  let timings: Timings = validTimings(savedTimings) ? { ...savedTimings } : { ...DEFAULT_TIMINGS };
+  const defaultTimings = () => (Object.keys(DEFAULT_TIMINGS) as (keyof Timings)[]).every((k) => timings[k] === DEFAULT_TIMINGS[k]);
+  /** Gem blast delays at the chosen blast speed. */
+  const blastTimed = (cleared: Cleared[]): Cleared[] => cleared.map((c) => ({ ...c, delay: (c.delay / BLAST_MS) * timings.blastMs }));
   /** 1 chest / 2 chests: the most chests on their way or on the board at once. */
   const chestLimit = () => (mode === 'chests1' ? 1 : mode === 'chests2' ? 2 : 0);
   const chestMode = () => chestLimit() > 0;
@@ -355,9 +371,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const bestKey = () => `${mode}:${mode === 'clear' ? clearPack + ':' : ''}${roundSecs}` +
     (coinOnlyDrill() || gemRates.every((rate) => rate === 200 / 308) ? '' : `:gems:${gemRates.join('-')}`) +
     (spawnDrill() && spawnDelay ? ':delay' : '') +
-    (chestRules >= 2 && (chestMode() || spawnDrill() || mode === 'clear') ? chestRules >= 3 && mode === 'chests2' ? `:rules${chestRules}` : ':rules2' : '') +
+    (chestRules >= 2 && (chestMode() || spawnDrill() || mode === 'clear') ? chestRules === 5 && chestMode() ? ':rules5' : chestRules >= 3 && mode === 'chests2' ? `:rules${Math.min(chestRules, 4)}` : ':rules2' : '') +
     (presetDrill() ? colourDrill() ? ':colour' : trainingRules >= 7 && (clearPack === 'standard' || clearPack === 'emeralds') ? ':drills7' : clearPack === 'edges' && trainingRules >= 5 ? ':drills5' : clearPack === 'edges' && trainingRules === 4 ? ':drills4' : trainingRules >= 3 && clearPack === 'emeralds' ? ':drills3' : ':drills2' : '') +
     (mode === 'clear' && clearPack === 'edges' && trainingRules >= 4 && impossibleChests ? ':impossible' : '') +
+    (defaultTimings() ? '' : `:timings:${timings.swapMs}-${timings.riseMs}-${timings.blastMs}-${timings.chestDelayMs}`) +
     (chestMode() && coinsPerChest !== LEGACY_COINS_PER_CHEST ? `:coins:${coinsPerChest}` : '');
   const actionCount = () => movers.length + fades.length;
   const inFlight = () => flyers.length + minis.length;
@@ -442,7 +459,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
     board.gemRates = coinOnlyDrill() ? [0, 0] : [...gemRates];
     // Rubies starts as if the first clear and its one-second wait have already happened.
-    board.chestReady = () => !spawnDrill() || (mode === 'rubies' && trainingRules >= 8) || (mode === 'spawn' && chestRules === 1 && !spawnDelay) || (firstClearAt !== null && ticks() >= firstClearAt + CHEST_DELAY_MS);
+    board.chestReady = () => !spawnDrill() || (mode === 'rubies' && trainingRules >= 8) || (mode === 'spawn' && chestRules === 1 && !spawnDelay) || (firstClearAt !== null && ticks() >= firstClearAt + timings.chestDelayMs);
     sendChests();
     if (chestRules === 4 && mode === 'chests2') chestSupply.beginMove(board, 2, ticks());
     shown = [...board.cells];
@@ -481,19 +498,19 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         const { x, y } = trainingChest;
         const sx = x + (x > 0 ? -1 : 2);
         sounds.play('piece_swap');
-        move(board.get(sx, 1), sx, 2, sx, 1, SWAP_MS);
-        move(board.get(sx, 2), sx, 1, sx, 2, SWAP_MS);
-        later(SWAP_MS, () => {
+        move(board.get(sx, 1), sx, 2, sx, 1, timings.swapMs);
+        move(board.get(sx, 2), sx, 1, sx, 2, timings.swapMs);
+        later(timings.swapMs, () => {
           movers = movers.filter((m) => m.tx !== sx || (m.ty !== 1 && m.ty !== 2));
           shown[2 * W + sx] = board!.get(sx, 2);
           shown[W + sx] = board!.get(sx, 1);
           const bringIn = () => {
             for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
-              move(board!.get(x + dx, y - dy), x + dx, -1 - dy, x + dx, y - dy, CELL * (y + 1) / RISE_PX_PER_MS);
+              move(board!.get(x + dx, y - dy), x + dx, -1 - dy, x + dx, y - dy, timings.riseMs * (y + 1));
             }
-            later(CELL * (y + 1) / RISE_PX_PER_MS, onReady);
+            later(timings.riseMs * (y + 1), onReady);
           };
-          if (chestRules >= 2) later(CHEST_DELAY_MS, bringIn);
+          if (chestRules >= 2) later(timings.chestDelayMs, bringIn);
           else bringIn();
         });
       } else onReady();
@@ -503,9 +520,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function start(): void {
     pause.resume();
     warning.reset();
-    replays.begin({ mode, clearPack, roundSecs, spawnDelay, gemRates: [...gemRates], coinsPerChest, chestRules, trainingRules, dismissRules, impossibleChests }, rng.snapshot());
+    replays.begin({ mode, clearPack, roundSecs, spawnDelay, gemRates: [...gemRates], coinsPerChest, chestRules, trainingRules, dismissRules, impossibleChests, timings: { ...timings } }, rng.snapshot());
     dismissRequested = false;
-    chestSupply = new ChestSupply(coinsPerChest, ticks(), mode !== 'chests2' ? 'initial' : chestRules === 4 ? 'wait' : chestRules === 3 ? 'clear' : 'initial');
+    chestSupply = new ChestSupply(coinsPerChest, ticks(), chestRules === 5 && chestMode() ? 'cycle' : mode !== 'chests2' ? 'initial' : chestRules === 4 ? 'wait' : chestRules === 3 ? 'clear' : 'initial', timings.chestDelayMs);
     chestMeter = chestRules >= 2 ? chestSupply.meter : new ChestMeter(coinsPerChest);
     chestEarned = false;
     sparks = [];
@@ -688,16 +705,17 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (result.kind === 'illegal') return;
     if (result.kind === 'gem') {
       tally.moves++;
-      if (result.cleared.length && firstClearAt === null) firstClearAt = ticks();
-      clearSounds(result.cleared);
-      countCleared(result.cleared);
-      for (const c of result.cleared) clearFx(c);
+      const cleared = blastTimed(result.cleared);
+      if (cleared.length && firstClearAt === null) firstClearAt = ticks();
+      clearSounds(cleared);
+      countCleared(cleared);
+      for (const c of cleared) clearFx(c);
       stable = false;
     } else {
       // The two pieces trade places over 250ms.
       sounds.play('piece_swap');
-      move(result.upper, x, y, x, y - 1, SWAP_MS);
-      move(result.lower, x, y - 1, x, y, SWAP_MS);
+      move(result.upper, x, y, x, y - 1, timings.swapMs);
+      move(result.lower, x, y - 1, x, y, timings.swapMs);
       if (result.kind === 'swap') {
         tally.moves++;
         stable = false;
@@ -751,7 +769,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       for (const m of step.moves) {
         if (m.fy < 0 && m.piece === RUBY) tally.rubiesSpawned++;
         if (m.fy < 0 && m.piece === EMERALD) tally.emeraldsSpawned++;
-        const duration = (CELL * Math.abs(m.ty - m.fy)) / RISE_PX_PER_MS;
+        const duration = timings.riseMs * Math.abs(m.ty - m.fy);
         move(m.piece, m.fx, m.fy, m.tx, m.ty, duration);
       }
       const spawned = spawnDrill() ? step.moves.find((m) => isChestOrigin(m.piece) && m.fy < 0) : undefined;
@@ -1273,7 +1291,22 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     .number('Coins per chest', () => coinsPerChest, (v) => {
       coinsPerChest = Math.max(1, Math.round(v));
       store.set('coinsPerChest', coinsPerChest);
-    }, { min: 1, max: 2000, step: 10, disabled: () => running, title: 'Coins cleared to earn a chest: 100 by default. Earned chests wait at least one second and stay queued until there is room.' });
+    }, { min: 1, max: 2000, step: 10, disabled: () => running, title: 'Coins cleared to earn a chest: 100 by default. Earned chests wait at least one second and stay queued until there is room.' })
+    .toggle('Each chest waits for a clear', () => chestRules === 5, (on) => {
+      chestRules = on ? 5 : 4;
+      store.set('chestCycle', on);
+    }, { disabled: () => running, title: 'At the start, after you haul your last chest, and once you have cleared enough coins, the next chest only comes a second after your next clear.' });
+  const timing = panel.settings.group('Timings', { columns: 2 });
+  ([
+    ['swapMs', 'Swap (ms)', 'How long two pieces take to trade places. The default is 250.'],
+    ['riseMs', 'Rise per square (ms)', 'How long pieces and chests take to float up one square. The default is about 85.7.'],
+    ['blastMs', 'Blast per square (ms)', 'How long a ruby or emerald blast takes to reach the next square. The default is 50.'],
+    ['chestDelayMs', 'Chest delay (ms)', 'The wait between a clear and a chest coming in. The default is 1000.'],
+  ] as const).forEach(([key, label, title]) => timing.number(label, () => Math.round(timings[key] * 10) / 10, (v) => {
+    timings = { ...timings, [key]: Math.max(0, v) };
+    store.set('timings', timings);
+  }, { min: 0, max: 5000, step: key === 'chestDelayMs' ? 50 : 5, disabled: () => running, title }));
+  timing.button('Defaults', () => { timings = { ...DEFAULT_TIMINGS }; store.set('timings', timings); }, { disabled: () => running });
   panel.settings.group('Display')
     .select('Artwork', ARTWORK, () => artwork, (value) => {
       artwork = value;
@@ -1310,6 +1343,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     spawnDelay = true;
     gemRates = [200 / 308, 200 / 308];
     coinsPerChest = COINS_PER_CHEST;
+    timings = { ...DEFAULT_TIMINGS };
+    store.set('timings', timings);
     artwork = 'vampirate';
     showCoinProgress = false;
     showWaitingChests = false;
@@ -1329,26 +1364,27 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }, { disabled: () => running });
 
   const replaySettingsCodec: ReplaySettingsCodec = {
-    currentVersion: 12,
-    simulatorVersion: 12,
+    currentVersion: 14,
+    simulatorVersion: 14,
     migrate: (version, value) => {
-      if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(version) || !value || typeof value !== 'object') return null;
+      if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(version) || !value || typeof value !== 'object') return null;
       const s = value as Record<string, unknown>;
       return (['0', '1', '2', 'chests1', 'chests2', 'spawn', 'clear'].includes(String(s.mode)) || (version >= 8 && s.mode === 'rubies')) &&
-        (version === 1 || (version === 2 ? s.chestRules === 2 : version >= 5 ? s.chestRules === 4 : s.chestRules === 2 || s.chestRules === 3)) &&
+        (version === 1 || (version === 2 ? s.chestRules === 2 : version >= 13 ? s.chestRules === 4 || s.chestRules === 5 : version >= 5 ? s.chestRules === 4 : s.chestRules === 2 || s.chestRules === 3)) &&
         (version < 3 || s.trainingRules === (version >= 12 ? 8 : version >= 11 ? 7 : version >= 10 ? 6 : version >= 9 ? 5 : version >= 7 ? 4 : version === 6 ? 3 : 2)) &&
         (version < 7 || typeof s.impossibleChests === 'boolean') &&
         (version < 4 || s.dismissRules === 2) &&
+        (s.timings === undefined || validTimings(s.timings)) &&
         (s.coinsPerChest === undefined || (Number.isFinite(s.coinsPerChest) && (s.coinsPerChest as number) >= 1)) &&
         ['standard', 'efficient', 'emeralds', 'edges'].includes(String(s.clearPack)) &&
         Number.isFinite(s.roundSecs) && (s.roundSecs as number) >= 0 && typeof s.spawnDelay === 'boolean' &&
         Array.isArray(s.gemRates) && s.gemRates.length === 2 && s.gemRates.every((n) => Number.isFinite(n) && (n as number) >= 0) ? { ...s, chestRules: version === 1 ? 1 : version === 2 ? 2 : s.chestRules, trainingRules: version < 3 ? 1 : version >= 12 ? 8 : version >= 11 ? 7 : version >= 10 ? 6 : version >= 9 ? 5 : version >= 7 ? 4 : version === 6 ? 3 : 2, dismissRules: version < 4 ? 1 : 2, impossibleChests: version >= 7 ? s.impossibleChests : false } : null;
     },
   };
-  type HaulSettings = { mode: Mode; clearPack: ClearPack; roundSecs: number; spawnDelay: boolean; gemRates: [number, number]; coinsPerChest?: number; chestRules?: 1 | 2 | 3 | 4; trainingRules?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8; dismissRules?: 1 | 2; impossibleChests?: boolean };
+  type HaulSettings = { mode: Mode; clearPack: ClearPack; roundSecs: number; spawnDelay: boolean; gemRates: [number, number]; coinsPerChest?: number; chestRules?: 1 | 2 | 3 | 4 | 5; trainingRules?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8; dismissRules?: 1 | 2; impossibleChests?: boolean; timings?: Timings };
   let savedReplaySettings: HaulSettings | null = null;
   replays = new ReplayRecorder('treasure-haul', store, panel, ticks, (tape: PuzzleReplay) => {
-    savedReplaySettings ??= { mode, clearPack, roundSecs, spawnDelay, gemRates: [...gemRates], coinsPerChest, chestRules, trainingRules, dismissRules, impossibleChests };
+    savedReplaySettings ??= { mode, clearPack, roundSecs, spawnDelay, gemRates: [...gemRates], coinsPerChest, chestRules, trainingRules, dismissRules, impossibleChests, timings: { ...timings } };
     const settings = tape.settings as HaulSettings;
     chestRules = settings.chestRules ?? 1;
     trainingRules = settings.trainingRules ?? 1;
@@ -1360,17 +1396,19 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     spawnDelay = settings.spawnDelay;
     gemRates = [...settings.gemRates];
     coinsPerChest = settings.coinsPerChest ?? LEGACY_COINS_PER_CHEST;
+    timings = { ...(settings.timings ?? DEFAULT_TIMINGS) };
     if (!rng.restore(tape.seed)) throw new Error('Invalid Treasure Haul random state');
     start();
   }, () => {
     if (running) stop();
     if (savedReplaySettings) {
       ({ mode, clearPack, roundSecs, spawnDelay, gemRates } = savedReplaySettings);
-      chestRules = savedReplaySettings.chestRules ?? 4;
+      chestRules = savedReplaySettings.chestRules ?? 5;
       trainingRules = savedReplaySettings.trainingRules ?? 8;
       impossibleChests = savedReplaySettings.impossibleChests ?? false;
       dismissRules = savedReplaySettings.dismissRules ?? 2;
       coinsPerChest = savedReplaySettings.coinsPerChest ?? COINS_PER_CHEST;
+      timings = { ...(savedReplaySettings.timings ?? DEFAULT_TIMINGS) };
       savedReplaySettings = null;
     }
   }, (seed) => new PyRandom(0).restore(seed), setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
