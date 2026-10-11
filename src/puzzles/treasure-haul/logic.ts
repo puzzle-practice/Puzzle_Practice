@@ -185,21 +185,37 @@ export class ChestSupply {
   private openings = 0;
   private emptyAtMove = false;
   private emptyReadyAt: number | null = null;
+  /** 'cycle': chests earned by coins that are still waiting for their clear. */
+  private armed = 0;
 
-  constructor(perChest: number, now: number, private readonly emptyRule: 'initial' | 'clear' | 'wait' = 'initial') {
+  /**
+   * 'cycle': every chest starts a fresh cycle. At the start, after a haul leaves no chest, and
+   * once the coin criteria is met, the chest waits for the next clear and a second after it.
+   */
+  constructor(perChest: number, now: number, private readonly emptyRule: 'initial' | 'clear' | 'wait' | 'cycle' = 'initial') {
     this.meter = new ChestMeter(perChest);
     this.readyAt = emptyRule === 'initial' ? [now + CHEST_DELAY_MS] : [];
     if (emptyRule === 'wait') this.emptyReadyAt = now + CHEST_DELAY_MS;
   }
 
-  get waiting(): number { return this.readyAt.length || (this.emptyReadyAt !== null ? 1 : 0); }
+  get waiting(): number { return this.readyAt.length + this.armed || (this.emptyReadyAt !== null ? 1 : 0); }
 
   addCleared(cleared: readonly Cleared[], now: number): void {
-    if (this.emptyRule === 'clear' && this.emptyAtMove && this.emptyReadyAt === null) {
+    if ((this.emptyRule === 'clear' || this.emptyRule === 'cycle') && this.emptyAtMove && this.emptyReadyAt === null) {
       const pieces = cleared.filter((c) => c.piece !== EMPTY && !isChest(c.piece));
       if (pieces.length) this.emptyReadyAt = now + Math.min(...pieces.map((c) => c.delay)) + CHEST_DELAY_MS;
     }
     const coins = cleared.filter((c) => c.piece >= 0 && c.piece < COLOURS).sort((a, b) => a.delay - b.delay);
+    if (this.emptyRule === 'cycle') {
+      // A chest earned earlier waits for this, the next clear, then a second.
+      const pieces = cleared.filter((c) => c.piece !== EMPTY && !isChest(c.piece));
+      if (this.armed && pieces.length) {
+        const at = now + Math.min(...pieces.map((c) => c.delay)) + CHEST_DELAY_MS;
+        for (; this.armed > 0; this.armed--) this.readyAt.push(at);
+      }
+      for (const _ of coins) if (this.meter.add(1)) this.armed++;
+      return;
+    }
     for (const coin of coins) {
       if (this.meter.add(1)) this.readyAt.push(now + coin.delay + CHEST_DELAY_MS);
     }
@@ -221,7 +237,7 @@ export class ChestSupply {
     this.observe(board, now);
     const inPlay = this.inPlay(board);
     this.openings = Math.min(1, Math.max(0, limit - inPlay));
-    this.emptyAtMove = this.emptyRule !== 'initial' && limit === 2 && inPlay === 0;
+    this.emptyAtMove = this.emptyRule !== 'initial' && (limit === 2 || this.emptyRule === 'cycle') && inPlay === 0;
     if (inPlay > 0) this.emptyReadyAt = null;
   }
 
