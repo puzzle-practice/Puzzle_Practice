@@ -426,7 +426,7 @@ export class ReplayRecorder {
       onCommit: () => { void this.jumpSelected(); this.scrubSeconds = null; } })
     .button('Save replay file', () => void this.download(), { disabled: () => !this.tapes.length || this.loading })
     .button('Report', () => void this.showSelectedReport(), {
-      title: 'Show the duty report this replay ended with', disabled: () => !this.tapes.length || this.loading,
+      title: 'Show the duty report this replay ended with; click again to hide it', disabled: () => !this.tapes.length || this.loading,
     });
     group.select('Playback speed', [
       { value: 0.25, label: '0.25×' }, { value: 0.5, label: '0.5×' }, { value: 1, label: '1×' },
@@ -896,6 +896,8 @@ export class ReplayRecorder {
     if (!entry) return;
     try {
       const tape = await this.loadTape(entry);
+      // A second click hides this replay's report again.
+      if (tape?.report && this.panel.shownReport === tape.report) { this.panel.showReport?.(null); return; }
       if (tape?.report && showsDutyReport(tape.report)) this.panel.showReport?.(tape.report);
       else this.replayStorageError = 'This replay was saved without a duty report.';
     } catch { this.replayStorageError = 'This replay could not be loaded.'; }
