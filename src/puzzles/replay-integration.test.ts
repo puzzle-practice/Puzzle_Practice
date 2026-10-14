@@ -73,6 +73,7 @@ function panelHarness() {
     if (method === 'group') return (title = '') => group('Play', title);
     if (method === 'settings') return group('Settings');
     if (method === 'tab') return (page: string) => group(page);
+    if (method === 'historySection') return (part: string) => group('History', part === 'replays' ? 'Replays' : '');
     if (method === 'results') return (get: () => unknown) => { results.push(get); };
     return () => group('Play');
   } });
@@ -1416,7 +1417,8 @@ describe('taking over a replay', () => {
     expect(recorder.isPlaying).toBe(false);
     // Play a little, then go back to the replay where it was taken over: nothing is saved.
     play(now + 3000);
-    buttons.get('History:Replays:Resume replay')!();
+    // The same button reads Resume replay after a take-over.
+    buttons.get('History:Replays:Take over')!();
     await vi.waitFor(() => expect(recorder.isSeeking).toBe(false));
     await vi.waitFor(() => expect(recorder.isPlaying).toBe(true));
     expect(recorder.isPaused).toBe(true);
@@ -1443,6 +1445,50 @@ describe('taking over a replay', () => {
     expect(recorder.divergedAt).toBeNull();
     expect(stats()).toEqual(live);
     buttons.get('History:Replays:Stop')!();
+    instance.dispose?.();
+  });
+});
+
+describe('changing a setting mid-game', () => {
+  it.each(['forage', 'treasure-haul', 'blacksmithing', 'swordfight'] as const)('%s abandons the game with nothing saved', async (puzzle) => {
+    vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new PyRandom(5)));
+    const store = new Store(puzzle);
+    if (puzzle === 'forage') store.set('settings', { mode: 'ci', roundSeconds: 5 });
+    if (puzzle === 'treasure-haul') store.set('round', 30);
+    const { panel, buttons, buttonStates } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./' + puzzle + '/index')).default as PuzzleFactory;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    buttons.get('Play::Start')!();
+    for (let frame = 0; frame < 200; frame++) { now += 17; instance.frame(frame % 20 === 10 ? [{ type: 'mousedown', button: 1, pos: [200, 300] }] : []); }
+    expect(recorder['canStartPlayback']()).toBe(false);
+    recorder.abandon();
+    expect(recorder['canStartPlayback']()).toBe(true);
+    // Play on past where a round would have ended: the abandoned game never saves.
+    for (let frame = 0; frame < 2500; frame++) { now += 17; instance.frame([]); }
+    await replayWrites.idle();
+    expect(await listReplayFiles(puzzle)).toHaveLength(0);
+    expect(Object.keys(JSON.parse(exportAll()).data).filter((key) => key.includes(':history:'))).toEqual([]);
+    expect(buttonStates.get('Play::Start')!.label!()).toMatch(/Start|Play again|Fight again|New sword/);
+    instance.dispose?.();
+  });
+
+  it('distilling keeps no replay of a session that sent nothing up', async () => {
+    const store = new Store('distilling');
+    store.set('mode', 'Practice');
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./distilling/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    for (let frame = 0; frame < 60; frame++) { now += 17; instance.frame([]); }
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    expect(await listReplayFiles('distilling')).toHaveLength(0);
     instance.dispose?.();
   });
 });

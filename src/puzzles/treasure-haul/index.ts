@@ -1212,11 +1212,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       mode = m;
       store.set('mode', m);
     }
-  }, { disabled: () => running });
+  }, {});
   session.select('Challenge', CHALLENGES, challenge, (c) => {
     setChallenge(c);
     store.set('challenge', c);
-  }, { hidden: () => !inChallenges(), disabled: () => running });
+  }, { hidden: () => !inChallenges() });
   const actions = panel.group();
   actions.note(() => mode === 'rubies' ? 'Spawn a chest below a ruby: 1 point per ruby column. Its blast must leave no blockers above the chest in the outer two columns on either side.' : '');
   actions.note(() => colourDrill() ? 'Above the chest, one column holds three coins of a problem colour and the other some more. Clear that colour from above the chest as efficiently as you can.' : '');
@@ -1286,16 +1286,16 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   panel.settings.group('Game').select('Round', ROUNDS, () => roundSecs, (s) => {
     roundSecs = s;
     store.set('round', s);
-  }, { disabled: () => running });
+  }, {});
   panel.settings.group('Chests', { hidden: () => !chestMode() })
     .number('Coins per chest', () => coinsPerChest, (v) => {
       coinsPerChest = Math.max(1, Math.round(v));
       store.set('coinsPerChest', coinsPerChest);
-    }, { min: 1, max: 2000, step: 10, disabled: () => running, title: 'Coins cleared to earn a chest: 100 by default. Earned chests wait at least one second and stay queued until there is room.' })
+    }, { min: 1, max: 2000, step: 10, title: 'Coins cleared to earn a chest: 100 by default. Earned chests wait at least one second and stay queued until there is room.' })
     .toggle('Each chest waits for a clear', () => chestRules === 5, (on) => {
       chestRules = on ? 5 : 4;
       store.set('chestCycle', on);
-    }, { disabled: () => running, title: 'At the start, after you haul your last chest, and once you have cleared enough coins, the next chest only comes a second after your next clear.' });
+    }, { title: 'At the start, after you haul your last chest, and once you have cleared enough coins, the next chest only comes a second after your next clear.' });
   const timing = panel.settings.group('Timings', { columns: 2 });
   ([
     ['swapMs', 'Swap (ms)', 'How long two pieces take to trade places. The default is 250.'],
@@ -1305,8 +1305,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   ] as const).forEach(([key, label, title]) => timing.number(label, () => Math.round(timings[key] * 10) / 10, (v) => {
     timings = { ...timings, [key]: Math.max(0, v) };
     store.set('timings', timings);
-  }, { min: 0, max: 5000, step: key === 'chestDelayMs' ? 50 : 5, disabled: () => running, title }));
-  timing.button('Defaults', () => { timings = { ...DEFAULT_TIMINGS }; store.set('timings', timings); }, { disabled: () => running });
+  }, { min: 0, max: 5000, step: key === 'chestDelayMs' ? 50 : 5, title }));
+  timing.button('Defaults', () => { timings = { ...DEFAULT_TIMINGS }; store.set('timings', timings); }, {});
   panel.settings.group('Display')
     .select('Artwork', ARTWORK, () => artwork, (value) => {
       artwork = value;
@@ -1328,14 +1328,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   panel.settings.group('Training').toggle('Impossible chests', () => impossibleChests, (on) => {
     impossibleChests = on;
     store.set('impossibleChests', on);
-  }, { hidden: () => mode !== 'clear' || clearPack !== 'edges', disabled: () => running || replays?.isPlaying,
+  }, { hidden: () => mode !== 'clear' || clearPack !== 'edges', 
     title: 'About one in five Difficult Edge Chests cannot be hauled. Practise recognising them and using Dismiss.' });
   const gems = panel.settings.group('Gem spawn rates', { columns: 2, hidden: coinOnlyDrill });
   ['Ruby (%)', 'Emerald (%)'].forEach((label, i) => gems.number(label, () => gemRates[i], (v) => {
     gemRates[i] = Math.max(0, Math.min(100 - gemRates[1 - i], v));
     store.set('gemRates', gemRates);
-  }, { min: 0, max: 100, step: 0.01, disabled: () => running }));
-  gems.button('Defaults', () => { gemRates = [200 / 308, 200 / 308]; store.set('gemRates', gemRates); }, { disabled: () => running });
+  }, { min: 0, max: 100, step: 0.01 }));
+  gems.button('Defaults', () => { gemRates = [200 / 308, 200 / 308]; store.set('gemRates', gemRates); }, {});
   panel.settings.group('Reset').button('Reset to defaults', () => {
     mode = 'chests2';
     roundSecs = 120;
@@ -1361,7 +1361,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     store.set('clearPack', clearPack);
     store.set('spawnDelay', spawnDelay);
     store.set('gemRates', gemRates);
-  }, { disabled: () => running });
+  }, {});
 
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 14,

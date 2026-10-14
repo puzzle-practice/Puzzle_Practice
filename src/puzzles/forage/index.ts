@@ -18,7 +18,7 @@ import type { DutyReport } from '../../core/duty/report';
 import type { RatingScale } from '../../core/duty/ratings';
 import { historyGroup } from '../../core/history';
 import { ReplayRecorder, type PuzzleReplay, type ReplayAction, type ReplaySettingsCodec } from '../../core/replay';
-import type { GameRecord } from '../../core/storage';
+import { excludesUnlikelyReplays, showsReplayClicks, type GameRecord } from '../../core/storage';
 import type { InputEvent, Point } from '../../core/input';
 import type { Option } from '../../core/panel';
 import type { PuzzleFactory } from '../../core/puzzle';
@@ -423,10 +423,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const best = bests();
     const final = shownScore();
     const report = endReport();
-    if (unrated()) {
-      if (!replay) { replays.cancel(); sessionSeed = null; recordedAction = false; }
-    }
-    const finishedReplay = unrated() ? null : endRecording(settings.mode === 'normal' ? `${scoreText(final)} a move` : `Score ${final}`, report);
+    const dropReplay = unrated() && excludesUnlikelyReplays();
+    if (dropReplay && !replay) { replays.cancel(); sessionSeed = null; recordedAction = false; }
+    const finishedReplay = dropReplay ? null : endRecording(settings.mode === 'normal' ? `${scoreText(final)} a move` : `Score ${final}`, report);
     if (!replay && !unrated()) {
       if (final > (best[key] ?? 0)) {
         best[key] = final;
@@ -555,11 +554,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   /** Stops watching and puts the player's own settings back. */
   function stopReplay(): void {
-    if (!replay) return;
-    const { saved } = replay;
+    if (!replay && !boardActive) return;
+    // Watching: the player's own settings go back. Playing (a setting changed): the game is dropped.
+    const saved = replay?.saved ?? { settings: structuredClone(settings), puzzleId, pickedRandomly };
     replay = null;
     rules = RULES;
     sessionSeed = null;
+    recordedAction = false;
     nextReplayBoard = 0;
     Object.assign(settings, saved.settings);
     puzzleId = saved.puzzleId;
@@ -603,7 +604,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const ctx = screen.ctx;
     ctx.save();
     r.clicks = r.clicks.filter((c) => now - c.t < 400);
-    for (const c of r.clicks) {
+    for (const c of showsReplayClicks() ? r.clicks : []) {
       const age = (now - c.t) / 400;
       ctx.globalAlpha = 1 - age;
       ctx.strokeStyle = c.b === 3 ? '#ffb347' : '#7fd4ff';
@@ -675,7 +676,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // ---- Panel ----
 
   const isPuzzle = () => settings.mode === 'puzzle';
-  const locked = () => boardActive || !!replay;
   const setting = <K extends keyof Settings>(k: K) => ({
     get: () => settings[k],
     set: (value: Settings[K]) => {
@@ -690,7 +690,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     hidden?: () => boolean,
   ) => {
     const { get, set } = setting(k);
-    group.toggle(label, get, set, { disabled: locked, hidden });
+    group.toggle(label, get, set, { hidden });
   };
 
   panel.clock(() => {
@@ -709,7 +709,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     { id: 'rotateRight', label: 'Rotate clockwise', defaultKey: 'C' },
   ]);
   const session = panel.session();
-  session.select('Mode', MODES, setting('mode').get, setting('mode').set, { disabled: locked });
+  session.select('Mode', MODES, setting('mode').get, setting('mode').set, {});
   session.number(
     'Puzzle',
     () => Number(puzzleId),
@@ -718,7 +718,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       pickedRandomly = false;
       store.set('puzzleId', puzzleId);
     },
-    { min: 0, disabled: locked, hidden: () => !isPuzzle(), title: '0 picks a puzzle at random' },
+    { min: 0, hidden: () => !isPuzzle(), title: '0 picks a puzzle at random' },
   );
   const actions = panel.group();
   actions.note(() => isPuzzle() ? settings.scramble ? 'Scrambled' : '' : roundSeconds() ? `${roundSeconds()} second round` : 'No timer');
@@ -754,7 +754,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ['Clockwise, anticlockwise', `${clockwise}, ${anticlockwise}`],
       // Points are the score except in Normal, where the score is points a move.
       ...(settings.mode === 'normal' ? [['Points', String(score)]] : []),
-      ...(unrated() ? [['Rating', 'Unrated: not saved']] : []),
+      ...(unrated() ? [['Rating', excludesUnlikelyReplays() ? 'Unrated: not saved' : 'Unrated: replay only']] : []),
     ],
     averages: duty.averages(historyKey() ? store.sessionHistory(historyKey()!) : null, isPuzzle()
       ? { scoreLabel: 'Moves', lowerIsBetter: true, digits: 1 }
@@ -832,7 +832,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     settledAt, playing.length, pendingNextBoard, ended, boardActive, JSON.stringify(rng.snapshot())].join('|');
 
   const setup = panel.settings.group('Game');
-  setup.select('Timer', [0, 30, 120, 300].map((value) => ({ value, label: value ? `${value} seconds` : 'No timer' })), roundSeconds, (value) => { settings.roundSeconds = value; saveSettings(); }, { disabled: locked, hidden: isPuzzle });
+  setup.select('Timer', [0, 30, 120, 300].map((value) => ({ value, label: value ? `${value} seconds` : 'No timer' })), roundSeconds, (value) => { settings.roundSeconds = value; saveSettings(); }, { hidden: isPuzzle });
   bind(setup, 'Scramble', 'scramble', () => !isPuzzle());
 
   const crateGroup = panel.settings.group('Crates');
@@ -844,7 +844,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   ratios.number('Chest mix preset', setting('forageLevel').get, (level) => { settings.forageLevel = Math.round(level); settings.chestRatios = undefined; saveSettings(); }, {
     min: 0,
     max: 15,
-    disabled: locked,
     hidden: () => settings.mode === 'normal',
     title: 'Changes chest spawn rates only',
   });
@@ -857,7 +856,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         else { settings.chestRatios ??= [...CHEST_WEIGHTINGS[settings.forageLevel]]; settings.chestRatios[i] = value; }
         saveSettings();
       },
-      { min: 0, step: 0.0001, disabled: locked },
+      { min: 0, step: 0.0001 },
     ),
   );
   ratios.button(
@@ -867,7 +866,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       else settings.chestRatios = undefined;
       saveSettings();
     },
-    { disabled: locked, title: 'Rates of 0.65, 0.345 and 0.0047 as ratios, with the 3x2 doubled' },
+    { title: 'Rates of 0.65, 0.345 and 0.0047 as ratios, with the 3x2 doubled' },
   );
 
   const specials = panel.settings.group('Specials');
@@ -883,7 +882,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     puzzleId = '0';
     pickedRandomly = false;
     store.set('puzzleId', puzzleId);
-  }, { disabled: locked });
+  }, {});
 
   // ---- Drawing ----
 

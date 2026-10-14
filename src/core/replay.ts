@@ -2,7 +2,7 @@ import { setReplayPirate } from './duty/profile';
 import { readReport, showsDutyReport, type DutyReport } from './duty/report';
 import type { InputEvent, Point } from './input';
 import type { Panel } from './panel';
-import { Store } from './storage';
+import { showsReplayClicks, Store } from './storage';
 import { readArchivedReplay, readReplayArchive, REPLAY_REMOVED, replayRetentionLimit } from './data-backups';
 import { replayId, replayWrites, saveReplayFile, type ReplayMetadata } from './replay-storage';
 
@@ -400,7 +400,7 @@ export class ReplayRecorder {
     private readonly settingsCodec: ReplaySettingsCodec = DEFAULT_SETTINGS_CODEC,
     private readonly canStartPlayback: () => boolean = () => true,
   ) {
-    const group = panel.tab('History').group('Replays', { title: 'Recorded controls and the run setup are included in shareable files' });
+    const group = panel.historySection('replays', { title: 'Recorded controls and the run setup are included in shareable files' });
     this.picker.className = 'panel-select';
     this.picker.setAttribute('aria-label', 'Replay');
     this.picker.addEventListener('change', () => { this.selected = Number(this.picker.value) || 0; });
@@ -410,13 +410,13 @@ export class ReplayRecorder {
     }, { label: () => this.loading ? 'Loading…' : !this.playback ? 'Play' : this.playback.paused ? 'Resume' : 'Pause',
       disabled: () => this.loading || !this.tapes.length || !!this.recording || (!this.playback && (!this.canPlay(this.tapes[this.selected]) || !this.canStartPlayback())) })
     .button('Stop', () => this.stopPlayback(), { disabled: () => !this.playback && !this.loading })
-    .button('Take over', () => this.takeOver(), {
-      title: 'Play on from this point yourself: the board, score and clock carry on as they are, and the game saves with your own',
-      disabled: () => !this.playback || this.loading || this.seeking || this.advancing || this.playback.finishPending,
-    })
-    .button('Resume replay', () => void this.resumeReplay(), {
-      title: 'Go back to the replay you took over, paused where you took it over. The game you played from there is not saved.',
-      disabled: () => !this.takeOverFrom || this.loading || !this.tapeIndices.has(this.takeOverFrom.id),
+    // One button: Take over while watching; after a take-over, Resume replay goes back to watching.
+    .button('Take over', () => { if (this.playback) this.takeOver(); else void this.resumeReplay(); }, {
+      label: () => !this.playback && this.takeOverFrom ? 'Resume replay' : 'Take over',
+      title: 'Take over: play on from this point yourself; the game saves as your own. Resume replay: back to the replay where you took over (the game you played from there is not saved).',
+      disabled: () => this.playback
+        ? this.loading || this.seeking || this.advancing || this.playback.finishPending
+        : !this.takeOverFrom || this.loading || !this.tapeIndices.has(this.takeOverFrom.id),
     })
     .range('Replay time (s)', () => this.scrubSeconds ?? (this.playback ? this.playback.elapsed / 1000 : this.jumpSeconds), (seconds) => {
       this.jumpSeconds = seconds; this.scrubSeconds = seconds;
@@ -452,6 +452,7 @@ export class ReplayRecorder {
     });
     this.syncPicker();
     void this.loadTapes();
+    panel.sessionLock?.(() => !!this.playback || this.loading || !this.canStartPlayback(), () => this.abandon());
     if (typeof window !== 'undefined') window.addEventListener(REPLAY_REMOVED, this.forget);
   }
 
@@ -707,7 +708,7 @@ export class ReplayRecorder {
     if (!p || this.seeking || this.advancing) return;
     p.clicks = p.clicks.filter((click) => p.elapsed - click.t < 450);
     ctx.save();
-    for (const click of p.clicks) {
+    for (const click of showsReplayClicks() ? p.clicks : []) {
       const age = Math.max(0, (p.elapsed - click.t) / 450);
       ctx.globalAlpha = 1 - age; ctx.strokeStyle = click.button === 3 ? '#ffb347' : '#7fd4ff'; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.arc(click.x, click.y, 6 + age * 14, 0, Math.PI * 2); ctx.stroke();
@@ -754,6 +755,19 @@ export class ReplayRecorder {
     } catch { this.replayStorageError = 'This replay could not be loaded. Check browser storage or folder access.'; }
     finally { if (request === this.request) this.loading = false; }
   }
+  /**
+   * A setting changed mid-game: a replay closes; a game of the player's stops with nothing saved
+   * (no history, best or replay).
+   */
+  abandon(): void {
+    if (this.playback || this.loading) { this.stopPlayback(); return; }
+    this.recording = null; this.pendingMouse = null; this.pendingCheck = null; this.takenOverAt = null;
+    this.store.setReadOnly(true);
+    try { this.stopRestored?.(); }
+    finally { this.store.setReadOnly(false); }
+    if (this.panel.shownReport) this.panel.showReport?.(null);
+  }
+
   /**
    * Back to watching the replay last taken over, paused at the take-over. The game played from
    * there is dropped unsaved: the replay's restore resets the puzzle with saving switched off.

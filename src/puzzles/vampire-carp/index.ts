@@ -921,7 +921,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     scoreCounting = true;
     store.set('scoreCounting', true);
     loadBestScore = true;
-  }, { disabled: () => boardActive || pauseAvailable() });
+  });
 
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 1,

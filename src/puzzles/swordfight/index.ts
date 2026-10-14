@@ -923,7 +923,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   screens.toggle('Show attack queues', () => showQueues, (on) => { showQueues = on; store.set('showQueues', on); }, {
     title: "Replaces each enemy's name with the attacks waiting to land on it and how many pieces they hold, as attacks:pieces (5:30 is five attacks of 30 pieces).",
   });
-  const off = { disabled: () => running || replays?.isPlaying };
+  // Settings can change mid-fight: the first change abandons the fight (see Panel.sessionLock).
+  const off = { disabled: () => false };
   const npcSwords: Option<number>[] = [{ value: -1, label: 'Random' }, ...PLAIN_SWORDS.map((value) => ({ value, label: SWORD_NAMES[value] }))];
   const rosterOf = (side: 'enemyRoster' | 'allyRoster'): NpcSettings[] => {
     // Older replays retain their original roster generation until playback ends.
