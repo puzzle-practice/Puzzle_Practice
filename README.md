@@ -45,6 +45,12 @@ it recorded. Each puzzle's `simulatorVersion` records the rules a game was playe
 replays keep playing by their own rules (Forage version 2: paced Normal crates and Chaos chests
 retrying a blocked column).
 
+**Take over** in the Replays card turns the replay being watched (or paused after a Jump) into
+your own game from that moment: the board, score and clock carry on and your inputs take
+control. It saves like any game, labelled "taken over at Ns", and its replay plays from the start
+of the original through the take-over. **Resume replay** goes back to the replay, playing on from where
+you took it over, and drops the game you played from there without saving it.
+
 Each past game on the History tab has a 🗑 button that deletes the game, its replay and its
 place in the stats. Deleted games are listed under `puzzle-practice:deleted`, so merging or
 importing an older backup, or syncing a backup folder, doesn't bring them back.

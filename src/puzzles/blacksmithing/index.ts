@@ -914,7 +914,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   session.select('Mode', MODES, () => mode, (m) => {
     mode = m;
     store.set('mode', m);
-  }, { disabled: busy });
+  }, {});
   const actions = panel.group();
   actions.note(() => {
     const level = `Difficulty ${difficulty}`;
@@ -1017,21 +1017,20 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   settings.select('Difficulty', DIFFICULTIES, () => difficulty, (d) => {
     difficulty = d;
     store.set('difficulty', d);
-  }, { disabled: busy, title: 'Which pieces appear (YPPedia: Blacksmithing, Difficulty levels)' });
+  }, { title: 'Which pieces appear (YPPedia: Blacksmithing, Difficulty levels)' });
   settings.number('Board size', () => perfectSize, (n) => {
     perfectSize = Math.max(MIN_PERFECT_SIZE, Math.min(MAX_PERFECT_SIZE, Math.round(n) || 3));
     store.set('perfectSize', perfectSize);
   }, {
     min: MIN_PERFECT_SIZE,
     max: MAX_PERFECT_SIZE,
-    disabled: busy,
     hidden: () => mode !== 'perfect',
     title: 'Squares along each side; every square can be struck once',
   });
   settings.select('Timer', TIMERS, () => timerMs, (ms) => {
     timerMs = ms;
     store.set('perfectTimer', ms);
-  }, { disabled: busy, hidden: () => mode !== 'perfect', title: 'Boards keep coming until Stop, or until the time runs out' });
+  }, { hidden: () => mode !== 'perfect', title: 'Boards keep coming until Stop, or until the time runs out' });
   settings.button('Reset to defaults', () => {
     mode = 'perfect';
     difficulty = 4;
@@ -1041,7 +1040,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     store.set('difficulty', difficulty);
     store.set('perfectSize', perfectSize);
     store.set('perfectTimer', timerMs);
-  }, { disabled: busy });
+  }, {});
 
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 2,
@@ -1079,6 +1078,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
   }, (seed) => new PyRandom(0).restore(seed), setReplayTime, () => frame([]), replaySettingsCodec, () => !busy() || replays.isPlaying);
 
+  // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  replays.onTakeOver = () => {
+    savedReplaySettings = null;
+  };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(board, doneness, tally, running, finished, hammerable, timers.map((t) => t.at));
 

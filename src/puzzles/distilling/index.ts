@@ -13,7 +13,7 @@ import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec 
 import { PyRandom } from '../../core/pyrandom';
 import type { InputEvent, Point } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
-import type { GameRecord } from '../../core/storage';
+import { excludesUnlikelyReplays, type GameRecord } from '../../core/storage';
 import {
   convert_seed,
   type Board,
@@ -516,6 +516,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     sessionEndedAt = ticks();
     resultRows = makeResultRows();
     if (completed) saveCompletedSession();
+    // Not completed, it's left out of the history: its replay is unlikely to matter.
+    else if (excludesUnlikelyReplays()) replays.cancel();
     else replays.finish(`Score ${sessionScore().toFixed(2)}`, endReport());
     game.finished = true;
     game.burnDue = false;
@@ -756,7 +758,9 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   function saveCompletedSession(): void {
     const key = historyKey(startedMode);
     const report = endReport();
-    const finishedReplay = replays.finish(`Score ${sessionScore().toFixed(2)}`, report);
+    const sentUp = !!game?.columns.length;
+    // A session that sent nothing up is left out of the history, and its replay with it.
+    const finishedReplay = sentUp || !excludesUnlikelyReplays() ? replays.finish(`Score ${sessionScore().toFixed(2)}`, report) : (replays.cancel(), null);
     // A session that sent no columns up isn't kept with the past games.
     if (key && game && game.columns.length && !replays.isPlaying) store.addHistory(key, {
       score: Number(sessionScore().toFixed(2)),
@@ -1037,13 +1041,13 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     game = null;
     seedText = '';
     lastSeed = '';
-  }, { disabled: () => running });
+  }, {});
   gameGroup.select(
     'Practice group',
     practiceAvailable.map((_, i) => ({ value: i, label: practiceGroupNames[i].replace(/:$/, '') })),
     () => practiceNum[0],
     (group) => (practiceNum = save('practiceNum', [group, 0])),
-    { hidden: () => mode !== 'Practice', disabled: () => running },
+    { hidden: () => mode !== 'Practice' },
   );
   // One board list per group, since a select's options are fixed.
   practiceAvailable.forEach((levels, group) => {
@@ -1052,7 +1056,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       levels.map((level) => ({ value: level, label: `${level}. ${practiceNames[group][level]}` })),
       () => practiceNum[1],
       (level) => (practiceNum = save('practiceNum', [group, level])),
-      { hidden: () => mode !== 'Practice' || practiceNum[0] !== group, disabled: () => running },
+      { hidden: () => mode !== 'Practice' || practiceNum[0] !== group },
     );
   });
 
@@ -1088,18 +1092,17 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   settingsGroup.toggle('Burn timer', timerShown, (on) => {
     if (mode === 'Create') createTimerOn = save('createTimerOn', on);
     else timerOn = save('timerOn', on);
-  }, { disabled: () => running });
+  }, {});
   settingsGroup.number('Burn timer (s)', () => timerSeconds, (v) => (timerSeconds = save('timerSeconds', Math.max(1, Math.min(120, v)))), {
     min: 1,
     max: 120,
     step: 0.1,
-    disabled: () => running,
     hidden: () => !timerShown(),
   });
   settingsGroup.number('Difficulty', () => difficulty, (n) => (difficulty = save('difficulty', Math.max(0, Math.min(100, Math.round(n))))), {
     min: 0,
     max: 100,
-    disabled: () => running,
+    title: 'Raising it makes browns spawn high on the board and blacks low, so they are harder to get where they belong.',
   });
 
   const spawnGroup = panel.settings.group('Spawn rates', { columns: 5, hidden: () => mode === 'Practice' });
@@ -1107,13 +1110,12 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     spawnGroup.number(label, () => spawnRates[index], (n) => {
       spawnRates[index] = Math.max(0, Math.round(n));
       save('spawnRates', spawnRates);
-    }, { min: 0, max: 999, disabled: () => running });
+    }, { min: 0, max: 999 });
   }
   const defaultRates = () => spawnRates.every((v, i) => v === DEFAULT_SPAWN[i]);
-  spawnGroup.button('Defaults', () => (spawnRates = save('spawnRates', defaultRates() ? [0, 0, 0, 0, 1] : [...DEFAULT_SPAWN])), {
-    label: () => (defaultRates() ? 'Whites only' : 'Defaults'),
-    disabled: () => running,
-    title: 'Switch between the default spawn rates and a board of only whites',
+  spawnGroup.button('Defaults', () => (spawnRates = save('spawnRates', [...DEFAULT_SPAWN])), {
+    disabled: defaultRates,
+    title: 'Back to the default spawn rates',
   });
 
   // The board's seed can be copied in any mode, and pasted or dealt anew while playing in Create.
@@ -1162,7 +1164,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
 
   const seedGroup = panel.group('Seed', { hidden: () => mode !== 'Seeded' });
   seedGroup.button('Copy', () => lastSeed && copyText(lastSeed, 'Copy this seed:'), {
-    disabled: () => running || !lastSeed,
+    disabled: () => !lastSeed,
     title: 'Copy the seed of the last start',
   });
   seedGroup.button('Paste', () => void pasteSeed(), { disabled: () => running, title: 'Use a pasted seed for the next start' });
@@ -1183,7 +1185,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     lastSeed = '';
     resultRows = null;
     game = null;
-  }, { disabled: () => running });
+  }, {});
 
   panel.clock(() => {
     if ((running && game?.timerless) || (!running && runSettings().interval === null)) return null;
@@ -1272,6 +1274,11 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     replayStartState = null;
   }, isDistillingReplayState, setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
 
+  // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  replays.onTakeOver = () => {
+    savedReplaySettings = null;
+    replayStartState = null;
+  };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(game, swaps, swapCount, waitCount, running, active, timers.map((t) => t.at));
 

@@ -132,6 +132,20 @@ export function savesHistory(): boolean {
   return new Store('global').get<boolean>('saveHistory', true);
 }
 
+/**
+ * Settings > Global > Replays > Exclude unlikely replays (on unless turned off): sessions left out
+ * of the history as unlikely to matter (a barely started Normal forage, a Distilling session that
+ * sent nothing up) keep no replay either. Off keeps their replays.
+ */
+export function excludesUnlikelyReplays(): boolean {
+  return new Store('global').get<boolean>('excludeUnlikelyReplays', true);
+}
+
+/** Settings > Global > Replays > Show clicks: the blue and orange rings where a replay's clicks land. */
+export function showsReplayClicks(): boolean {
+  return new Store('global').get<boolean>('showReplayClicks', true);
+}
+
 /** This session's games per puzzle and settings key, kept even when history saving is off. */
 const sessionGames = new Map<string, GameRecord[]>();
 let historyRevision = 0;
