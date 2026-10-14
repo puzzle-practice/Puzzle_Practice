@@ -247,6 +247,11 @@ export class Panel {
       .toggle('Warning timer', getWarningTimer, setWarningTimer, {
         title: 'Play a warning near the end of timed puzzles: 30 seconds for Foraging and Blacksmithing, 15 seconds for Treasure Haul and Vampire Carpentry.',
       });
+    this.globalSettings.group('History').toggle('Save games to history',
+      () => this.preferences.get<boolean>('saveHistory', true),
+      (on) => this.preferences.set('saveHistory', on),
+      { title: 'When off, finished games are left out of the History tab, scores and replays. Session stats still count them until the tab is closed.' },
+    );
     const replayPreferences = this.globalSettings.group('Replays');
     replayPreferences.toggle('Save replays',
       () => this.preferences.get<boolean>('saveReplays', true),

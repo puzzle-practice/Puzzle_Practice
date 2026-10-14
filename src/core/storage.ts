@@ -39,7 +39,7 @@ export function scoreRecords(data: Record<string, unknown>, puzzle?: string): Sc
     const settingsKey = key.slice(marker + ':history:'.length);
     for (const game of value) {
       if (!game || typeof game !== 'object' || !Number.isFinite(game.at) || !Number.isFinite(game.score)) continue;
-      const { at, score, replayAt, replayId, duty: _duty, ...stats } = game as GameRecord;
+      const { at, score, replayAt, replayId, duty: _duty, session: _session, ...stats } = game as GameRecord;
       const replayFileId = typeof replayAt === 'number' && Number.isFinite(replayAt)
         ? `${namespace}:${replayAt}${typeof replayId === 'string' && replayId ? `:${replayId}` : ''}` : undefined;
       scores.push({ puzzle: namespace, settingsKey, at, score, stats,
@@ -51,6 +51,33 @@ export function scoreRecords(data: Record<string, unknown>, puzzle?: string): Sc
 
 /** The desktop games kept every score per settings key; this keeps the most recent this many. */
 const HISTORY_LIMIT = 1000;
+
+/**
+ * This browser session: the tab, from when it was opened until it's closed. sessionStorage keeps
+ * the id through reloads and gives each new tab or window its own. Session stats count only the
+ * games played in it.
+ */
+const SESSION_KEY = 'puzzle-practice-session';
+let pageSession: string | null = null;
+export function browserSession(): string {
+  if (pageSession) return pageSession;
+  const fresh = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Math.random()).slice(2);
+  try {
+    pageSession = sessionStorage.getItem(SESSION_KEY) ?? fresh;
+    sessionStorage.setItem(SESSION_KEY, pageSession);
+  } catch {
+    pageSession = fresh;
+  }
+  return pageSession;
+}
+
+/** Whether finished games are added to the History tab (Settings > History); on unless turned off. */
+export function savesHistory(): boolean {
+  return new Store('global').get<boolean>('saveHistory', true);
+}
+
+/** This session's games per puzzle and settings key, kept even when history saving is off. */
+const sessionGames = new Map<string, GameRecord[]>();
 let historyRevision = 0;
 
 function backupItemKey(item: unknown): string {
@@ -190,11 +217,38 @@ export class Store {
     return games;
   }
 
-  /** Adds a finished game to its settings key's history and returns the history. */
+  /**
+   * This browser session's games for one settings key, oldest first, for session stats. They're
+   * kept for the tab in sessionStorage, so a reload keeps them and history saving can be off.
+   */
+  sessionHistory(key: string): readonly GameRecord[] {
+    const name = `${PREFIX}${this.namespace}:${key}`;
+    let games = sessionGames.get(name);
+    if (!games) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(`${SESSION_KEY}:${name}`) ?? '[]');
+        games = Array.isArray(saved) ? saved : [];
+      } catch { games = []; }
+      sessionGames.set(name, games);
+    }
+    return games;
+  }
+
+  /**
+   * Adds a finished game to this session's games and, unless history saving is off, to its
+   * settings key's history. Returns the history.
+   */
   addHistory(key: string, game: { score: number; [stat: string]: number | string }): readonly GameRecord[] {
     if (this.readOnly) return this.history(key);
+    const record = { at: Date.now(), ...game, session: browserSession() } as GameRecord;
+    const session = this.sessionHistory(key) as GameRecord[];
+    session.push(record);
+    session.splice(0, session.length - HISTORY_LIMIT);
+    try { sessionStorage.setItem(`${SESSION_KEY}:${PREFIX}${this.namespace}:${key}`, JSON.stringify(session)); }
+    catch { /* No session storage: this page's games still count. */ }
+    if (!savesHistory()) return this.history(key);
     const games = this.history(key) as GameRecord[];
-    games.push({ at: Date.now(), ...game } as GameRecord);
+    games.push(record);
     games.splice(0, games.length - HISTORY_LIMIT);
     this.set(`history:${key}`, games);
     return games;

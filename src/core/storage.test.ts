@@ -205,3 +205,22 @@ describe('when storage is full', () => {
   });
 });
 
+
+describe('history saving and browser sessions', () => {
+  beforeEach(() => { vi.stubGlobal('localStorage', fakeStorage()); vi.stubGlobal('sessionStorage', fakeStorage()); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('tags games with this browser session and keeps them for session stats even when history saving is off', () => {
+    const store = new Store('blacksmithing');
+    store.addHistory('session-test', { score: 1 });
+    const [first] = store.history('session-test');
+    expect(typeof first.session).toBe('string');
+    new Store('global').set('saveHistory', false);
+    store.addHistory('session-test', { score: 2 });
+    expect(store.history('session-test').map((g) => g.score)).toEqual([1]);
+    expect(store.sessionHistory('session-test').map((g) => g.score)).toEqual([1, 2]);
+    expect(store.sessionHistory('session-test').every((g) => g.session === first.session)).toBe(true);
+    // Scores exported for graphs don't carry the session id.
+    expect(scoreRecords(JSON.parse(exportAll()).data, 'blacksmithing')[0].stats).not.toHaveProperty('session');
+  });
+});

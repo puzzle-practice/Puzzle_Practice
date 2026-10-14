@@ -64,7 +64,10 @@ export function historyGroup(
           title: 'Show this game’s duty report',
           onClick: (index: number) => {
             const report = reportOf(shownGames()[index]);
-            if (report) panel.showReport(report, () => sessionAverages(games() ?? [], {
+            const game = shownGames()[index];
+            // Its session's games: the browser session it was played in (older games have none).
+            const session = (games() ?? []).filter((g) => g === game || (game.session !== undefined && g.session === game.session));
+            if (report) panel.showReport(report, () => sessionAverages(session, {
               scoreLabel: report.score.label,
               lowerIsBetter: report.puzzle === 'forage' && report.score.label === 'Moves',
             }));

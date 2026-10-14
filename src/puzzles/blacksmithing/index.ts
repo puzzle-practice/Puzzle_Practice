@@ -9,7 +9,7 @@ import { dutyDesk } from '../../core/duty/desk';
 import type { RatingScale } from '../../core/duty/ratings';
 import { historyGroup } from '../../core/history';
 import { keyMatches } from '../../core/controls';
-import { ReplayRecorder, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
+import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
 import type { InputEvent, Point } from '../../core/input';
 import type { Option } from '../../core/panel';
 import type { PuzzleFactory } from '../../core/puzzle';
@@ -996,8 +996,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     title: mode === 'perfect' ? 'Perfect board results' : 'Sword results',
     report: duty.last,
     averages: mode === 'classic'
-      ? duty.averages(store.history(`classic:${difficulty}`), { scoreLabel: 'Strikes' })
-      : duty.averages(store.history(runHistoryKey()), { scoreLabel: 'Points' }),
+      ? duty.averages(store.sessionHistory(`classic:${difficulty}`), { scoreLabel: 'Strikes' })
+      : duty.averages(store.sessionHistory(runHistoryKey()), { scoreLabel: 'Points' }),
     rows: mode === 'perfect' ? [
       ['Points', String(run.points)], ['Boards', String(run.boards)],
       ['Perfect / One off / Too far off', `${run.perfect} / ${run.oneOff} / ${run.farOff}`],
@@ -1078,6 +1078,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       savedReplaySettings = null;
     }
   }, (seed) => new PyRandom(0).restore(seed), setReplayTime, () => frame([]), replaySettingsCodec, () => !busy() || replays.isPlaying);
+
+  // What decides how the game goes on; replays check it after every recorded input.
+  replays.fingerprint = () => stateText(board, doneness, tally, running, finished, hammerable, timers.map((t) => t.at));
 
   return { frame, dispose: () => { replays.dispose(); sounds.dispose(); warning.dispose(); } };
 }) satisfies PuzzleFactory;

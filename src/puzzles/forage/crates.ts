@@ -19,6 +19,9 @@ export class CrateRequests implements CrateSource {
   /** Crates asked for so far. */
   requested = 0;
   private nextKey = 0;
+  /** Paced: moves since the last request was sent, and when the one on its way reaches the board. */
+  private moves = 0;
+  private readyAt: number | null = null;
 
   constructor(
     private readonly rng: PyRandom,
@@ -26,11 +29,39 @@ export class CrateRequests implements CrateSource {
     private readonly weights: readonly [number, number, number],
     /** How many crates the board brings in all. */
     private readonly budget: number,
+    /**
+     * Paced, as in the game: two moves after the last request, a crate is asked for. The ask goes
+     * out with the next two-second batch, and reaches the board on the first move after that.
+     * Unpaced (replays recorded before) asks before every move there's room.
+     */
+    private readonly paced = false,
+    /** Paced: the game clock in milliseconds. */
+    private readonly now: () => number = () => 0,
   ) {}
+
+  /** Room on the board and in the budget for another crate. */
+  private room(game: Forage): boolean {
+    const b = game.board;
+    return b.bonusMode === 0 && b.crates < MAX_CRATES && b.crateArea < MAX_CRATE_AREA && this.requested < this.budget;
+  }
+
+  afterMove(game: Forage): boolean {
+    if (!this.paced) return false;
+    this.moves++;
+    if (this.readyAt === null && this.moves >= 2 && this.room(game)) {
+      this.readyAt = (Math.floor(this.now() / MOVE_BATCH_MS) + 1) * MOVE_BATCH_MS + ROUND_TRIP_MS;
+      this.moves = 0;
+    }
+    return false;
+  }
 
   beforeMove(game: Forage): void {
     const b = game.board;
-    if (b.bonusMode !== 0 || b.crates >= MAX_CRATES || b.crateArea >= MAX_CRATE_AREA || this.requested >= this.budget) return;
+    if (this.paced) {
+      if (this.readyAt === null || this.now() < this.readyAt || b.bonusMode !== 0) return;
+      this.readyAt = null;
+    }
+    if (!this.room(game)) return;
     const sizes = [0, 1, 2].filter((s) => this.weights[s] > 0);
     if (!sizes.length) return;
     const size = this.rng.choiceWeighted(
@@ -76,6 +107,11 @@ export class GauntletChests implements CrateSource {
     private readonly paced = false,
     /** Paced: the game clock in milliseconds, used to schedule delivery. */
     private readonly now: () => number = () => 0,
+    /**
+     * A chest whose column is blocked tries another column on each later move until it lands.
+     * Off (replays recorded before): from the third move it tries every column, keeping the last.
+     */
+    private readonly retryColumns = false,
   ) {
     this.budget = budget;
     this.pick();
@@ -155,6 +191,12 @@ export class GauntletChests implements CrateSource {
       return false;
     }
     let blocked = this.blocked(game, this.column);
+    if (blocked && this.retryColumns) {
+      // Next move, another column.
+      const others = Array.from({ length: WIDTH + 1 - this.next }, (_, i) => i).filter((x) => x !== this.column);
+      if (others.length) this.column = this.rng.choice(others);
+      return false;
+    }
     if (blocked && this.movesSinceLast >= 3) {
       for (const x of this.rng.shuffle(Array.from({ length: WIDTH + 1 - this.next }, (_, i) => i))) {
         this.column = x;
