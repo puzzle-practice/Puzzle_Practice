@@ -1421,7 +1421,8 @@ describe('taking over a replay', () => {
     buttons.get('History:Replays:Take over')!();
     await vi.waitFor(() => expect(recorder.isSeeking).toBe(false));
     await vi.waitFor(() => expect(recorder.isPlaying).toBe(true));
-    expect(recorder.isPaused).toBe(true);
+    // It plays on straight away from the take-over.
+    expect(recorder.isPaused).toBe(false);
     expect(recorder.elapsedMs).toBe(10000);
     expect(recorder.divergedAt).toBeNull();
     expect(stats()).toEqual(atTakeOver);

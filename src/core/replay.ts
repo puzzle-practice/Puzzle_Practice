@@ -413,7 +413,7 @@ export class ReplayRecorder {
     // One button: Take over while watching; after a take-over, Resume replay goes back to watching.
     .button('Take over', () => { if (this.playback) this.takeOver(); else void this.resumeReplay(); }, {
       label: () => !this.playback && this.takeOverFrom ? 'Resume replay' : 'Take over',
-      title: 'Take over: play on from this point yourself; the game saves as your own. Resume replay: back to the replay where you took over (the game you played from there is not saved).',
+      title: 'Take over: play on from this point yourself; the game saves as your own. Resume replay: the replay plays on from where you took over (the game you played from there is not saved).',
       disabled: () => this.playback
         ? this.loading || this.seeking || this.advancing || this.playback.finishPending
         : !this.takeOverFrom || this.loading || !this.tapeIndices.has(this.takeOverFrom.id),
@@ -769,7 +769,7 @@ export class ReplayRecorder {
   }
 
   /**
-   * Back to watching the replay last taken over, paused at the take-over. The game played from
+   * Back to watching the replay last taken over, playing on from the take-over. The game played from
    * there is dropped unsaved: the replay's restore resets the puzzle with saving switched off.
    */
   private async resumeReplay(): Promise<void> {
@@ -780,7 +780,10 @@ export class ReplayRecorder {
     this.recording = null; this.pendingMouse = null; this.pendingCheck = null; this.takenOverAt = null;
     this.selected = index; this.jumpSeconds = from.at / 1000;
     await this.jumpSelected(true);
-    if (this.playback) this.takeOverFrom = null;
+    if (!this.playback) return;
+    this.takeOverFrom = null;
+    // Carry straight on watching from the take-over.
+    this.playback.paused = false; this.playback.lastReal = performance.now();
   }
   private async jumpSelected(resuming = false): Promise<void> {
     // Resuming leaves a game of the player's in progress; the replay's restore replaces it.
