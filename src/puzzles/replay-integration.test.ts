@@ -1338,3 +1338,38 @@ describe('short Normal forage sessions', () => {
     instance.dispose?.();
   });
 });
+
+describe('deleting a past game', () => {
+  it('removes its history row, its replay file and the replay from the list', async () => {
+    vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new PyRandom(9)));
+    const { removeGame } = await import('../core/storage');
+    const { deleteReplay } = await import('../core/data-backups');
+    const store = new Store('forage');
+    store.set('settings', { mode: 'ci', roundSeconds: 5 });
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./forage/index')).default as PuzzleFactory;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    buttons.get('Play::Start')!();
+    for (let elapsed = 0; elapsed <= 9000; elapsed += 20) {
+      now = elapsed;
+      if (elapsed >= 3000 && elapsed % 400 === 0) instance.frame([{ type: 'mousedown', button: 1, pos: [67 + 100, 50 + 200] }]);
+      else instance.frame([]);
+    }
+    await replayWrites.idle();
+    const key = Object.keys(JSON.parse(exportAll()).data).find((k) => k.includes(':history:'))!.split(':history:')[1];
+    const [game] = store.history(key);
+    expect(recorder.hasPlayableAt(game.replayAt as number, game.replayId as string)).toBe(true);
+    const replay = removeGame(game)!;
+    await deleteReplay(replay);
+    expect(store.history(key)).toHaveLength(0);
+    // Earlier tests in this file share the session's games, so look for this one only.
+    expect(store.sessionHistory(key).some((g) => g.at === game.at && g.score === game.score)).toBe(false);
+    expect(await listReplayFiles('forage')).toHaveLength(0);
+    expect(recorder.hasPlayableAt(game.replayAt as number, game.replayId as string)).toBe(false);
+    instance.dispose?.();
+  });
+});

@@ -45,6 +45,10 @@ it recorded. Each puzzle's `simulatorVersion` records the rules a game was playe
 replays keep playing by their own rules (Forage version 2: paced Normal crates and Chaos chests
 retrying a blocked column).
 
+Each past game on the History tab has a 🗑 button that deletes the game, its replay and its
+place in the stats. Deleted games are listed under `puzzle-practice:deleted`, so merging or
+importing an older backup, or syncing a backup folder, doesn't bring them back.
+
 Settings > Global > History can stop finished games being saved to the History tab (and to
 replays). Session averages in results count only games from this browser session: the tab since
 it was opened, kept through reloads; a new tab or window starts a new session.

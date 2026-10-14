@@ -3,7 +3,7 @@ import { readReport, showsDutyReport, type DutyReport } from './duty/report';
 import type { InputEvent, Point } from './input';
 import type { Panel } from './panel';
 import { Store } from './storage';
-import { readArchivedReplay, readReplayArchive, replayRetentionLimit } from './data-backups';
+import { readArchivedReplay, readReplayArchive, REPLAY_REMOVED, replayRetentionLimit } from './data-backups';
 import { replayId, replayWrites, saveReplayFile, type ReplayMetadata } from './replay-storage';
 
 /** A portable run: puzzle-specific settings and seed data plus the timestamped inputs. */
@@ -434,7 +434,22 @@ export class ReplayRecorder {
     });
     this.syncPicker();
     void this.loadTapes();
+    if (typeof window !== 'undefined') window.addEventListener(REPLAY_REMOVED, this.forget);
   }
+
+  /** A replay was deleted from the History tab: it leaves the list (and stops if it's playing). */
+  private readonly forget = (event: Event): void => {
+    const id = (event as CustomEvent<string>).detail;
+    const index = this.tapeIndices.get(id);
+    if (index === undefined) return;
+    if (this.playback && replayId(this.puzzle, this.playback.tape.at, this.playback.tape.runId) === id) this.stopPlayback();
+    const selectedId = this.tapes[this.selected]?.id;
+    this.tapes.splice(index, 1);
+    this.decoded.delete(id); this.compatibility.delete(id);
+    this.reindex();
+    this.selected = Math.max(0, this.tapes.findIndex((entry) => entry.id === selectedId));
+    this.syncPicker();
+  };
 
   begin(settings: unknown, seed: unknown, start = this.ticks()): void {
     if (!this.isPlaying) this.closeReplayReport();
@@ -611,6 +626,7 @@ export class ReplayRecorder {
     if (this.disposed) return;
     if (this.playback) this.stopPlayback(); else this.finish('Stopped when leaving puzzle');
     this.disposed = true; ++this.request;
+    if (typeof window !== 'undefined') window.removeEventListener(REPLAY_REMOVED, this.forget);
   }
   private stopPlayback(): void {
     ++this.request; this.loading = false;
