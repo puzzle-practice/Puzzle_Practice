@@ -534,6 +534,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     } else {
       const seed = () => Math.floor(Math.random() * 2 ** 32);
       sessionSeed = { format: 'forage-replay-state', seeds: [seed(), seed()], boards: [] };
+      // A game taken over from a replay kept that replay's rules; a new one plays by today's.
+      rules = RULES;
       nextReplayBoard = 0;
       recordedAction = false;
       replays.begin({ ...structuredClone(settings), puzzleId, pickedRandomly }, sessionSeed);
@@ -818,6 +820,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     boardActive = true;
     start();
   }, stopReplay, isForageReplaySeed, setReplayTime, () => frame([]), replaySettingsCodec, () => !boardActive || !!replay);
+  replays.onTakeOver = () => {
+    // The game carries on as the player's: only the boards dealt so far are part of it.
+    replay = null;
+    sessionSeed = sessionSeed ? { ...sessionSeed, boards: sessionSeed.boards.slice(0, nextReplayBoard) } : null;
+    if (sessionSeed) replays.updateSeed(sessionSeed);
+    recordedAction = true;
+  };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => [game.cells.join(','), score, movesUsed, crates, clockwise, anticlockwise,
     settledAt, playing.length, pendingNextBoard, ended, boardActive, JSON.stringify(rng.snapshot())].join('|');

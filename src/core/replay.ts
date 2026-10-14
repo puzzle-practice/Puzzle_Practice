@@ -376,6 +376,14 @@ export class ReplayRecorder {
    * the game goes on (the board, the score, timers). Without it, replays aren't checked.
    */
   fingerprint: (() => string) | null = null;
+  /**
+   * Take over: the replay being watched becomes the player's game from where it is. The puzzle
+   * drops its watching state (and keeps the board, score and clock) and can update the recording's
+   * seed data to what has been dealt so far.
+   */
+  onTakeOver: ((tape: PuzzleReplay) => void) | null = null;
+  /** When the game being recorded was taken over from a replay, in ms into it; null for a game played from the start. */
+  private takenOverAt: number | null = null;
   private readonly picker = document.createElement('select');
   private readonly file = document.createElement('input');
 
@@ -400,6 +408,10 @@ export class ReplayRecorder {
     }, { label: () => this.loading ? 'Loading…' : !this.playback ? 'Play' : this.playback.paused ? 'Resume' : 'Pause',
       disabled: () => this.loading || !this.tapes.length || !!this.recording || (!this.playback && (!this.canPlay(this.tapes[this.selected]) || !this.canStartPlayback())) })
     .button('Stop', () => this.stopPlayback(), { disabled: () => !this.playback && !this.loading })
+    .button('Take over', () => this.takeOver(), {
+      title: 'Play on from this point yourself: the board, score and clock carry on as they are, and the game saves with your own',
+      disabled: () => !this.playback || this.loading || this.seeking || this.advancing || this.playback.finishPending,
+    })
     .range('Replay time (s)', () => this.scrubSeconds ?? (this.playback ? this.playback.elapsed / 1000 : this.jumpSeconds), (seconds) => {
       this.jumpSeconds = seconds; this.scrubSeconds = seconds;
     }, { min: 0, maxValue: () => (this.currentTape()?.duration ?? 0) / 1000, step: 0.1,
@@ -451,6 +463,45 @@ export class ReplayRecorder {
     this.syncPicker();
   };
 
+  /**
+   * Stops watching and carries on the game from this moment as the player's own. Its recording is
+   * the replay up to here, so the saved game still replays from the start, through the take-over.
+   */
+  takeOver(): boolean {
+    const p = this.playback;
+    if (!p || this.loading || this.seeking || this.advancing || p.finishPending || this.disposed) return false;
+    const tape = p.tape;
+    const settings = this.migratedSettings(tape);
+    if (settings === null) return false;
+    // Everything the replay has applied so far: the last frame and step it ran.
+    const lastStep = p.step > 0 ? (tape.steps?.[p.step - 1] ?? 0) : 0;
+    const ranTo = Math.max(lastStep, p.frame > 0 ? tape.frames[p.frame - 1].t : 0);
+    this.lastAt = Math.max(Date.now(), this.lastAt + 1);
+    this.recording = {
+      format: 'puzzle-practice-replay', version: 1, puzzle: this.puzzle, at: this.lastAt, duration: p.elapsed,
+      runId: crypto.randomUUID(), clockStart: p.start,
+      settingsVersion: this.settingsCodec.currentVersion, simulatorVersion: tape.simulatorVersion ?? 1,
+      result: 'In progress', settings: structuredClone(settings), seed: structuredClone(tape.seed),
+      frames: structuredClone(tape.frames.slice(0, p.frame)),
+      steps: tape.steps ? tape.steps.slice(0, p.step) : [],
+      ...(this.fingerprint ? { checks: (tape.checks ?? []).filter(([t]) => t <= ranTo).map(([t, hash]): [number, number] => [t, hash]) } : {}),
+    };
+    this.takenOverAt = p.elapsed;
+    this.recordStart = p.start;
+    this.compressRecording = this.preferences.get<boolean>('compressReplays', true);
+    this.previousMouse = [...p.mouse]; this.pendingMouse = null; this.pendingCheck = null;
+    this.mouseButtonsDown.clear(); this.keysDown.clear();
+    this.playback = null;
+    ++this.request;
+    this.store.setReadOnly(false);
+    // The clock carries on from the replay's time instead of jumping back.
+    this.setReplayTime?.(null);
+    setReplayPirate(null);
+    this.onTakeOver?.(tape);
+    this.syncPicker();
+    return true;
+  }
+
   begin(settings: unknown, seed: unknown, start = this.ticks()): void {
     if (!this.isPlaying) this.closeReplayReport();
     if (this.isPlaying || this.disposed || !this.preferences.get<boolean>('saveReplays', true) ||
@@ -458,6 +509,7 @@ export class ReplayRecorder {
     ++this.request;
     this.loading = false;
     if (this.recording) this.finish('Stopped');
+    this.takenOverAt = null;
     this.compressRecording = this.preferences.get<boolean>('compressReplays', true);
     this.recordStart = start; this.previousMouse = [-1, -1]; this.pendingMouse = null; this.pendingCheck = null;
     this.mouseButtonsDown.clear(); this.keysDown.clear();
@@ -474,7 +526,8 @@ export class ReplayRecorder {
   finish(result: string, report?: DutyReport | null): PuzzleReplay | null {
     if (!this.recording || this.isPlaying) return null;
     this.recording.duration = Math.max(this.recording.duration, this.ticks() - this.recordStart);
-    this.recording.result = result;
+    this.recording.result = this.takenOverAt === null ? result : `${result} (taken over at ${Math.round(this.takenOverAt / 1000)}s)`;
+    this.takenOverAt = null;
     if (report) this.recording.report = structuredClone(report);
     // A pending check would hash the state partway through the frame that is ending the run.
     this.pendingCheck = null;

@@ -977,6 +977,13 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   }, isVampireReplaySeed, setReplayTime, () => frame([]), replaySettingsCodec,
   () => (!boardActive && !pauseAvailable()) || replays.isPlaying);
 
+  // Taken over, the replay's settings are the game's, and new boards come as in any game.
+  replays.onTakeOver = () => {
+    savedReplaySettings = null;
+    replayBoardSeeds = null;
+    replays.updateSeed({ seed: seedAtStart, speedRng: recordedSpeedState, boardSeeds: [...recordedBoardSeeds] });
+  };
+
   // ---- The frame ----
 
   function frame(events: InputEvent[]): void {

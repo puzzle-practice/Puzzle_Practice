@@ -1048,6 +1048,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // For driving the game from tests during development.
   if (import.meta.env.DEV) (window as unknown as { __sf: unknown }).__sf = { get match() { return match; } };
 
+  // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  replays.onTakeOver = () => {
+    savedSettings = null;
+  };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(match, running, finished);
 

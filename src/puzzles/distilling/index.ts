@@ -1272,6 +1272,11 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     replayStartState = null;
   }, isDistillingReplayState, setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
 
+  // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  replays.onTakeOver = () => {
+    savedReplaySettings = null;
+    replayStartState = null;
+  };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(game, swaps, swapCount, waitCount, running, active, timers.map((t) => t.at));
 

@@ -1373,3 +1373,61 @@ describe('deleting a past game', () => {
     instance.dispose?.();
   });
 });
+
+describe('taking over a replay', () => {
+  it.each([
+    ['forage', { settings: { mode: 'ci', roundSeconds: 30 } }, 33000],
+    ['treasure-haul', { round: 30, gemRates: [50, 50] }, 34000],
+  ] as const)('%s plays on from the jump point, saves as a game and replays through the take-over', async (puzzle, settings, end) => {
+    vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new PyRandom(21)));
+    if (puzzle === 'treasure-haul') vi.spyOn(PyRandom.prototype, 'seedFromCrypto').mockImplementation(function (this: PyRandom) { this.seed(4321); });
+    const store = new Store(puzzle);
+    for (const [key, value] of Object.entries(settings)) store.set(key, value);
+    const { panel, buttons, setters, stats } = panelHarness();
+    let now = 500;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const input = { mouse: [-1, -1] };
+    const factory = (await import('./' + puzzle + '/index')).default as PuzzleFactory;
+    const instance = await factory({ screen, input, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    const clicks = new PyRandom(2);
+    const click = () => {
+      const pos: [number, number] = puzzle === 'forage'
+        ? [67 + clicks.randintN(0, 5) * 45 + 10, 50 + clicks.randintN(0, 8) * 45 + 10]
+        : [64 + clicks.randintN(0, 7) * 45 + 10, 205 + clicks.randintN(0, 6) * 45 + 10];
+      input.mouse = pos;
+      instance.frame([{ type: 'mousedown', button: 1, pos }, { type: 'mouseup', button: 1, pos }]);
+    };
+    const play = (until: number) => { for (let frame = 0; now < until; frame++) { now += 17; if (frame % 23 === 0 && now > 3500) click(); else instance.frame([]); } };
+    // Someone else's game, recorded in full.
+    buttons.get('Play::Start')!();
+    play(500 + end);
+    await replayWrites.idle();
+    const [theirs] = await listReplayFiles(puzzle);
+    // Watch it to 10 seconds, paused, then take over and play on.
+    setters.get('History:Replays:Jump to (s)')!(10);
+    buttons.get('History:Replays:Jump')!();
+    await vi.waitFor(() => expect(recorder.isPlaying).toBe(true));
+    await vi.waitFor(() => expect(recorder.isSeeking).toBe(false));
+    expect(recorder.divergedAt).toBeNull();
+    buttons.get('History:Replays:Take over')!();
+    expect(recorder.isPlaying).toBe(false);
+    play(now + end);
+    await replayWrites.idle();
+    const live = stats();
+    const mine = (await listReplayFiles(puzzle)).find((entry) => entry.id !== theirs.id)!;
+    expect(mine.result).toMatch(/taken over at 10s/);
+    const histories = Object.entries(JSON.parse(exportAll()).data).filter(([key]) => key.includes(':history:'));
+    expect((histories[0][1] as unknown[]).length).toBe(2);
+    // The saved game replays from the start, through the take-over, to the same end.
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(mine.at, mine.runId)).toBe(true);
+    perf.mockReturnValue(mine.duration);
+    instance.frame([]);
+    expect(recorder.divergedAt).toBeNull();
+    expect(stats()).toEqual(live);
+    buttons.get('History:Replays:Stop')!();
+    instance.dispose?.();
+  });
+});

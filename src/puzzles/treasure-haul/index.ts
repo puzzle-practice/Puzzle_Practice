@@ -1413,6 +1413,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
   }, (seed) => new PyRandom(0).restore(seed), setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
 
+  // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  replays.onTakeOver = () => {
+    savedReplaySettings = null;
+  };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(board, chestSupply, chestMeter, running, finished, active, roundEnd, timers.map((t) => t.at));
 
