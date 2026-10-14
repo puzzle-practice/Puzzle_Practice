@@ -205,3 +205,45 @@ describe('when storage is full', () => {
   });
 });
 
+
+describe('history saving and browser sessions', () => {
+  beforeEach(() => { vi.stubGlobal('localStorage', fakeStorage()); vi.stubGlobal('sessionStorage', fakeStorage()); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('tags games with this browser session and keeps them for session stats even when history saving is off', () => {
+    const store = new Store('blacksmithing');
+    store.addHistory('session-test', { score: 1 });
+    const [first] = store.history('session-test');
+    expect(typeof first.session).toBe('string');
+    new Store('global').set('saveHistory', false);
+    store.addHistory('session-test', { score: 2 });
+    expect(store.history('session-test').map((g) => g.score)).toEqual([1]);
+    expect(store.sessionHistory('session-test').map((g) => g.score)).toEqual([1, 2]);
+    expect(store.sessionHistory('session-test').every((g) => g.session === first.session)).toBe(true);
+    // Scores exported for graphs don't carry the session id.
+    expect(scoreRecords(JSON.parse(exportAll()).data, 'blacksmithing')[0].stats).not.toHaveProperty('session');
+  });
+});
+
+describe('deleting past games', () => {
+  beforeEach(() => { vi.stubGlobal('localStorage', fakeStorage()); vi.stubGlobal('sessionStorage', fakeStorage()); });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('removes a game from history and session stats, and backups and imports leave it out', async () => {
+    const { removeGame, DELETED_KEY } = await import('./storage');
+    const store = new Store('forage');
+    store.addHistory('ci:bin', { score: 3, replayAt: 111, replayId: 'abc' });
+    store.addHistory('ci:bin', { score: 5 });
+    const backup = exportAll();
+    const [first] = store.history('ci:bin');
+    expect(removeGame(first)).toBe('forage:111:abc');
+    expect(store.history('ci:bin').map((g) => g.score)).toEqual([5]);
+    expect(store.sessionHistory('ci:bin').map((g) => g.score)).toEqual([5]);
+    // An older backup still has the game: merging and importing it doesn't bring it back.
+    const merged = JSON.parse(mergeBackupFiles(exportAll(), backup)).data;
+    expect(merged['puzzle-practice:forage:history:ci:bin'].map((g: { score: number }) => g.score)).toEqual([5]);
+    expect(merged[DELETED_KEY]).toContain('replay:forage:111:abc');
+    importAll(backup);
+    expect(store.history('ci:bin').map((g) => g.score)).toEqual([5]);
+  });
+});

@@ -18,7 +18,7 @@ import { loadFont } from '../../core/fonts';
 import { dutyDesk } from '../../core/duty/desk';
 import type { RatingScale } from '../../core/duty/ratings';
 import { historyGroup } from '../../core/history';
-import { ReplayRecorder, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
+import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
 import type { InputEvent } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { GameRecord } from '../../core/storage';
@@ -1025,6 +1025,9 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     drawStars();
     replays.drawOverlay(ctx);
   }
+
+  // What decides how the game goes on; replays check it after every recorded input.
+  replays.fingerprint = () => stateText(stats, boardIndex, boardActive, timePassed, speedRng.snapshot());
 
   return { frame, dispose: () => { replays.dispose(); sounds.dispose(); warning.dispose(); } };
 }) satisfies PuzzleFactory;

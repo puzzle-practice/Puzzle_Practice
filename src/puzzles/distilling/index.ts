@@ -9,7 +9,7 @@ import { dutyDesk } from '../../core/duty/desk';
 import type { RatingScale } from '../../core/duty/ratings';
 import { columnOrbs } from './report';
 import { historyGroup } from '../../core/history';
-import { ReplayRecorder, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
+import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
 import { PyRandom } from '../../core/pyrandom';
 import type { InputEvent, Point } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
@@ -757,7 +757,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     const key = historyKey(startedMode);
     const report = endReport();
     const finishedReplay = replays.finish(`Score ${sessionScore().toFixed(2)}`, report);
-    if (key && game && !replays.isPlaying) store.addHistory(key, {
+    // A session that sent no columns up isn't kept with the past games.
+    if (key && game && game.columns.length && !replays.isPlaying) store.addHistory(key, {
       score: Number(sessionScore().toFixed(2)),
       swaps,
       activeMs: sessionActiveMs(),
@@ -1205,7 +1206,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   panel.results(() => resultRows && !running && (startedMode === 'Standard' || startedMode === 'Seeded') ? {
     title: 'Distilling results',
     report: duty.last,
-    averages: duty.averages(historyKey(startedMode) ? store.history(historyKey(startedMode)!) : null),
+    averages: duty.averages(historyKey(startedMode) ? store.sessionHistory(historyKey(startedMode)!) : null),
     rows: resultRows,
   } : null);
 
@@ -1270,6 +1271,9 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     }
     replayStartState = null;
   }, isDistillingReplayState, setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
+
+  // What decides how the game goes on; replays check it after every recorded input.
+  replays.fingerprint = () => stateText(game, swaps, swapCount, waitCount, running, active, timers.map((t) => t.at));
 
   return { frame, dispose: () => { if (running && !replays.isPlaying) dismiss(); replays.dispose(); sounds.dispose(); } };
 }) satisfies PuzzleFactory;

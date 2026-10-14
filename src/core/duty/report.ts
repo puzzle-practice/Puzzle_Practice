@@ -38,6 +38,8 @@ export interface DutyReport {
   performance: number;
   score: { label: string; value: string };
   cleared: ClearedGroup[];
+  /** Too short to rate (e.g. a Normal forage that barely started): shown as Unrated. */
+  unrated?: true;
 }
 
 /** What a puzzle passes when its session ends; the pirate is filled in. */
@@ -48,6 +50,7 @@ export interface ReportInput {
   performance: number;
   score: { label: string; value: string };
   cleared?: ClearedGroup[];
+  unrated?: boolean;
 }
 
 /** Combat and Distilling's practice boards use their own results instead of a duty popup. */
@@ -60,6 +63,7 @@ export function makeReport(input: ReportInput): DutyReport {
     v: 1, puzzle: input.puzzle, station: input.station, ...(input.mode ? { mode: input.mode } : {}),
     pirate: currentPirate(), performance: input.performance, score: { ...input.score },
     cleared: (input.cleared ?? []).map((group) => ({ ...group, items: group.items.map((item) => ({ ...item })) })),
+    ...(input.unrated ? { unrated: true as const } : {}),
   };
 }
 
@@ -88,7 +92,7 @@ export function readReport(value: unknown): DutyReport | null {
   return {
     v: 1, puzzle: r.puzzle!, station: r.station!, ...(r.mode !== undefined ? { mode: r.mode } : {}),
     pirate: sanitizeProfile(r.pirate), performance: r.performance!, score: { label: r.score.label, value: r.score.value },
-    cleared,
+    cleared, ...(r.unrated === true ? { unrated: true as const } : {}),
   };
 }
 

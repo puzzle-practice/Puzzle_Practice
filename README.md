@@ -39,6 +39,24 @@ individual gzip blobs in IndexedDB. The complete replay index stays available; o
 most recently opened tapes are kept decoded in memory. Recordings include simulation frame
 times so playback speed and seeking preserve the order and timing of moves. Watching a replay
 does not save scores or personal bests, and leaving a puzzle finishes its active recording.
+Replays also store a hash of the puzzle's state after every recorded input. Playback checks
+its own state at the same moments and says in the History tab if a replay drifted from the game
+it recorded. Each puzzle's `simulatorVersion` records the rules a game was played by, so older
+replays keep playing by their own rules (Forage version 2: paced Normal crates and Chaos chests
+retrying a blocked column).
+
+Each past game on the History tab has a 🗑 button that deletes the game, its replay and its
+place in the stats. Deleted games are listed under `puzzle-practice:deleted`, so merging or
+importing an older backup, or syncing a backup folder, doesn't bring them back.
+
+Settings > Global > History can stop finished games being saved to the History tab (and to
+replays). Session averages in results count only games from this browser session: the tab since
+it was opened, kept through reloads; a new tab or window starts a new session.
+
+Normal Forage crates are paced as in the game: two moves after the last request, a crate is asked
+for with the next two-second batch and arrives on the first move after that. A Normal session
+where ten per move plus the seconds played is under 95 is Unrated and keeps no replay, best or
+history. Distilling sessions that send no columns up are not added to the history.
 
 The home page offers portable JSON backup downloads and optional automatic folder backups.
 Folder backups contain a small `puzzle-practice-backup.json` manifest and a `replays/` directory

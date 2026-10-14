@@ -4,7 +4,8 @@
 import { decodeReport, showsDutyReport, type DutyReport } from './duty/report';
 import { sessionAverages } from './duty/desk';
 import type { Panel, RowAction } from './panel';
-import type { GameRecord } from './storage';
+import { removeGame, type GameRecord } from './storage';
+import { deleteReplay } from './data-backups';
 
 export interface HistoryColumn {
   label: string;
@@ -64,13 +65,26 @@ export function historyGroup(
           title: 'Show this game’s duty report',
           onClick: (index: number) => {
             const report = reportOf(shownGames()[index]);
-            if (report) panel.showReport(report, () => sessionAverages(games() ?? [], {
+            const game = shownGames()[index];
+            // Its session's games: the browser session it was played in (older games have none).
+            const session = (games() ?? []).filter((g) => g === game || (game.session !== undefined && g.session === game.session));
+            if (report) panel.showReport(report, () => sessionAverages(session, {
               scoreLabel: report.score.label,
               lowerIsBetter: report.puzzle === 'forage' && report.score.label === 'Moves',
             }));
           },
           disabled: (index: number) => !reportOf(shownGames()[index]),
         }] : []),
+        {
+          label: '🗑',
+          title: 'Delete this game: it leaves the history, its stats and its replay',
+          onClick: (index: number) => {
+            const game = shownGames()[index];
+            if (!game || !window.confirm(`Delete the game from ${when(game.at)}? Its replay and its place in the stats go too. This can't be undone.`)) return;
+            const replay = removeGame(game);
+            if (replay) void deleteReplay(replay).catch(() => {});
+          },
+        },
         ...(replayAction ? [{
           label: '▶',
           title: 'Play this game replay',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PyRandom } from '../../core/pyrandom';
-import { CRATE_SIZES, crateSize, HEIGHT, isCrate, isCrateAnchor, isTool, WIDTH } from './board';
+import { CRATE_SIZES, crateSize, HEIGHT, isCrate, isCrateAnchor, isTool, SHOVEL, WIDTH } from './board';
 import { GauntletChests, CrateRequests } from './crates';
 import { Forage, TIMING } from './engine';
 
@@ -127,5 +127,49 @@ describe('paced chest timing', () => {
     expect(dueAt).toBeGreaterThanOrEqual(0);
     // Asked for on the first move at or after the next batch plus the round trip.
     expect(now).toBeGreaterThanOrEqual((Math.floor(dueAt / 2000) + 1) * 2000 + 120);
+  });
+});
+
+describe('paced Normal crates', () => {
+  it('asks two moves after the last request, waits for the two-second batch, then arrives with the next move', () => {
+    let now = 0;
+    const source = new CrateRequests(new PyRandom(3), [1, 0, 0], 9, true, () => now);
+    const game = new Forage(5n, source);
+    const turn = () => { game.act(0, 8, false); };
+    now = 100; turn();
+    expect(game.board.bonusMode).toBe(0);
+    now = 300; turn();
+    // Asked for at 300ms: it goes with the batch at 2s and reaches the board 120ms later.
+    expect(game.board.bonusMode & 64).toBe(0);
+    now = 2100; source.beforeMove(game);
+    expect(game.board.bonusMode).toBe(0);
+    now = 2120; source.beforeMove(game);
+    expect(game.board.bonusMode & 64).toBe(64);
+    expect(source.requested).toBe(1);
+  });
+
+  it('unpaced (older replays) asks before every move with room', () => {
+    const source = new CrateRequests(new PyRandom(3), [1, 0, 0], 9);
+    const game = new Forage(5n, source);
+    source.beforeMove(game);
+    expect(game.board.bonusMode & 64).toBe(64);
+  });
+});
+
+describe('Gauntlet chests in a blocked column', () => {
+  it('try another column on each later move until one is clear', () => {
+    const source = new GauntletChests(new PyRandom(8), [1, 0, 0], 9, true, false, () => 0, true);
+    const game = new Forage(9n, source);
+    // Every top cell is a tool but one: the chest has to keep looking.
+    const free = 4;
+    game.load(Array.from({ length: WIDTH * HEIGHT }, (_, i) => i < WIDTH && i !== free ? SHOVEL : (i % WIDTH + Math.floor(i / WIDTH)) % 5));
+    const columns = new Set<number>();
+    let landed = -1;
+    for (let move = 0; move < 60 && landed < 0; move++) {
+      columns.add((source as unknown as { column: number }).column);
+      if (source.afterMove(game)) landed = game.cells.findIndex((p, i) => i < WIDTH && isCrateAnchor(p));
+    }
+    expect(landed).toBe(free);
+    expect(columns.size).toBeGreaterThan(1);
   });
 });

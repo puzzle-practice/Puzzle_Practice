@@ -17,7 +17,7 @@ import type { InputEvent } from '../../core/input';
 import type { Option } from '../../core/panel';
 import type { PuzzleFactory } from '../../core/puzzle';
 import { PyRandom } from '../../core/pyrandom';
-import { ReplayRecorder, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
+import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
 import type { GameRecord } from '../../core/storage';
 import {
   blockPiece, blockTile, colour, DAMAGE, DAMAGE_HINT, EMPTY, H, isBlock, isBreaker, kind, METAL, RUM, SWORD, swordTile, W,
@@ -1047,6 +1047,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   // For driving the game from tests during development.
   if (import.meta.env.DEV) (window as unknown as { __sf: unknown }).__sf = { get match() { return match; } };
+
+  // What decides how the game goes on; replays check it after every recorded input.
+  replays.fingerprint = () => stateText(match, running, finished);
 
   return { frame, dispose: () => { replays.dispose(); sounds.dispose(); } };
 }) satisfies PuzzleFactory;

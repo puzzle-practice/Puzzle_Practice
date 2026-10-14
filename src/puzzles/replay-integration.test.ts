@@ -117,11 +117,8 @@ describe('Distilling session dismissal', () => {
     now = 1000;
     buttons.get('Play::Start')!();
     expect(results()[0]).toBeNull();
-    if (mode === 'Practice') {
-      const games = store.history('Practice:0-0');
-      expect(games).toHaveLength(1);
-      expect(games[0].duty).toBeUndefined();
-    }
+    // Nothing was sent up, so the session isn't kept with the past games.
+    if (mode === 'Practice') expect(store.history('Practice:0-0')).toHaveLength(0);
     instance.dispose?.();
   });
 
@@ -1250,17 +1247,129 @@ describe('puzzle completion during replay', () => {
     expect(await recorder.playAt(replay.at, replay.runId)).toBe(true);
     perf.mockReturnValue(replay.duration);
     instance.frame([]);
+    expect(recorder.divergedAt).toBeNull();
     expect(stats()).toEqual(expectedStats);
     if (puzzle === 'distilling') expect(results()[0]).not.toBeNull();
     expect(JSON.parse(exportAll()).data).toEqual(data);
     setters.get('History:Replays:Jump to (s)')!(replay.duration / 1000);
     buttons.get('History:Replays:Jump')!();
     await vi.waitFor(() => expect(recorder.isSeeking).toBe(false));
+    expect(recorder.divergedAt).toBeNull();
     // Allow lazy loading/restoration to complete before testing Stop.
     await new Promise((resolve) => setTimeout(resolve, 0));
     buttons.get('History:Replays:Stop')!();
     expect(JSON.parse(exportAll()).data).toEqual(data);
     expect(await listReplayFiles(puzzle)).toHaveLength(1);
+    instance.dispose?.();
+  });
+});
+
+describe('replays match the live game', () => {
+  it.each([
+    ['ci', 60],
+    ['chaos', 60],
+    ['normal', 0],
+  ] as const)('forage %s replays to the same score when the clock does not start at 0', async (mode, roundSeconds) => {
+    vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new PyRandom(77)));
+    const store = new Store('forage');
+    store.set('settings', { mode, roundSeconds });
+    const { panel, buttons, stats, results } = panelHarness();
+    let now = 1234;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const input = { mouse: [-1, -1] };
+    const factory = (await import('./forage/index')).default as PuzzleFactory;
+    const instance = await factory({ screen, input, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    buttons.get('Play::Start')!();
+    const clicks = new PyRandom(5);
+    for (let elapsed = 0; elapsed <= 65000 && !results()[0]; elapsed += 17) {
+      now += 17;
+      if (elapsed % 289 === 0) {
+        const index = clicks.randintN(0, 53);
+        const pos: [number, number] = [67 + (index % 6) * 45 + 10, 50 + Math.floor(index / 6) * 45 + 10];
+        input.mouse = pos;
+        instance.frame([{ type: 'mousedown', button: clicks.randintN(0, 1) ? 1 : 3, pos }]);
+      } else instance.frame([]);
+    }
+    if (!results()[0]) buttons.get('Play::Start')!();
+    for (let frame = 0; frame < 200; frame++) { now += 17; instance.frame([]); }
+    const live = stats();
+    await replayWrites.idle();
+    const replay = (await listReplayFiles('forage'))[0];
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(replay.at, replay.runId)).toBe(true);
+    perf.mockReturnValue(replay.duration + 1);
+    instance.frame([]);
+    expect(recorder.divergedAt).toBeNull();
+    expect(stats()).toEqual(live);
+    // Every recorded move was checked against the game's state when it was played.
+    expect((await recorder['loadTape']((await listReplayFiles('forage'))[0]))!.checks!.length).toBeGreaterThan(30);
+    instance.dispose?.();
+  });
+});
+
+describe('short Normal forage sessions', () => {
+  it('are unrated and keep no replay, best or history', async () => {
+    vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new PyRandom(3)));
+    const store = new Store('forage');
+    store.set('settings', { mode: 'normal' });
+    const { panel, buttons, results } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./forage/index')).default as PuzzleFactory;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    // Two moves in about five seconds: 2 x 10 + 5 is under 95.
+    for (let elapsed = 0; elapsed < 5000; elapsed += 17) {
+      now += 17;
+      if (elapsed === 3009 || elapsed === 4012) instance.frame([{ type: 'mousedown', button: 1, pos: [67 + 100, 50 + 200] }]);
+      else instance.frame([]);
+    }
+    // Start reads Dismiss while a Normal board is out.
+    buttons.get('Play::Start')!();
+    for (let frame = 0; frame < 300; frame++) { now += 17; instance.frame([]); }
+    const result = results()[0] as { rows: string[][]; report: { unrated?: boolean } };
+    expect(result.rows).toContainEqual(['Rating', 'Unrated: not saved']);
+    expect(result.report.unrated).toBe(true);
+    await replayWrites.idle();
+    expect(await listReplayFiles('forage')).toHaveLength(0);
+    expect(Object.keys(JSON.parse(exportAll()).data).filter((key) => key.includes(':history:') || key.includes('normalBest'))).toEqual([]);
+    instance.dispose?.();
+  });
+});
+
+describe('deleting a past game', () => {
+  it('removes its history row, its replay file and the replay from the list', async () => {
+    vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new PyRandom(9)));
+    const { removeGame } = await import('../core/storage');
+    const { deleteReplay } = await import('../core/data-backups');
+    const store = new Store('forage');
+    store.set('settings', { mode: 'ci', roundSeconds: 5 });
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./forage/index')).default as PuzzleFactory;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    buttons.get('Play::Start')!();
+    for (let elapsed = 0; elapsed <= 9000; elapsed += 20) {
+      now = elapsed;
+      if (elapsed >= 3000 && elapsed % 400 === 0) instance.frame([{ type: 'mousedown', button: 1, pos: [67 + 100, 50 + 200] }]);
+      else instance.frame([]);
+    }
+    await replayWrites.idle();
+    const key = Object.keys(JSON.parse(exportAll()).data).find((k) => k.includes(':history:'))!.split(':history:')[1];
+    const [game] = store.history(key);
+    expect(recorder.hasPlayableAt(game.replayAt as number, game.replayId as string)).toBe(true);
+    const replay = removeGame(game)!;
+    await deleteReplay(replay);
+    expect(store.history(key)).toHaveLength(0);
+    // Earlier tests in this file share the session's games, so look for this one only.
+    expect(store.sessionHistory(key).some((g) => g.at === game.at && g.score === game.score)).toBe(false);
+    expect(await listReplayFiles('forage')).toHaveLength(0);
+    expect(recorder.hasPlayableAt(game.replayAt as number, game.replayId as string)).toBe(false);
     instance.dispose?.();
   });
 });

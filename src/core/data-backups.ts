@@ -1,5 +1,5 @@
-import { exportAll, importAll, mergeBackupFiles, scoreRecords } from './storage';
-import { isReplayMetadata, listReplayFiles, OperationQueue, readReplayFile, replayChecksum, replayWrites, saveReplayFile, type ReplayMetadata } from './replay-storage';
+import { deletedMarks, exportAll, importAll, mergeBackupFiles, replayMark, scoreRecords } from './storage';
+import { deleteReplayFile, isReplayMetadata, listReplayFiles, OperationQueue, readReplayFile, replayChecksum, replayWrites, saveReplayFile, type ReplayMetadata } from './replay-storage';
 
 const BACKUP_FILE = 'puzzle-practice-backup.json';
 const CHANGE_EVENT = 'puzzle-practice-data-changed';
@@ -113,8 +113,14 @@ async function readDirectoryReplay(directory: FileSystemDirectoryHandle, metadat
 /** Caller holds the queue/lock. Commit payloads before publishing their manifest. */
 async function writeMergedBackup(directory: FileSystemDirectoryHandle): Promise<void> {
   const old = await readBackup(directory) ?? emptyBackup();
+  const deleted = deletedMarks();
   const entries = new Map(old.replays.map((entry) => [entry.id, entry]));
+  for (const entry of old.replays) if (deleted.has(replayMark(entry.id))) {
+    entries.delete(entry.id);
+    try { await (await directory.getDirectoryHandle('replays')).removeEntry(replayName(entry)); } catch { /* Already gone. */ }
+  }
   for (const entry of await listReplayFiles()) {
+    if (deleted.has(replayMark(entry.id))) continue;
     if (entry.checksum && entries.get(entry.id)?.checksum === entry.checksum) continue;
     const blob = await readReplayFile(entry);
     if (!blob) throw new Error('Missing replay payload');
@@ -156,8 +162,9 @@ function enqueueSave(): void {
 }
 async function importDirectory(directory: FileSystemDirectoryHandle, backup: DirectoryBackup, keepCurrentSettings = false): Promise<number> {
   const existing = new Set((await listReplayFiles()).map((entry) => entry.id));
+  const deleted = new Set([...deletedMarks(), ...(Array.isArray(backup.data['puzzle-practice:deleted']) ? backup.data['puzzle-practice:deleted'] as string[] : [])]);
   for (const metadata of backup.replays) {
-    if (!existing.has(metadata.id)) await saveReplayFile({ metadata, blob: await readDirectoryReplay(directory, metadata) });
+    if (!existing.has(metadata.id) && !deleted.has(replayMark(metadata.id))) await saveReplayFile({ metadata, blob: await readDirectoryReplay(directory, metadata) });
   }
   const json = settingsJson(backup.data);
   return importAll(keepCurrentSettings ? mergeBackupFiles(settingsJson(currentData()), json) : json);
@@ -200,13 +207,22 @@ export function subscribeDataBackupStatus(callback: () => void): () => void {
   return () => subscribers.delete(callback);
 }
 /** Metadata only: all archived runs are listed without decompressing their payloads. */
+/** Deletes a replay from this browser; backups drop it on their next save (it's listed as deleted). */
+export async function deleteReplay(id: string): Promise<void> {
+  await replayWrites.run(() => deleteReplayFile(id));
+  window.dispatchEvent(new CustomEvent(REPLAY_REMOVED, { detail: id }));
+  enqueueSave();
+}
+export const REPLAY_REMOVED = 'puzzle-practice-replay-removed';
+
 export async function readReplayArchive(puzzle?: string): Promise<ReplayMetadata[]> {
   const entries = new Map<string, ReplayMetadata>();
   try { for (const entry of await listReplayFiles(puzzle)) entries.set(entry.id, entry); } catch { /* Report on save/load. */ }
   if (handle && syncingFolder && await handle.queryPermission({ mode: 'readwrite' }).catch(() => 'denied') === 'granted') {
     try {
       const backup = await readBackup(handle);
-      for (const entry of backup?.replays ?? []) if (puzzle === undefined || entry.puzzle === puzzle) {
+      const deleted = deletedMarks();
+      for (const entry of backup?.replays ?? []) if ((puzzle === undefined || entry.puzzle === puzzle) && !deleted.has(replayMark(entry.id))) {
         if (!entries.has(entry.id)) entries.set(entry.id, entry);
       }
     } catch { message = 'The folder archive could not be read. Browser replays remain available.'; notify(); }
@@ -279,7 +295,8 @@ export function importCompleteBackup(json: string): Promise<number> {
           (file.metadata.checksum && await replayChecksum(file.blob) !== file.metadata.checksum)) throw new Error('Invalid replay payload');
     }
     await replayWrites.idle();
-    for (const file of files) await saveReplayFile(file);
+    const deleted = new Set([...deletedMarks(), ...(Array.isArray(value.data['puzzle-practice:deleted']) ? value.data['puzzle-practice:deleted'] as string[] : [])]);
+    for (const file of files) if (!deleted.has(replayMark(file.metadata.id))) await saveReplayFile(file);
     const count = importAll(settingsJson(value.data));
     message = 'Backup loaded. All replays remain available in this browser.';
     enqueueSave();

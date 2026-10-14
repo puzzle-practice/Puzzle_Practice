@@ -39,7 +39,7 @@ export function scoreRecords(data: Record<string, unknown>, puzzle?: string): Sc
     const settingsKey = key.slice(marker + ':history:'.length);
     for (const game of value) {
       if (!game || typeof game !== 'object' || !Number.isFinite(game.at) || !Number.isFinite(game.score)) continue;
-      const { at, score, replayAt, replayId, duty: _duty, ...stats } = game as GameRecord;
+      const { at, score, replayAt, replayId, duty: _duty, session: _session, ...stats } = game as GameRecord;
       const replayFileId = typeof replayAt === 'number' && Number.isFinite(replayAt)
         ? `${namespace}:${replayAt}${typeof replayId === 'string' && replayId ? `:${replayId}` : ''}` : undefined;
       scores.push({ puzzle: namespace, settingsKey, at, score, stats,
@@ -49,8 +49,91 @@ export function scoreRecords(data: Record<string, unknown>, puzzle?: string): Sc
   return scores.sort((a, b) => a.at - b.at || a.puzzle.localeCompare(b.puzzle) || a.settingsKey.localeCompare(b.settingsKey));
 }
 
+/**
+ * Games and replays the player deleted from the History tab. Backups merge by adding, so without
+ * this list a deleted game would come back from a folder or file backup; every merge and import
+ * leaves out what's listed. Entries are `game:<history key>@<at>:<score>` and `replay:<replay id>`.
+ */
+export const DELETED_KEY = `${PREFIX}deleted`;
+const gameMark = (key: string, at: number, score: unknown) => `game:${key}@${at}:${score}`;
+export const replayMark = (id: string) => `replay:${id}`;
+function deletedIn(...values: unknown[]): Set<string> {
+  const marks = new Set<string>();
+  for (const value of values) if (Array.isArray(value)) for (const mark of value) if (typeof mark === 'string') marks.add(mark);
+  return marks;
+}
+/** Everything deleted in this browser. */
+export function deletedMarks(): Set<string> {
+  try { return deletedIn(JSON.parse(localStorage.getItem(DELETED_KEY) ?? '[]')); } catch { return new Set(); }
+}
+function isDeletedGame(marks: Set<string>, key: string, item: unknown): boolean {
+  const { at, score } = (item ?? {}) as { at?: unknown; score?: unknown };
+  return typeof at === 'number' && marks.has(gameMark(key, at, score));
+}
+
+/**
+ * Deletes a past game from its history and this session's games, and lists it as deleted so
+ * backups don't bring it back. Returns its replay's id, if it had one, for the caller to delete.
+ */
+export function removeGame(game: GameRecord): string | null {
+  let replay: string | null = null;
+  const marks = deletedMarks();
+  const same = (item: unknown) => !!item && typeof item === 'object' && (item as GameRecord).at === game.at && (item as GameRecord).score === game.score;
+  for (const key of savedKeys()) {
+    if (storageKind(key) !== 'history') continue;
+    const games = readArray(key);
+    const index = games.findIndex(same);
+    if (index < 0) continue;
+    games.splice(index, 1);
+    writeItem(key, JSON.stringify(games));
+    marks.add(gameMark(key, game.at, game.score));
+    if (typeof game.replayAt === 'number') {
+      const namespace = key.slice(PREFIX.length, key.indexOf(':history:', PREFIX.length));
+      replay = `${namespace}:${game.replayAt}${typeof game.replayId === 'string' && game.replayId ? `:${game.replayId}` : ''}`;
+      marks.add(replayMark(replay));
+    }
+  }
+  for (const [name, games] of sessionGames) {
+    const index = games.findIndex(same);
+    if (index < 0) continue;
+    games.splice(index, 1);
+    try { sessionStorage.setItem(`${SESSION_KEY}:${name}`, JSON.stringify(games)); } catch { /* Memory only. */ }
+  }
+  writeItem(DELETED_KEY, JSON.stringify([...marks]));
+  historyRevision++;
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('puzzle-practice-data-changed'));
+  return replay;
+}
+
 /** The desktop games kept every score per settings key; this keeps the most recent this many. */
 const HISTORY_LIMIT = 1000;
+
+/**
+ * This browser session: the tab, from when it was opened until it's closed. sessionStorage keeps
+ * the id through reloads and gives each new tab or window its own. Session stats count only the
+ * games played in it.
+ */
+const SESSION_KEY = 'puzzle-practice-session';
+let pageSession: string | null = null;
+export function browserSession(): string {
+  if (pageSession) return pageSession;
+  const fresh = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Math.random()).slice(2);
+  try {
+    pageSession = sessionStorage.getItem(SESSION_KEY) ?? fresh;
+    sessionStorage.setItem(SESSION_KEY, pageSession);
+  } catch {
+    pageSession = fresh;
+  }
+  return pageSession;
+}
+
+/** Whether finished games are added to the History tab (Settings > History); on unless turned off. */
+export function savesHistory(): boolean {
+  return new Store('global').get<boolean>('saveHistory', true);
+}
+
+/** This session's games per puzzle and settings key, kept even when history saving is off. */
+const sessionGames = new Map<string, GameRecord[]>();
 let historyRevision = 0;
 
 function backupItemKey(item: unknown): string {
@@ -190,11 +273,38 @@ export class Store {
     return games;
   }
 
-  /** Adds a finished game to its settings key's history and returns the history. */
+  /**
+   * This browser session's games for one settings key, oldest first, for session stats. They're
+   * kept for the tab in sessionStorage, so a reload keeps them and history saving can be off.
+   */
+  sessionHistory(key: string): readonly GameRecord[] {
+    const name = `${PREFIX}${this.namespace}:${key}`;
+    let games = sessionGames.get(name);
+    if (!games) {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(`${SESSION_KEY}:${name}`) ?? '[]');
+        games = Array.isArray(saved) ? saved : [];
+      } catch { games = []; }
+      sessionGames.set(name, games);
+    }
+    return games;
+  }
+
+  /**
+   * Adds a finished game to this session's games and, unless history saving is off, to its
+   * settings key's history. Returns the history.
+   */
   addHistory(key: string, game: { score: number; [stat: string]: number | string }): readonly GameRecord[] {
     if (this.readOnly) return this.history(key);
+    const record = { at: Date.now(), ...game, session: browserSession() } as GameRecord;
+    const session = this.sessionHistory(key) as GameRecord[];
+    session.push(record);
+    session.splice(0, session.length - HISTORY_LIMIT);
+    try { sessionStorage.setItem(`${SESSION_KEY}:${PREFIX}${this.namespace}:${key}`, JSON.stringify(session)); }
+    catch { /* No session storage: this page's games still count. */ }
+    if (!savesHistory()) return this.history(key);
     const games = this.history(key) as GameRecord[];
-    games.push({ at: Date.now(), ...game } as GameRecord);
+    games.push(record);
     games.splice(0, games.length - HISTORY_LIMIT);
     this.set(`history:${key}`, games);
     return games;
@@ -223,6 +333,11 @@ export function mergeBackupFiles(currentJson: string, archiveJson: string, repla
     throw new Error('Not a Puzzle Practice backup');
   }
   const data = { ...archive.data, ...current.data };
+  const deleted = deletedIn(archive.data[DELETED_KEY], current.data[DELETED_KEY]);
+  if (deleted.size) data[DELETED_KEY] = [...deleted];
+  for (const [key, value] of Object.entries(data)) {
+    if (key.includes(':history:') && Array.isArray(value)) data[key] = value.filter((item) => !isDeletedGame(deleted, key, item));
+  }
   for (const [key, incoming] of Object.entries(current.data)) {
     const old = archive.data[key];
     const isReplays = key.endsWith(':replays');
@@ -237,7 +352,7 @@ export function mergeBackupFiles(currentJson: string, archiveJson: string, repla
     } else {
       merged.sort((a, b) => Number((a as { at?: number })?.at ?? 0) - Number((b as { at?: number })?.at ?? 0));
     }
-    data[key] = merged;
+    data[key] = isHistory ? merged.filter((item) => !isDeletedGame(deleted, key, item)) : merged;
   }
   return JSON.stringify({ puzzlePractice: 1, saved: new Date().toISOString(), data }, null, 1);
 }
@@ -253,9 +368,10 @@ export function importAll(json: string, replayLimit = 10): number {
   // Settings and the profile first, so a backup too big for storage gives up games, not settings.
   const order: Record<StorageKind, number> = { setting: 0, history: 1, replays: 2 };
   const entries = Object.entries(parsed.data).sort(([a], [b]) => order[storageKind(a)] - order[storageKind(b)]);
+  const deleted = deletedIn([...deletedMarks()], parsed.data[DELETED_KEY]);
   for (const [key, value] of entries) {
     if (!key.startsWith(PREFIX)) continue;
-    let next = value;
+    let next = key === DELETED_KEY ? [...deleted] : value;
     if (Array.isArray(value) && (key.includes(':history:') || key.endsWith(':replays'))) {
       let existing: unknown;
       try { existing = JSON.parse(localStorage.getItem(key) ?? 'null'); }
@@ -270,7 +386,7 @@ export function importAll(json: string, replayLimit = 10): number {
         merged = merged.slice(0, replayLimit);
       } else {
         merged.sort((a, b) => Number((a as { at?: number })?.at ?? 0) - Number((b as { at?: number })?.at ?? 0));
-        merged = merged.slice(-HISTORY_LIMIT);
+        merged = merged.filter((item) => !isDeletedGame(deleted, key, item)).slice(-HISTORY_LIMIT);
       }
       next = merged;
     }

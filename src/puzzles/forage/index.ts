@@ -241,6 +241,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // ---- Recording and replays ----
 
   let replays!: ReplayRecorder;
+  /**
+   * The rules a game is played by (the replay format's simulatorVersion). 2: Normal crates are
+   * paced (two moves, the next two-second batch, then a move), and a Chaos chest whose column is
+   * blocked tries another each move. Replays play by the rules they were recorded with.
+   */
+  const RULES = 2;
+  let rules = RULES;
   let sessionSeed: ForageReplaySeed | null = null;
   let recordedAction = false;
   let nextReplayBoard = 0;
@@ -252,10 +259,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     /** What the player had set before watching, put back afterwards. */
     saved: { settings: Settings; puzzleId: string; pickedRandomly: boolean };
   } | null = null;
-  /** Set while a replayed event is applied, so it happens at the time it was recorded. */
-  let clockAt: number | null = null;
-  /** Game time: real time, or the replay's clock while watching. */
-  const clock = () => clockAt ?? (replay ? replay.now : ticks());
+  /**
+   * Game time. While watching, the replay sets ticks() to the time each recorded frame ran, from
+   * the same starting point as the game it recorded: the 14ms frames and two-second chest batches
+   * fall on the same times, so the replay plays out the same.
+   */
+  const clock = () => ticks();
   game = newGame();
 
   const ciKey = () => {
@@ -297,10 +306,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
     const source =
       settings.mode === 'normal'
-        ? new CrateRequests(rng, crateWeights(), BANANAS)
+        ? new CrateRequests(rng, crateWeights(), BANANAS, rules >= 2, () => clock())
         : settings.mode === 'puzzle'
           ? {}
-          : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock());
+          : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock(), rules >= 2);
     const g = new Forage(seed, source);
     // Shovel, machete, monkey, earthquake, ants.
     g.board.allowed = [settings.shovel, settings.machete, settings.monkey, settings.eq, settings.ants];
@@ -401,6 +410,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
   const scoreText = (n: number) => (settings.mode === 'normal' ? n.toFixed(2) : String(n));
 
+  /**
+   * A Normal session too short to rate: ten for each move plus the seconds played comes to under
+   * 95. It isn't rated, and keeps no replay, best or history.
+   */
+  const unrated = () => settings.mode === 'normal' && movesUsed * 10 + timePassed / 1000 < 95;
+
   function finishScored(): void {
     ended = true;
     boardActive = false;
@@ -408,8 +423,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const best = bests();
     const final = shownScore();
     const report = endReport();
-    const finishedReplay = endRecording(settings.mode === 'normal' ? `${scoreText(final)} a move` : `Score ${final}`, report);
-    if (!replay) {
+    if (unrated()) {
+      if (!replay) { replays.cancel(); sessionSeed = null; recordedAction = false; }
+    }
+    const finishedReplay = unrated() ? null : endRecording(settings.mode === 'normal' ? `${scoreText(final)} a move` : `Score ${final}`, report);
+    if (!replay && !unrated()) {
       if (final > (best[key] ?? 0)) {
         best[key] = final;
         store.set(settings.mode === 'normal' ? 'normalBestPerMove' : 'ciBest', best);
@@ -418,7 +436,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         ? { score: Number(final.toFixed(2)), points: score, moves: movesUsed, clockwise, anticlockwise, ...duty.fields(report), ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? '' } : {}) }
         : { score: final, clockwise, anticlockwise, ...duty.fields(report), ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? '' } : {}) });
     }
-    bestScore = Math.max(bestScore ?? 0, final);
+    if (!unrated()) bestScore = Math.max(bestScore ?? 0, final);
     // A full meter is "Great work!" in the game, and the pieces fly off a second later.
     if (settings.mode === 'normal' && boardDone()) {
       timed.push({ effect: { kind: 'text', text: 'Great work!', size: 32, delay: 0 }, start: clock() });
@@ -429,11 +447,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** The session's duty report: what it's rated on depends on the mode. */
   function endReport(): DutyReport {
     const gauntlet = settings.mode === 'ci' || settings.mode === 'chaos';
-    const performance = settings.mode === 'normal' ? duty.rate('normal', shownScore())
+    const performance = unrated() ? duty.rate(null, null) : settings.mode === 'normal' ? duty.rate('normal', shownScore())
       : gauntlet ? duty.rate('gauntletPoints', score) : duty.rate(null, null);
     return duty.end({
       mode: MODES.find((m) => m.value === settings.mode)?.label,
       performance,
+      unrated: unrated(),
       score: isPuzzle() ? { label: 'Moves', value: String(movesUsed) }
         : { label: settings.mode === 'normal' ? 'Points a move' : 'Score', value: scoreText(shownScore()) },
       cleared: [{ label: 'Crates Collected', inScore: true, items: [
@@ -537,6 +556,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (!replay) return;
     const { saved } = replay;
     replay = null;
+    rules = RULES;
     sessionSeed = null;
     nextReplayBoard = 0;
     Object.assign(settings, saved.settings);
@@ -732,8 +752,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ['Clockwise, anticlockwise', `${clockwise}, ${anticlockwise}`],
       // Points are the score except in Normal, where the score is points a move.
       ...(settings.mode === 'normal' ? [['Points', String(score)]] : []),
+      ...(unrated() ? [['Rating', 'Unrated: not saved']] : []),
     ],
-    averages: duty.averages(historyKey() ? store.history(historyKey()!) : null, isPuzzle()
+    averages: duty.averages(historyKey() ? store.sessionHistory(historyKey()!) : null, isPuzzle()
       ? { scoreLabel: 'Moves', lowerIsBetter: true, digits: 1 }
       : { scoreLabel: settings.mode === 'normal' ? 'Points a move' : 'Score' }),
   } : null);
@@ -759,7 +780,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // The common replay UI owns Forage's history, playback controls, and files too.
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 1,
-    simulatorVersion: 1,
+    simulatorVersion: RULES,
     migrate: (version, value) => {
       if (version !== 1 || !value || typeof value !== 'object') return null;
       const s = value as Record<string, unknown>;
@@ -790,12 +811,16 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     puzzleId = replayPuzzleId;
     pickedRandomly = replayPickedRandomly;
     replay = { now: 0, mouse: [-1, -1], clicks: [], saved };
+    rules = tape.simulatorVersion ?? 1;
     sessionSeed = structuredClone(tape.seed);
     nextReplayBoard = 0;
     meterAt = 0;
     boardActive = true;
     start();
   }, stopReplay, isForageReplaySeed, setReplayTime, () => frame([]), replaySettingsCodec, () => !boardActive || !!replay);
+  // What decides how the game goes on; replays check it after every recorded input.
+  replays.fingerprint = () => [game.cells.join(','), score, movesUsed, crates, clockwise, anticlockwise,
+    settledAt, playing.length, pendingNextBoard, ended, boardActive, JSON.stringify(rng.snapshot())].join('|');
 
   const setup = panel.settings.group('Game');
   setup.select('Timer', [0, 30, 120, 300].map((value) => ({ value, label: value ? `${value} seconds` : 'No timer' })), roundSeconds, (value) => { settings.roundSeconds = value; saveSettings(); }, { disabled: locked, hidden: isPuzzle });
@@ -1173,10 +1198,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       replay.now = routed.elapsed;
       replay.mouse = routed.mouse;
       for (const item of routed.actions) {
-        clockAt = item.t;
-        advanceGame(item.t);
+        advanceGame(clock());
         applyReplayAction(item.action);
-        clockAt = null;
       }
     }
     const now = clock();
