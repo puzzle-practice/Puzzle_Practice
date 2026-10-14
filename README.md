@@ -48,7 +48,8 @@ retrying a blocked column).
 **Take over** in the Replays card turns the replay being watched (or paused after a Jump) into
 your own game from that moment: the board, score and clock carry on and your inputs take
 control. It saves like any game, labelled "taken over at Ns", and its replay plays from the start
-of the original through the take-over.
+of the original through the take-over. **Resume replay** goes back to the replay, paused where
+you took it over, and drops the game you played from there without saving it.
 
 Each past game on the History tab has a 🗑 button that deletes the game, its replay and its
 place in the stats. Deleted games are listed under `puzzle-practice:deleted`, so merging or

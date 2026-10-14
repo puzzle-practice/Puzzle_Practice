@@ -1411,6 +1411,21 @@ describe('taking over a replay', () => {
     await vi.waitFor(() => expect(recorder.isPlaying).toBe(true));
     await vi.waitFor(() => expect(recorder.isSeeking).toBe(false));
     expect(recorder.divergedAt).toBeNull();
+    const atTakeOver = stats();
+    buttons.get('History:Replays:Take over')!();
+    expect(recorder.isPlaying).toBe(false);
+    // Play a little, then go back to the replay where it was taken over: nothing is saved.
+    play(now + 3000);
+    buttons.get('History:Replays:Resume replay')!();
+    await vi.waitFor(() => expect(recorder.isSeeking).toBe(false));
+    await vi.waitFor(() => expect(recorder.isPlaying).toBe(true));
+    expect(recorder.isPaused).toBe(true);
+    expect(recorder.elapsedMs).toBe(10000);
+    expect(recorder.divergedAt).toBeNull();
+    expect(stats()).toEqual(atTakeOver);
+    await replayWrites.idle();
+    expect(await listReplayFiles(puzzle)).toHaveLength(1);
+    // Take over again and play the game out this time.
     buttons.get('History:Replays:Take over')!();
     expect(recorder.isPlaying).toBe(false);
     play(now + end);

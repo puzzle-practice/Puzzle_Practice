@@ -384,6 +384,8 @@ export class ReplayRecorder {
   onTakeOver: ((tape: PuzzleReplay) => void) | null = null;
   /** When the game being recorded was taken over from a replay, in ms into it; null for a game played from the start. */
   private takenOverAt: number | null = null;
+  /** The replay last taken over and where, so Resume replay can go back to watching it there. */
+  private takeOverFrom: { id: string; at: number } | null = null;
   private readonly picker = document.createElement('select');
   private readonly file = document.createElement('input');
 
@@ -411,6 +413,10 @@ export class ReplayRecorder {
     .button('Take over', () => this.takeOver(), {
       title: 'Play on from this point yourself: the board, score and clock carry on as they are, and the game saves with your own',
       disabled: () => !this.playback || this.loading || this.seeking || this.advancing || this.playback.finishPending,
+    })
+    .button('Resume replay', () => void this.resumeReplay(), {
+      title: 'Go back to the replay you took over, paused where you took it over. The game you played from there is not saved.',
+      disabled: () => !this.takeOverFrom || this.loading || !this.tapeIndices.has(this.takeOverFrom.id),
     })
     .range('Replay time (s)', () => this.scrubSeconds ?? (this.playback ? this.playback.elapsed / 1000 : this.jumpSeconds), (seconds) => {
       this.jumpSeconds = seconds; this.scrubSeconds = seconds;
@@ -487,6 +493,7 @@ export class ReplayRecorder {
       ...(this.fingerprint ? { checks: (tape.checks ?? []).filter(([t]) => t <= ranTo).map(([t, hash]): [number, number] => [t, hash]) } : {}),
     };
     this.takenOverAt = p.elapsed;
+    this.takeOverFrom = { id: replayId(this.puzzle, tape.at, tape.runId), at: p.elapsed };
     this.recordStart = p.start;
     this.compressRecording = this.preferences.get<boolean>('compressReplays', true);
     this.previousMouse = [...p.mouse]; this.pendingMouse = null; this.pendingCheck = null;
@@ -510,6 +517,8 @@ export class ReplayRecorder {
     this.loading = false;
     if (this.recording) this.finish('Stopped');
     this.takenOverAt = null;
+    // A new game of the player's own: there's no taken-over replay to go back to.
+    this.takeOverFrom = null;
     this.compressRecording = this.preferences.get<boolean>('compressReplays', true);
     this.recordStart = start; this.previousMouse = [-1, -1]; this.pendingMouse = null; this.pendingCheck = null;
     this.mouseButtonsDown.clear(); this.keysDown.clear();
@@ -745,8 +754,24 @@ export class ReplayRecorder {
     } catch { this.replayStorageError = 'This replay could not be loaded. Check browser storage or folder access.'; }
     finally { if (request === this.request) this.loading = false; }
   }
-  private async jumpSelected(): Promise<void> {
-    if (!this.stepFrame || !this.setReplayTime || this.recording || this.loading || !this.canStartPlayback()) return;
+  /**
+   * Back to watching the replay last taken over, paused at the take-over. The game played from
+   * there is dropped unsaved: the replay's restore resets the puzzle with saving switched off.
+   */
+  private async resumeReplay(): Promise<void> {
+    const from = this.takeOverFrom;
+    const index = from ? this.tapeIndices.get(from.id) : undefined;
+    if (!from || index === undefined || this.loading) return;
+    if (this.playback) this.stopPlayback();
+    this.recording = null; this.pendingMouse = null; this.pendingCheck = null; this.takenOverAt = null;
+    this.selected = index; this.jumpSeconds = from.at / 1000;
+    await this.jumpSelected(true);
+    if (this.playback) this.takeOverFrom = null;
+  }
+  private async jumpSelected(resuming = false): Promise<void> {
+    // Resuming leaves a game of the player's in progress; the replay's restore replaces it.
+    const canStart = () => resuming || this.canStartPlayback();
+    if (!this.stepFrame || !this.setReplayTime || this.recording || this.loading || !canStart()) return;
     const entry = this.currentTape();
     if (!entry || !this.canPlay(entry)) return;
     const target = Math.min(entry.duration, Math.max(0, this.jumpSeconds * 1000));
@@ -754,7 +779,7 @@ export class ReplayRecorder {
     const request = ++this.request; this.loading = true;
     try {
       const tape = await this.loadTape(entry);
-      if (!tape || request !== this.request || this.disposed || this.recording || !this.canStartPlayback()) return;
+      if (!tape || request !== this.request || this.disposed || this.recording || !canStart()) return;
       this.seeking = true;
       const base = tape.clockStart ?? 0;
       this.setReplayTime(base);
