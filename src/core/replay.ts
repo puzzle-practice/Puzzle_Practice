@@ -378,6 +378,8 @@ export class ReplayRecorder {
   fingerprint: (() => string) | null = null;
   private readonly picker = document.createElement('select');
   private readonly file = document.createElement('input');
+  /** Ends the player's own game, the way its Stop button does; set by the puzzle. */
+  private stopLive?: () => void;
 
   constructor(
     private readonly puzzle: string, private readonly store: Store, private readonly panel: Panel,
@@ -856,6 +858,17 @@ export class ReplayRecorder {
       const tape = await decodeReplayBlob(chosen);
       if (!tape || tape.puzzle !== this.puzzle || !this.validateTape(tape)) throw new Error('Unsupported replay');
       this.blobs.set(tape, Promise.resolve(chosen)); this.addTape(tape); await this.persistTape(tape);
+      await this.playOpened(tape);
     } catch { window.alert("That file isn't a supported compressed " + this.puzzle + ' replay.'); }
+  }
+  /** The puzzle's way to end a game of the player's own, so an opened replay file can take over. */
+  setStopLive(stop: () => void): void { this.stopLive = stop; }
+  /** An opened file plays straight away: the replay or game on the board ends first. */
+  private async playOpened(tape: PuzzleReplay): Promise<void> {
+    if (this.disposed) return;
+    if (this.playback || this.loading) this.stopPlayback();
+    if (this.recording || !this.canStartPlayback()) this.stopLive?.();
+    if (this.recording) this.finish('Stopped');
+    await this.playAt(tape.at, tape.runId);
   }
 }
