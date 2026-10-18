@@ -39,6 +39,8 @@ export interface Option<T> {
 export interface GroupOptions extends ControlOptions {
   /** Lays the group's fields out in this many columns, labels above, for runs of short boxes. */
   columns?: number;
+  /** The heading folds the card away and opens it again; `true` starts folded. */
+  collapsed?: boolean;
 }
 
 export interface ControlOptions {
@@ -156,7 +158,20 @@ export class Page {
   /** A card of related controls, with an optional heading. */
   group(title?: string, options: GroupOptions = {}): Group {
     const card = el('section', 'panel-group');
-    if (title) card.append(el('h2', 'panel-title', title));
+    if (title && options.collapsed !== undefined) {
+      // A heading that folds the card: the arrow shows which way it goes.
+      const heading = el('h2', 'panel-title is-collapsible');
+      const toggle = el('button', 'panel-collapse', title);
+      toggle.type = 'button';
+      const set = (folded: boolean) => {
+        card.classList.toggle('is-collapsed', folded);
+        toggle.setAttribute('aria-expanded', String(!folded));
+      };
+      toggle.addEventListener('click', () => set(!card.classList.contains('is-collapsed')));
+      heading.append(toggle);
+      card.append(heading);
+      set(options.collapsed);
+    } else if (title) card.append(el('h2', 'panel-title', title));
     if (options.columns) {
       card.classList.add('is-columns');
       card.style.setProperty('--columns', String(options.columns));
@@ -188,6 +203,13 @@ export class Panel {
   private readonly sessionElement: HTMLElement;
   private readonly liveElement: HTMLElement;
   private resetSettings: () => void = () => {};
+  /** The History tab's one card: past games first, then the replay controls. */
+  private historyParts: { games: HTMLElement; replays: HTMLElement } | null = null;
+  /**
+   * While a game or replay is on, settings can still change: the first change abandons the game
+   * unsaved, or closes the replay, before it applies. Set by the replay recorder.
+   */
+  private lock: { active: () => boolean; abandon: () => void } | null = null;
 
   constructor(readonly root: HTMLElement, private readonly canvas?: HTMLCanvasElement) {
     this.tabs.setAttribute('role', 'tablist');
@@ -258,6 +280,16 @@ export class Panel {
       (on) => this.preferences.set('saveReplays', on),
       { title: 'When off, new scores are still saved but their replay files are not.' },
     );
+    replayPreferences.toggle('Show clicks',
+      () => this.preferences.get<boolean>('showReplayClicks', true),
+      (on) => this.preferences.set('showReplayClicks', on),
+      { title: 'Blue and orange rings where a replay’s left and right clicks land.' },
+    );
+    replayPreferences.toggle('Exclude unlikely replays',
+      () => this.preferences.get<boolean>('excludeUnlikelyReplays', true),
+      (on) => this.preferences.set('excludeUnlikelyReplays', on),
+      { title: 'Sessions left out of the history as unlikely to matter (a Normal forage too short to rate, a Distilling session that sent nothing up) keep no replay. Turn off to keep their replays.' },
+    );
     replayPreferences.toggle('Compress replays',
       () => this.preferences.get<boolean>('compressReplays', true),
       (on) => this.preferences.set('compressReplays', on),
@@ -300,6 +332,33 @@ export class Panel {
     // Session choices, Start, the clock and the score belong to Play; History shows only history.
     this.sessionElement.hidden = name !== 'Play';
     this.liveElement.hidden = name !== 'Play';
+    this.sync();
+  }
+
+  /** A section of the History tab's single History card: `games` for past games, `replays` for the replay controls. */
+  historySection(part: 'games' | 'replays', options: ControlOptions = {}): Group {
+    if (!this.historyParts) {
+      const card = this.tab('History').group('History');
+      this.historyParts = { games: el('div', 'panel-history-part'), replays: el('div', 'panel-history-part') };
+      card.element.append(this.historyParts.games, this.historyParts.replays);
+    }
+    const section = el('div', 'panel-history-section');
+    this.historyParts[part].append(section);
+    this.watch(section, options);
+    return new Group(this, section);
+  }
+
+  /** What's playing, and how to abandon it when a setting changes (see `lock`). */
+  sessionLock(active: () => boolean, abandon: () => void): void {
+    this.lock = { active, abandon };
+  }
+
+  /** @internal A control is about to change something: a puzzle setting abandons the game or replay first. */
+  beforeChange(node: HTMLElement, isButton = false): void {
+    if (!this.lock?.active()) return;
+    const setting = this.settings.element.contains(node) || (!isButton && this.sessionElement.contains(node));
+    if (!setting) return;
+    this.lock.abandon();
     this.sync();
   }
 
@@ -471,6 +530,7 @@ export class Group {
     };
     syncOptions();
     select.addEventListener('change', () => {
+      this.panel.beforeChange(this.element);
       const option = current?.[Number(select.value)];
       if (option) set(option.value);
       this.panel.used();
@@ -489,6 +549,7 @@ export class Group {
     const input = el('input', 'panel-switch');
     input.type = 'checkbox';
     input.addEventListener('change', () => {
+      this.panel.beforeChange(this.element);
       set(input.checked);
       this.panel.used();
     });
@@ -523,6 +584,7 @@ export class Group {
     const control = el('div', 'panel-range-control');
     control.append(input, output);
     input.addEventListener('input', () => {
+      this.panel.beforeChange(this.element);
       set(Number(input.value));
       this.panel.sync();
     });
@@ -548,6 +610,7 @@ export class Group {
     if (opts.max !== undefined) input.max = String(opts.max);
     input.step = String(opts.step ?? 1);
     input.addEventListener('change', () => {
+      this.panel.beforeChange(this.element);
       let value = Number(input.value);
       if (input.value === '' || Number.isNaN(value)) value = get();
       if (opts.min !== undefined) value = Math.max(opts.min, value);
@@ -573,6 +636,7 @@ export class Group {
     if (opts.placeholder) input.placeholder = opts.placeholder;
     if (opts.inputMode) input.inputMode = opts.inputMode;
     input.addEventListener('change', () => {
+      this.panel.beforeChange(this.element);
       set(input.value);
       input.value = get();
       this.panel.used();
@@ -591,6 +655,7 @@ export class Group {
     const button = el('button', `panel-button ${opts.variant === 'primary' ? 'is-primary' : ''}`, label);
     button.type = 'button';
     button.addEventListener('click', () => {
+      this.panel.beforeChange(this.element, true);
       onClick();
       this.panel.used();
     });

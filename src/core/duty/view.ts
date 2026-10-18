@@ -269,7 +269,7 @@ export function randomFace(): FaceSpec {
 /** The Pirate card on a Settings tab: name and face, saved site-wide for every puzzle's reports. */
 export function pirateSettings(page: Page): Group {
   let profile: PirateProfile = loadProfile();
-  const group = page.group('Pirate', { title: 'Your name and face on duty reports, for every puzzle' });
+  const group = page.group('Pirate', { title: 'Your name and face on duty reports, for every puzzle', collapsed: true });
   const preview = el('div', 'duty-preview');
   const faces = MOODS.map((mood) => faceCanvas(profile.face, mood, mood === 'normal' ? 'duty-face' : 'duty-face is-small'));
   const moodRow = el('div', 'duty-moods');

@@ -332,6 +332,26 @@ a {
   text-transform: uppercase;
 }
 
+/* A card whose heading folds it away: the arrow points down when open. */
+.panel-collapse {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  width: 100%;
+}
+.panel-collapse::before {
+  content: '▾';
+  font-size: 1.1em;
+  transition: transform 0.15s;
+}
+.panel-group.is-collapsed .panel-collapse::before { transform: rotate(-90deg); }
+.panel-collapse:focus-visible { outline: 2px solid var(--accent, #6aa9ff); outline-offset: 2px; }
+.panel-group.is-collapsed > :not(.panel-title) { display: none; }
+.panel-history-part, .panel-history-section { display: contents; }
+.panel-history-section[hidden] { display: none; }
+
 .panel-field {
   display: grid;
   grid-template-columns: minmax(80px, auto) minmax(0, 1fr);

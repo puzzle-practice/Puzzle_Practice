@@ -48,9 +48,10 @@ export function historyGroup(
 ): void {
   const hidden = () => games() === null;
   const shownGames = () => (games() ?? []).slice(-SHOWN).reverse();
+  // Every puzzle's past games go in the History card (the title is kept for older callers).
+  void title;
   panel
-    .tab('History')
-    .group(title, { hidden })
+    .historySection('games', { hidden })
     .note(() => {
       const n = games()?.length ?? 0;
       return n ? `${n} game${n === 1 ? '' : 's'} with these settings` : 'No games yet with these settings';

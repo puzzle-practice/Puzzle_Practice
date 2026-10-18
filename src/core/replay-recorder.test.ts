@@ -35,6 +35,7 @@ function harness(puzzle = 'distilling') {
   const reports: unknown[] = [];
   const panel = {
     tab: () => ({ group: () => group }),
+    historySection: () => group,
     showReport: (report: unknown) => reports.push(report),
     get shownReport() { return reports.at(-1) ?? null; },
   } as unknown as Panel;
