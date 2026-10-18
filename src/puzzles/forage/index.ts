@@ -1242,6 +1242,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (replay) drawReplayOverlay(now);
   }
 
+  // Opening a replay file ends a game in progress, as its Stop button would.
+  replays.setStopLive(() => { if (boardActive && !replay) toggleRunning(); });
   return { frame, dispose: () => { if (!recordedAction) replays.cancel(); replays.dispose(); sounds.dispose(); warning.dispose(); } };
 }) satisfies PuzzleFactory;
 

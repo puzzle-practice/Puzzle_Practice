@@ -1085,5 +1085,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(board, doneness, tally, running, finished, hammerable, timers.map((t) => t.at));
 
+  // Opening a replay file ends a game in progress, as its Stop button would.
+  replays.setStopLive(() => { if (mode === 'perfect') { if (run.active) endRun(false); } else if (running) { abortBoard(); replays.finish('Stopped'); } });
   return { frame, dispose: () => { replays.dispose(); sounds.dispose(); warning.dispose(); } };
 }) satisfies PuzzleFactory;
