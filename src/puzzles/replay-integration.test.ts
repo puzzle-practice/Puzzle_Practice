@@ -17,6 +17,7 @@ import { setWarningTimer } from '../core/audio';
 import { SailingGame } from './sailing/game';
 import { PatchingBoard, movable as patchingMovable } from './patching/logic';
 import { AIM_HISTORY, AIM_LANDING_MS, AIM_MS, AimTrainer } from './rumble/aim';
+import type { Board, Point } from './rumble/board';
 import { GunningGame } from './gunning/game';
 import { LOOP, LOOP_SIDES, POWDER, SHOT, WAD } from './gunning/board';
 
@@ -130,10 +131,17 @@ beforeEach(async () => {
   }) });
 });
 
+/** An aim that lands somewhere other than next to the target. */
+function misses(b: Board, fist: number, dir: number, cells: Point[]): boolean {
+  const shot = b.shoot(b.path(fist, dir));
+  return !!shot && !cells.some(p => b.adjacent(shot.rest, p));
+}
+
 describe('Rumble aim trainer sessions', () => {
-  async function setup() {
+  async function setup(difficulty?: string) {
     const updates = vi.spyOn(AimTrainer.prototype, 'update');
     const store = new Store('rumble'); store.set('mode', 'Aim trainer');
+    if (difficulty) store.set('aimDifficulty', difficulty);
     const harness = panelHarness();
     let now = 100;
     const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
@@ -148,7 +156,7 @@ describe('Rumble aim trainer sessions', () => {
       const t = aim(), f = t.fighter, fist = t.current.fist;
       const [lo, hi] = f.board.ranges[fist];
       const dir = hit ? t.current.angles[0] : Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
-        .find(d => !t.current.angles.includes(d) && f.board.shoot(f.board.path(fist, d)))!;
+        .find(d => misses(f.board, fist, d, t.current.cells))!;
       const delta = dir - f.dir[fist], arrow = delta > 0 ? 'arrowleft' : 'arrowright';
       const key = fist === 0 ? 'z' : 'x';
       instance.frame([{ type: 'keydown', key: 'shift' },
@@ -178,7 +186,7 @@ describe('Rumble aim trainer sessions', () => {
     expect(h.aim().result).toBe('Time up');
     expect(h.aim().score).toBe(8);
     expect(h.aim().lives).toBe(2);
-    expect(h.results()[0]).toMatchObject({ title: 'Aim trainer · Time up' });
+    expect(h.results()[0]).toMatchObject({ title: 'Aim trainer · Mixed · Time up' });
     expect(h.store.history(AIM_HISTORY)).toHaveLength(1);
     expect(h.store.history(AIM_HISTORY)[0]).toMatchObject({ score: 8, shots: 9, lives: 2, ms: AIM_MS });
     const recorder = captured.recorders[0], expected = recorder.fingerprint!();
@@ -208,7 +216,7 @@ describe('Rumble aim trainer sessions', () => {
     h.advance(AIM_LANDING_MS - 1);
     expect(h.results()[0]).toBeNull();
     h.advance(1);
-    expect(h.results()[0]).toMatchObject({ title: 'Aim trainer · Out of lives' });
+    expect(h.results()[0]).toMatchObject({ title: 'Aim trainer · Mixed · Out of lives' });
     expect(h.store.history(AIM_HISTORY)[0]).toMatchObject({ score: 0, shots: 3, lives: 0 });
     h.buttons.get('Play::Start')!(); h.instance.frame([]);
     expect(h.aim().lives).toBe(3);
@@ -231,6 +239,31 @@ describe('Rumble aim trainer sessions', () => {
     expect(h.clocks()[0]).toMatchObject({ label: 'Time', ms: 0 });
     expect(h.results()[0]).toBeNull();
     expect(h.store.get('mode', '')).toBe('Fight');
+    h.instance.dispose?.();
+  });
+
+  it('keeps each difficulty\'s history apart and replays a round at its own difficulty', async () => {
+    const h = await setup('Very hard');
+    expect(h.aim().difficulty).toBe('Very hard');
+    expect(h.aim().current.difficulty).toBe('Very hard');
+    for (let i = 0; i < 3; i++) { h.fire(false); h.advance(3000); }
+    expect(h.results()[0]).toMatchObject({ title: 'Aim trainer · Very hard · Out of lives' });
+    expect(h.store.history(`${AIM_HISTORY}:Very hard`)[0]).toMatchObject({ score: 0, shots: 3, difficulty: 'Very hard' });
+    expect(h.store.history(AIM_HISTORY)).toHaveLength(0);
+    await replayWrites.idle();
+    const [tape] = await listReplayFiles('rumble');
+    const recorder = captured.recorders[0], expected = recorder.fingerprint!(), live = h.aim();
+    h.selections.get('Play::Difficulty')!('Easy');
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration); h.instance.frame([]);
+    expect(h.aim()).not.toBe(live);
+    expect(h.aim().difficulty).toBe('Very hard');
+    expect(recorder.fingerprint!()).toBe(expected);
+    recorder.stop();
+    expect(h.store.get('aimDifficulty', '')).toBe('Easy');
+    h.buttons.get('Play::Start')!(); h.instance.frame([]);
+    expect(h.aim().difficulty).toBe('Easy');
     h.instance.dispose?.();
   });
 });
