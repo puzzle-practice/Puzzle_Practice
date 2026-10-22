@@ -1,16 +1,17 @@
 // In-puzzle text drawn the way the game draws it (research-fonts/FONT_NOTES.md):
-// - Big text is DellaRobbia BT from a shared size table, stretched 1.1x wide (the game on Windows).
+// - Big text is DellaRobbia BT in the game, stood in for here by Della Respira (a free font based on
+//   it, SIL OFL), from a shared size table, stretched 1.1x wide (the game on Windows).
 // - Small text is the "Dialog" font, which is Arial on Windows.
 // - Outlined labels get a 1px outline on all 8 sides with the fill at (+1, +1), drawn twice.
 // - Grayscale antialiasing, no kerning, and every glyph advance rounded to a whole pixel.
 // - Score popups last 1500 ms, rise 30 px in a straight line and fade over their second half.
 import { loadFont } from './fonts';
-import delarobbUrl from './fonts/delarobb.ttf?url';
+import dellaRespiraUrl from './fonts/della-respira.ttf?url';
 
-export const GAME_FONT = 'DellaRobbia BT';
+export const GAME_FONT = 'Della Respira';
 const DIALOG = 'Arial, "Liberation Sans", Helvetica, sans-serif';
 
-/** The game's popup font table: index 0..5 = DellaRobbia 24..68 px. */
+/** The game's popup font table: index 0..5 = game font 24..68 px. */
 export const GAME_FONT_SIZES = [24, 30, 36, 42, 52, 68] as const;
 /** The board font: pause labels and Weaving popups (Swordfight and Rumble use BOARD_FONT_SMALL). */
 export const BOARD_FONT = 52;
@@ -20,7 +21,7 @@ export const BOARD_FONT_SMALL = 42;
 export const TEXT_WHITE = '#ffffff';
 export const TEXT_YELLOW = '#ffff00';
 
-/** DellaRobbia metrics, as fractions of the size (measured with the game's font code). */
+/** The game's DellaRobbia metrics, as fractions of the size, so label boxes match the game. */
 const ASCENT = 23.11 / 24;
 const DESCENT = 5.66 / 24;
 /** Arial metrics. */
@@ -29,7 +30,7 @@ const DIALOG_DESCENT = 0.212;
 const STRETCH = 1.1;
 
 export function loadGameFont(): Promise<void> {
-  return loadFont(GAME_FONT, delarobbUrl);
+  return loadFont(GAME_FONT, dellaRespiraUrl);
 }
 
 /** GameFonts.get(i): px for index 0..5, clamped. */
@@ -45,7 +46,7 @@ export function gameFontFor(value: number, max: number): number {
 export interface GameTextStyle {
   /** Size in px. */
   px: number;
-  /** 'game' = DellaRobbia (default), 'dialog' = Arial. */
+  /** 'game' = Della Respira (default), 'dialog' = Arial. */
   family?: 'game' | 'dialog';
   bold?: boolean;
   fill?: string;
