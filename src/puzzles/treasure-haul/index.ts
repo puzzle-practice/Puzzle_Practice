@@ -4,18 +4,20 @@ import { SessionPause } from '../../core/pause';
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
 import { TimerWarning } from '../../core/timer-warning';
-import { loadFont } from '../../core/fonts';
+import { drawGameText, drawPauseLabel, floatAt, gameFontFor, gameTextBox, loadGameFont, TEXT_WHITE, TEXT_YELLOW, FLOAT_MS } from '../../core/game-text';
 import { dutyDesk } from '../../core/duty/desk';
 import type { RatingScale } from '../../core/duty/ratings';
 import { historyGroup } from '../../core/history';
 import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
 import { keyMatches } from '../../core/controls';
+import { copyText, pasteText } from '../../core/clipboard';
 import type { InputEvent } from '../../core/input';
 import type { Option } from '../../core/panel';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { Drawable } from '../../core/screen';
 import type { GameRecord } from '../../core/storage';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
+import { seedControls } from '../../core/seeds';
 import {
   type Cleared,
   chestValue,
@@ -34,8 +36,8 @@ import {
   W,
 } from './logic';
 import { colourAboveChest } from './colour-training';
+import { PAINTABLE, boardCode, boardIssues, fill as fillBoard, paint as paintSquare, paintOf, readBoardCode } from './create';
 import { createDrill, createRubyBoard, rubySpawnScore, type ClearPack } from './training';
-import delarobbUrl from './delarobb.ttf?url';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
@@ -56,7 +58,7 @@ const MINI = 23;
 /** Floating up: 0.35px/ms, half again as fast when settling. */
 const RISE_PX_PER_MS = 0.35 * 1.5;
 const SWAP_MS = 250;
-/** Gem blasts reach each square this long after the last (haul/client/k). */
+/** Gem blasts reach each square this long after the last. */
 const BLAST_MS = 50;
 /**
  * The game's timings, which players can change in Settings to experiment: a swap, a piece rising
@@ -72,11 +74,7 @@ const MAX_ABOVE = 2 * (H - 2);
 const SPAWN_POINTS = 3;
 const BAD_SPAWN = -9;
 /** Message sizes: the game fonts, picked by the step's points out of 100. */
-const FONT_SIZES = [24, 30, 36, 42, 52, 68];
-const FONT = 'Delarobb';
 /** Floating messages rise 30px over 1.5s, fading in the second half (nenya ScoreAnimation). */
-const FLOAT_MS = 1500;
-const FLOAT_PX = 30;
 /** A skin tone for the hauling hands, which the game tints to your pirate's. */
 const SKIN = [236, 188, 140];
 
@@ -85,7 +83,7 @@ const SKIN = [236, 188, 140];
  * always waiting to come in, and the board is dealt again each time one does.
  * Rubies scores these openings against ruby blasts. Clear: each haul starts another drill.
  */
-type Mode = '0' | 'chests1' | 'chests2' | 'spawn' | 'rubies' | 'clear' | LegacyMode;
+type Mode = '0' | 'chests1' | 'chests2' | 'spawn' | 'rubies' | 'clear' | 'create' | LegacyMode;
 /** The old fixed 1- and 2-chest modes: no longer offered, but their replays still play. */
 type LegacyMode = '1' | '2';
 const MODES: Option<Mode>[] = [
@@ -95,6 +93,7 @@ const MODES: Option<Mode>[] = [
   { value: 'spawn', label: 'Spawn Chests' },
   { value: 'rubies', label: 'Rubies' },
   { value: 'clear', label: 'Clear Chests' },
+  { value: 'create', label: 'Freeplay' },
 ];
 /** Default cleared-coin threshold for earning a chest. */
 const COINS_PER_CHEST = 100;
@@ -109,13 +108,17 @@ const ARTWORK: Option<Artwork>[] = [
 /** Low, medium and high value chests at the shallow end of the pool (treasureMinAwesomeness). */
 const CHEST_VALUE_WEIGHTS = [90, 9, 1];
 /** The Mode list shows the drills as one entry, Challenges, with a picker for which. */
-type ModeChoice = '0' | 'chests1' | 'chests2' | 'challenges';
+type ModeChoice = '0' | 'chests1' | 'chests2' | 'challenges' | 'create';
 const MODE_CHOICES: Option<ModeChoice>[] = [
   { value: '0', label: 'No chests' },
   { value: 'chests1', label: '1 chest' },
   { value: 'chests2', label: '2 chests' },
   { value: 'challenges', label: 'Challenges' },
+  { value: 'create', label: 'Freeplay' },
 ];
+const PIECE_NAMES = ['Coin 1', 'Coin 2', 'Coin 3', 'Coin 4', 'Ruby', 'Emerald', 'Low chest', 'Medium chest', 'High chest'];
+/** Freeplay mode paints with keys 1-4 (the coins), 5 (ruby), 6 (emerald) and 7-9 (chests) held over the board. */
+const PAINT_KEYS = PAINTABLE.map((paint, i) => ({ id: `paint${i + 1}`, label: `Paint ${PIECE_NAMES[i].toLowerCase()} (Freeplay)`, defaultKey: String(i + 1), paint }));
 type Challenge = 'spawn' | 'rubies' | ClearPack;
 const CHALLENGES: Option<Challenge>[] = [
   { value: 'spawn', label: 'Spawn Chests' },
@@ -250,7 +253,7 @@ function tint(img: HTMLImageElement): HTMLCanvasElement {
 export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplayTime: rawReplayTime }) => {
   const pause = new SessionPause(rawTicks, rawReplayTime);
   const { ticks, setReplayTime } = pause;
-  const [images] = await Promise.all([Images.load(imageUrls), loadFont(FONT, delarobbUrl)]);
+  const [images] = await Promise.all([Images.load(imageUrls), loadGameFont()]);
   let artwork = store.get<Artwork>('artwork', 'vampirate');
   if (!ARTWORK.some((option) => option.value === artwork)) artwork = 'vampirate';
   const img = (name: string) => {
@@ -263,8 +266,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const sounds = new SoundBank<Sound>(soundUrls, () => replays?.isSeeking ?? false);
   const warning = new TimerWarning('vampirate', () => replays?.isSeeking ?? false);
   const ctx = screen.ctx;
-  const rng = new PyRandom();
-  rng.seedFromCrypto();
+  const rng = new Random();
+  const fxRng = new Random();
   const random = () => rng.random();
   let replays!: ReplayRecorder;
   const hands = tint(img('hands'));
@@ -315,7 +318,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let showEmeraldSightLines = store.get<boolean>('showEmeraldSightLines', false);
   let firstClearAt: number | null = null;
   let trainingChest: { x: number; y: number } | null = null;
-  let edgeStart: { seed: ReturnType<PyRandom['snapshot']>; tally: Tally; gold: number; cursor: Point } | null = null;
+  /** Freeplay mode: the palette piece a left click places, the piece a held key paints, and moves waiting to be recorded. */
+  let createStarted = false;
+  let palettePaint: string | null = null;
+  let paintWith: string | null = null;
+  let painting = false;
+  let pasteNote = '';
+  let commands: string[] = [];
+  let edgeStart: { seed: ReturnType<Random['snapshot']>; tally: Tally; gold: number; cursor: Point } | null = null;
 
 
   let board: HaulBoard | null = null;
@@ -364,7 +374,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const cellXY = (x: number, y: number): Point => [x * CELL, (H - 1 - y) * CELL];
   const chestSheet = (mini: boolean) => (mini ? 'minichest2x2' : 'chest2x2');
   /** Bests are kept per mode, pack, round length and spawn rules. */
-  const timed = () => roundSecs > 0;
+  const timed = () => roundSecs > 0 && mode !== 'create';
+  const creating = () => running && createStarted;
   const spawnDrill = () => mode === 'spawn' || mode === 'rubies';
   const colourDrill = () => mode === 'clear' && clearPack === 'efficient' && trainingRules >= 6;
   const scoreLabel = () => mode === 'rubies' ? 'Ruby score' : mode === 'spawn' ? 'Spawn score' : colourDrill() ? 'Clears' : mode === 'clear' ? 'Chests cleared' : chestMode() || mode === '1' || mode === '2' ? 'Chests hauled' : 'Points';
@@ -410,12 +421,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   /** A floating message, moved clear of any already showing (PuzzleBoardView.f's arranger). */
   function say(message: Message, points: number): void {
-    const px = FONT_SIZES[Math.min(FONT_SIZES.length - 1, Math.floor((points * (FONT_SIZES.length)) / 100))];
-    ctx.save();
-    ctx.font = `${px}px "${FONT}"`;
-    const w = Math.ceil(ctx.measureText(message.text).width * 1.1) + 4;
-    ctx.restore();
-    const h = Math.round(px * 1.2);
+    const px = gameFontFor(points, 100);
+    const { w, h } = gameTextBox(ctx, message.text, { px });
     let x: number;
     let y: number;
     // HaulBoardView.a(int x, int y, int w, int h,...): centred across w squares, and over the top of h.
@@ -429,10 +436,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     else place(cursor[0], cursor[1], 2, 1);
     const now = ticks();
     for (const t of texts) {
-      const ty = t.y - (FLOAT_PX * (now - t.start)) / FLOAT_MS;
+      const ty = t.y + floatAt(now - t.start).dy;
       if (y! < ty + t.h && ty < y! + h && x! < t.x + t.w && t.x < x! + w) y = ty + t.h;
     }
-    texts.push({ text: message.text, colour: message.kind === 'chain' ? '#ffff00' : '#ffffff', px, x: x!, y: Math.min(y!, BOARD - h), w, h, start: now });
+    texts.push({ text: message.text, colour: message.kind === 'chain' ? TEXT_YELLOW : TEXT_WHITE, px, x: x!, y: Math.min(y!, BOARD - h), w, h, start: now });
   }
 
   // ---- The game ----
@@ -442,6 +449,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     edgeStart = mode === 'clear' && clearPack === 'edges' && trainingRules >= 5 ? {
       seed: rng.snapshot(), tally: { ...tally, chestsByType: [...tally.chestsByType] }, gold, cursor: [...cursor],
     } : null;
+    rng.nextBoard();
+    fxRng.seed(JSON.stringify(rng.snapshot()));
     firstClearAt = null;
     trainingChest = null;
     colourGoal = null;
@@ -486,7 +495,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         if (left[x] === 0) left[x] = 1500;
-        left[x] = Math.max(left[x] - rng.randintN(0, 149), 500);
+        left[x] = Math.max(left[x] - fxRng.integer(0, 149), 500);
         durations[y * W + x] = left[x] / speed;
       }
     }
@@ -517,9 +526,55 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     });
   }
 
+  const seedMode = seedControls(panel, store, () => running || !!replays?.isPlaying);
+  /** Freeplay mode: the board can change once nothing on it is moving. */
+  const editable = () => creating() && !!board && active && stable && !intro && !redeal && actionCount() === 0;
+  const queue = (command: string) => { if (running && !pause.paused && !replays.isPlaying) commands.push(command); };
+  /** Freeplay mode: every change to the board and every swap is a recorded command, so replays repeat them in order. */
+  function createCommand(command: string): void {
+    if (!board || !creating()) return;
+    if (command.startsWith('swap:')) {
+      const [x, y] = command.slice(5).split(',').map(Number);
+      cursor = [x, y];
+      swapAt(x, y);
+      return;
+    }
+    if (!editable()) return;
+    let changed = false;
+    if (command.startsWith('paint:')) {
+      const [x, y, what] = command.slice(6).split(',');
+      changed = paintSquare(board, Number(x), Number(y), what);
+    } else if (command.startsWith('fill:')) changed = fillBoard(board, command.slice(5));
+    else if (command.startsWith('load:')) {
+      const cells = readBoardCode(command.slice(5));
+      if (cells) { board.cells.splice(0, cells.length, ...cells); changed = true; }
+    } else if (command === 'generate') {
+      board = new HaulBoard(random);
+      board.populate();
+      board.gemRates = [...gemRates];
+      changed = true;
+    }
+    if (changed) shown = [...board.cells];
+  }
+  /** The square under the pointer, y = 0 at the bottom. */
+  const squareAt = (p: Point): Point | null => {
+    const x = Math.floor((p[0] - BOARD_X) / CELL), y = H - 1 - Math.floor((p[1] - BOARD_Y) / CELL);
+    return x >= 0 && x < W && y >= 0 && y < H ? [x, y] : null;
+  };
+  const paintAt = (p: Point, what: string) => {
+    const at = squareAt(p);
+    if (at && board && paintOf(board.get(at[0], at[1])) !== what) queue(`paint:${at[0]},${at[1]},${what}`);
+  };
+
   function start(): void {
     pause.resume();
+    createStarted = mode === 'create';
+    commands = [];
+    paintWith = null;
+    painting = false;
+    pasteNote = '';
     warning.reset();
+    if (!replays.isPlaying) rng.beginSession(seedMode.next());
     replays.begin({ mode, clearPack, roundSecs, spawnDelay, gemRates: [...gemRates], coinsPerChest, chestRules, trainingRules, dismissRules, impossibleChests, timings: { ...timings } }, rng.snapshot());
     dismissRequested = false;
     chestSupply = new ChestSupply(coinsPerChest, ticks(), chestRules === 5 && chestMode() ? 'cycle' : mode !== 'chests2' ? 'initial' : chestRules === 4 ? 'wait' : chestRules === 3 ? 'clear' : 'initial', timings.chestDelayMs);
@@ -617,7 +672,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     intro = null;
     timers = [];
     const best = bests[bestKey()];
-    const better = !replays.isPlaying && completed && (best === undefined || score() > best);
+    const better = store.scoresEnabled && !replays.isPlaying && completed && (best === undefined || score() > best);
     if (better) {
       bests[bestKey()] = score();
       store.set('bestPoints', bests);
@@ -668,7 +723,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       }
       if (!chest || isChestOrigin(c.piece)) {
         [px, py] = cellXY(c.x, c.y);
-        flyers.push({ piece: c.piece, x: px, y: py, start: at, amp: random() * 10, period: 100 + rng.randintN(0, 99), fps: 15 + rng.randintN(0, 14) });
+        flyers.push({ piece: c.piece, x: px, y: py, start: at, amp: fxRng.random() * 10, period: 100 + fxRng.integer(0, 99), fps: 15 + fxRng.integer(0, 14) });
         startHauling();
       }
     });
@@ -728,7 +783,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (!board) return;
     // Spawn drills: one chest waits at the bottom for the next qualifying gap.
     if (spawnDrill()) {
-      if (!board.chestList.length) board.chestList.push({ value: rng.randintN(0, 2), size: 0 });
+      if (!board.chestList.length) board.chestList.push({ value: rng.integer(0, 2), size: 0 });
       return;
     }
     if (chestMode()) {
@@ -743,10 +798,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       }
       return;
     }
-    const want = mode === 'clear' || mode === '0' ? 0 : Number(mode);
+    const want = mode === 'clear' || mode === '0' || mode === 'create' ? 0 : Number(mode);
     let count = board.chestList.length + board.pending.length;
     for (const p of board.cells) if (isChestOrigin(p)) count++;
-    for (; count < want; count++) board.pending.push({ value: rng.randintN(0, 2), size: 0 });
+    for (; count < want; count++) board.pending.push({ value: rng.integer(0, 2), size: 0 });
   }
 
   /** A chest's value (its picture): low, medium or high by the game's shallow-end weights. */
@@ -909,7 +964,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       const h = isChest(f.piece) ? 2 * CELL : CELL;
       if (y >= -h) return true;
       const x = Math.round(f.x + f.amp * Math.sin((Math.PI * 2 * (now - f.start)) / f.period));
-      minis.push({ piece: f.piece, x: x + 44, start: now, fps: 15 + rng.randintN(0, 14) });
+      minis.push({ piece: f.piece, x: x + 44, start: now, fps: 15 + fxRng.integer(0, 14) });
       return false;
     });
     minis = minis.filter((m) => {
@@ -1063,37 +1118,15 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function drawTexts(now: number): void {
     texts = texts.filter((t) => now < t.start + FLOAT_MS);
     for (const t of texts) {
-      const p = (now - t.start) / FLOAT_MS;
-      ctx.save();
-      ctx.globalAlpha = p < 0.5 ? 1 : Math.max(0, 1 - (p - 0.5) * 2);
-      // The game stretches its message font 10% wide and outlines it in black.
-      ctx.translate(t.x + t.w / 2, t.y - FLOAT_PX * p);
-      ctx.scale(1.1, 1);
-      ctx.font = `${t.px}px "${FONT}"`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#000';
-      ctx.strokeText(t.text, 0, 0);
-      ctx.fillStyle = t.colour;
-      ctx.fillText(t.text, 0, 0);
-      ctx.restore();
+      const { dy, alpha } = floatAt(now - t.start);
+      drawGameText(ctx, t.text, t.x, t.y + dy, { px: t.px, fill: t.colour, alpha });
     }
   }
 
   const seconds = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
 
   function banner(text: string, y: number): void {
-    ctx.save();
-    ctx.font = `30px "${FONT}"`;
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#000';
-    ctx.fillStyle = '#fff';
-    ctx.strokeText(text, WIDTH / 2, y);
-    ctx.fillText(text, WIDTH / 2, y);
-    ctx.restore();
+    drawPauseLabel(ctx, text, WIDTH / 2, y, BOARD);
   }
 
   function moveCursor(dx: number, dy: number): void {
@@ -1108,14 +1141,17 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const liveEvents = pause.input(events, 'treasure-haul', running);
     if (liveEvents === null) return;
     events = liveEvents;
+    const liveCommands = replays.isPlaying ? [] : commands.splice(0);
+    for (const command of liveCommands) replays.command(command);
     const routed = replays.frame(events, input.mouse, ticks());
     events = routed.events;
     input.mouse = routed.mouse;
     const now = ticks();
     if (!routed.renderOnly) {
-      for (const command of routed.commands) {
+      for (const command of [...liveCommands, ...routed.commands]) {
         if (command === 'dismiss') dismissBoard();
         else if (command === 'retry') retryBoard();
+        else createCommand(command);
       }
       const onBoard = (p: Point) => p[0] >= BOARD_X && p[0] < BOARD_X + BOARD && p[1] >= BOARD_Y && p[1] < BOARD_Y + BOARD;
       // The cursor follows the mouse over the board: the square under it and the one below (HaulBoardView.c(int, int)).
@@ -1124,15 +1160,42 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         const cy = Math.min(H - 1, H - Math.floor((input.mouse[1] - BOARD_Y) / CELL));
         cursor = [cx, cy];
       }
+      const moved = input.mouse[0] !== lastMouse[0] || input.mouse[1] !== lastMouse[1];
       lastMouse = input.mouse;
+      // A Freeplay replay's swaps and paints are commands, so its recorded clicks and keys only move the cursor.
+      const creatingLive = creating() && !replays.isPlaying;
+      if (creatingLive && moved) {
+        if (paintWith !== null) paintAt(input.mouse, paintWith);
+        else if (painting && palettePaint !== null) paintAt(input.mouse, palettePaint);
+      }
+      const swapHere = () => {
+        if (creatingLive) queue(`swap:${cursor[0]},${cursor[1]}`);
+        else if (!creating()) swapAt(cursor[0], cursor[1]);
+      };
       for (const event of events) {
-        if (event.type === 'mousedown' && event.button <= 3 && onBoard(event.pos)) swapAt(cursor[0], cursor[1]);
+        if (creatingLive && event.type === 'mousedown' && event.button === 1 && palettePaint !== null) { paintAt(event.pos, palettePaint); painting = true; continue; }
+        if (creatingLive && event.type === 'mouseup' && event.button === 1 && painting) { painting = false; continue; }
+        if (creatingLive && event.type === 'mousedown' && (event.button === 4 || event.button === 5)) {
+          // The wheel cycles the coin or gem under the pointer.
+          const at = squareAt(event.pos);
+          const i = at && board ? PAINTABLE.slice(0, 6).indexOf(paintOf(board.get(at[0], at[1])) as typeof PAINTABLE[number]) : -1;
+          if (at && i >= 0) paintAt(event.pos, PAINTABLE[(i + (event.button === 4 ? 1 : 5)) % 6]);
+          continue;
+        }
+        const paintKey = event.type === 'keydown' || event.type === 'keyup' ? PAINT_KEYS.find((k) => keyMatches(event.key, 'treasure-haul', k.id, k.defaultKey)) : undefined;
+        if (paintKey) {
+          if (!creatingLive) continue;
+          if (event.type === 'keydown') { paintWith = paintKey.paint; paintAt(input.mouse, paintKey.paint); }
+          else if (paintWith === paintKey.paint) paintWith = null;
+          continue;
+        }
+        if (event.type === 'mousedown' && event.button <= 3 && onBoard(event.pos)) swapHere();
         else if (event.type === 'keydown') {
           if (keyMatches(event.key, 'treasure-haul', 'left', 'arrowleft')) moveCursor(-1, 0);
           else if (keyMatches(event.key, 'treasure-haul', 'right', 'arrowright')) moveCursor(1, 0);
           else if (keyMatches(event.key, 'treasure-haul', 'up', 'arrowup')) moveCursor(0, 1);
           else if (keyMatches(event.key, 'treasure-haul', 'down', 'arrowdown')) moveCursor(0, -1);
-          else if (keyMatches(event.key, 'treasure-haul', 'swap', 'space', ['enter'])) swapAt(cursor[0], cursor[1]);
+          else if (keyMatches(event.key, 'treasure-haul', 'swap', 'space', ['enter'])) swapHere();
         }
       }
 
@@ -1169,7 +1232,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     } else screen.blit(img('background'), 0, 0);
     drawTop(now);
     drawBoard(now);
-    if (!running && !board) banner('Press Start to haul treasure', BOARD_Y + 180);
+    if (!running && !board) banner(mode === 'create' ? 'Press Start, then paint any board' : 'Press Start to haul treasure', BOARD_Y + 180);
     else if (finished) banner(clearMs ? `Hauled in ${seconds(clearMs)}` : roundEnd && now >= roundEnd ? "Time's up!" : 'Stopped', BOARD_Y + 180);
     replays.drawOverlay(ctx);
   }
@@ -1193,6 +1256,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     { id: 'up', label: 'Move up', defaultKey: 'ArrowUp' },
     { id: 'down', label: 'Move down', defaultKey: 'ArrowDown' },
     { id: 'swap', label: 'Swap pieces', defaultKey: 'Space' },
+    ...PAINT_KEYS.map(({ id, label, defaultKey }) => ({ id, label, defaultKey })),
   ]);
   const session = panel.session();
   const inChallenges = () => mode === 'spawn' || mode === 'rubies' || mode === 'clear';
@@ -1218,9 +1282,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     store.set('challenge', c);
   }, { hidden: () => !inChallenges() });
   const actions = panel.group();
-  actions.note(() => mode === 'rubies' ? 'Spawn a chest below a ruby: 1 point per ruby column. Its blast must leave no blockers above the chest in the outer two columns on either side.' : '');
-  actions.note(() => colourDrill() ? 'Above the chest, one column holds three coins of a problem colour and the other some more. Clear that colour from above the chest as efficiently as you can.' : '');
-  actions.note(() => mode === 'clear' && !colourDrill() ? presetDrill() ? 'Start with the chest in position. Haul as many as you can.' : 'A practice move brings in each chest. Haul as many as you can.' : '');
   // Starting while a replay is open closes it and starts a game of your own.
   actions.button('Start', () => { if (replays.isPlaying) { replays.stop(); if (replays.isPlaying) return; } if (running) stop(); else start(); }, { variant: 'primary', label: () => (replays?.isPlaying ? 'Start' : running ? 'Stop' : finished ? 'Play again' : 'Start') });
 
@@ -1240,6 +1301,54 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }, { hidden: () => mode !== 'clear' || clearPack !== 'edges' || trainingRules < 5,
     disabled: () => !running || !edgeStart || !!replays?.isPlaying || !!(roundEnd && ticks() >= roundEnd),
     title: 'Restore this chest, all starting pieces and the same refills. Undo this attempt’s score changes and keep the session timer running.' });
+
+  // The board's text can be copied in any mode, and pasted, dealt anew or painted while playing in Freeplay.
+  const createOnly = () => mode !== 'create';
+  const editing = () => !editable() || pause.paused || !!replays?.isPlaying;
+  const boardGroup = panel.group('Board');
+  boardGroup.button('Copy', () => { if (board) copyText(boardCode(board), 'Copy this board:'); }, { disabled: () => !board, title: 'Copy the board' });
+  boardGroup.button('Paste', () => void pasteText('Paste a board:').then((text) => {
+    if (text === null) return;
+    if (readBoardCode(text)) { pasteNote = ''; queue(`load:${text.trim()}`); }
+    else pasteNote = 'That isn’t a Treasure Haul board. Boards copied here start with T.';
+  }), { hidden: createOnly, disabled: editing, title: 'Play a board from a pasted copy' });
+  boardGroup.button('Generate', () => {
+    queue('generate');
+    window.setTimeout(() => { if (board) copyText(boardCode(board), 'Copy this board:'); }, 50);
+  }, { hidden: createOnly, disabled: editing, title: 'Deal a new board and copy it' });
+  const palette = document.createElement('div');
+  palette.className = 'piece-palette';
+  PAINTABLE.forEach((what, i) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'panel-button';
+    const icon = document.createElement('canvas');
+    icon.width = icon.height = CELL;
+    icon.setAttribute('aria-hidden', 'true');
+    const iconCtx = icon.getContext('2d')!;
+    let iconArt: Artwork | null = null;
+    button.append(icon, document.createTextNode(`${i + 1} · ${PIECE_NAMES[i]}`));
+    button.addEventListener('click', () => { palettePaint = palettePaint === what ? null : what; panel.used(); });
+    panel.addSync(() => {
+      button.disabled = !creating();
+      button.setAttribute('aria-pressed', String(palettePaint === what));
+      if (iconArt === artwork) return;
+      iconArt = artwork;
+      iconCtx.clearRect(0, 0, CELL, CELL);
+      const chest = 'LMH'.indexOf(what);
+      if (chest >= 0) iconCtx.drawImage(img(chestSheet(false)), chest * 2 * CELL, 0, 2 * CELL, 2 * CELL, 0, 0, CELL, CELL);
+      else iconCtx.drawImage(img(`piece${what === 'R' ? RUBY : what === 'E' ? EMERALD : what}`), 0, 0, CELL, CELL, 0, 0, CELL, CELL);
+    });
+    palette.append(button);
+  });
+  boardGroup.append(palette, { hidden: createOnly });
+  boardGroup.button('Fill board', () => queue(`fill:${palettePaint !== null && !'LMH'.includes(palettePaint) ? palettePaint : '0'}`),
+    { hidden: createOnly, disabled: editing, title: 'Make every square the selected coin or gem' });
+  boardGroup.note(() => pasteNote || 'Hold 1–4 for a coin, 5 for a ruby, 6 for an emerald or 7–9 for a low, medium or high chest to paint, or select a piece above and left-click to place it. A chest goes in with its top-left square under the pointer. Select it again to deselect and swap. Scroll to cycle the coin or gem under the pointer. Freeplay sends no chests of its own, has no timer and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => {
+    const issues = board ? boardIssues(board) : [];
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+  }, { hidden: () => createOnly() || !running });
 
   const best = () => bests[bestKey()];
   const waitingChests = () => (running || finished ? chestSupply.waiting + (board?.chestList.length ?? 0) : 0);
@@ -1324,7 +1433,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       showEmeraldSightLines = on;
       store.set('showEmeraldSightLines', on);
     }, { title: 'Hover over an emerald to highlight its diagonals and the pieces along them; chests are passed over.' });
-  actions.note(() => mode === 'clear' && coinOnlyDrill() && !colourDrill() ? 'Clear the chest with coin matches and the emeralds provided.' : '');
   panel.settings.group('Training').toggle('Impossible chests', () => impossibleChests, (on) => {
     impossibleChests = on;
     store.set('impossibleChests', on);
@@ -1365,11 +1473,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 14,
-    simulatorVersion: 14,
+    simulatorVersion: 15,
     migrate: (version, value) => {
       if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14].includes(version) || !value || typeof value !== 'object') return null;
       const s = value as Record<string, unknown>;
-      return (['0', '1', '2', 'chests1', 'chests2', 'spawn', 'clear'].includes(String(s.mode)) || (version >= 8 && s.mode === 'rubies')) &&
+      return (['0', '1', '2', 'chests1', 'chests2', 'spawn', 'clear'].includes(String(s.mode)) || (version >= 8 && s.mode === 'rubies') || (version >= 14 && s.mode === 'create')) &&
         (version === 1 || (version === 2 ? s.chestRules === 2 : version >= 13 ? s.chestRules === 4 || s.chestRules === 5 : version >= 5 ? s.chestRules === 4 : s.chestRules === 2 || s.chestRules === 3)) &&
         (version < 3 || s.trainingRules === (version >= 12 ? 8 : version >= 11 ? 7 : version >= 10 ? 6 : version >= 9 ? 5 : version >= 7 ? 4 : version === 6 ? 3 : 2)) &&
         (version < 7 || typeof s.impossibleChests === 'boolean') &&
@@ -1411,7 +1519,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       timings = { ...(savedReplaySettings.timings ?? DEFAULT_TIMINGS) };
       savedReplaySettings = null;
     }
-  }, (seed) => new PyRandom(0).restore(seed), setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
+  }, (seed) => new Random(0).restore(seed), setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
 
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
   replays.onTakeOver = () => {

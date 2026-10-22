@@ -38,7 +38,7 @@ function showLanding(): void {
     ),
   );
   app.replaceChildren(
-    el('header', { className: 'site' }, el('h1', {}, 'Puzzle Practice'), el('p', {}, 'Practice tools for Puzzle Pirates puzzles. Pick one to play.')),
+    el('header', { className: 'site' }, el('h1', {}, 'Puzzle Practice')),
     el('main', { className: 'grid' }, ...cards),
     backupFooter(),
   );

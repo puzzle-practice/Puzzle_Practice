@@ -16,7 +16,7 @@ export interface PuzzleMeta {
   /** Logical canvas size; defaults to 800×600. Settings go in the panel beside it, not on the canvas. */
   width?: number;
   height?: number;
-  /** Lower numbers are listed first on the landing page. */
+  /** Lower numbers are listed first on the landing page; it follows the skill order on a Yoweb pirate page. */
   order?: number;
   /** Thumbnail URL for the landing page (import it with `?url`). */
   thumbnail?: string;
@@ -29,14 +29,14 @@ export interface PuzzleContext {
   panel: Panel;
   /** Saved settings and scores for this puzzle only. */
   store: Store;
-  /** Milliseconds since the puzzle started, like pygame.time.get_ticks(). */
+  /** Simulation time in milliseconds, independent of browser rendering frequency. */
   ticks(): number;
   /** Sets an exact simulation time during playback; null resumes a continuous live clock. */
   setReplayTime?(milliseconds: number | null): void;
 }
 
 export interface PuzzleInstance {
-  /** Called up to 60 times a second (pygame's clock.tick(60)) with the input since the last frame. */
+  /** Called on the fixed 60 Hz simulation timeline, including catch-up steps after a late render. */
   frame(events: InputEvent[]): void;
   /** Called when the player leaves the puzzle. Release anything the puzzle started. */
   dispose?(): void;

@@ -1,4 +1,4 @@
-// The hand-made puzzles from board_pool.py, one string per row (top row first).
+// Hand-made puzzle templates, one string per row (top row first).
 // Letters: u v w x y = the five colours, s = random colour, z = empty,
 // k = bone box, g h / i j = 2x2 jar, a b c / d e f = 3x2 chest, m = machete, n = shovel,
 // o = earthquake, p = monkey.

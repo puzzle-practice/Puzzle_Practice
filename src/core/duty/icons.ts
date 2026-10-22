@@ -6,7 +6,9 @@ import chests from './media/chests.png?url';
 import cursedChests from './media/cursed_chests.png?url';
 import hauntedChests from './media/haunted_chests.png?url';
 import vampirateChests from './media/vampirate_chests.png?url';
+import werewolfChests from './media/werewolf_chests.png?url';
 import coffins from './media/vampirate_patches.png?url';
+import moons from './media/werewolf_moons.png?url';
 import puzzles from './media/puzzles.png?url';
 import haulCoin from '../../puzzles/treasure-haul/media/minipiece0.png?url';
 import haulRuby from '../../puzzles/treasure-haul/media/minipiece4.png?url';
@@ -21,6 +23,7 @@ import brewMid from '../../puzzles/distilling/media/piece_mid.png?url';
 import brewDark from '../../puzzles/distilling/media/piece_dark.png?url';
 import brewSpice from '../../puzzles/distilling/media/piece_spice.png?url';
 import carpStars from '../../puzzles/vampire-carp/media/stars.png?url';
+import cannonball from './media/cannonball.png?url';
 import smithBonus from '../../puzzles/blacksmithing/media/bonus.png?url';
 import smithTally from '../../puzzles/blacksmithing/media/tally.png?url';
 import smithPerfect from '../../puzzles/swordfight/media/swords/sword11.png?url';
@@ -51,12 +54,19 @@ export const ICONS: Record<string, Icon> = {
   'vampirate-chest-small': frame(vampirateChests, 12, 12, 0),
   'vampirate-chest-medium': frame(vampirateChests, 12, 12, 1),
   'vampirate-chest-large': frame(vampirateChests, 12, 12, 2),
+  'werewolf-chest-small': frame(werewolfChests, 12, 12, 0),
+  'werewolf-chest-medium': frame(werewolfChests, 12, 12, 1),
+  'werewolf-chest-large': frame(werewolfChests, 12, 12, 2),
   'haunted-chest': frame(hauntedChests, 12, 12, 2),
   'vampirate-chest': frame(vampirateChests, 12, 12, 2),
   // Coffins Boarded Up, worst to best.
   'coffin-slipshod': frame(coffins, 12, 12, 0),
   'coffin-creaky': frame(coffins, 12, 12, 1),
   'coffin-vampire-proof': frame(coffins, 12, 12, 2),
+  // Constellations Charted (Werewolf Isle navigation): the longer the chain, the fuller the moon.
+  'moon-crescent': frame(moons, 12, 12, 0),
+  'moon-half': frame(moons, 12, 12, 1),
+  'moon-full': frame(moons, 12, 12, 2),
   'haul-coin': frame(haulCoin, 23, 23, 0, 14),
   'haul-ruby': frame(haulRuby, 16, 23, 0, 14),
   'haul-emerald': frame(haulEmerald, 16, 23, 0, 14),
@@ -88,10 +98,12 @@ export const ICONS: Record<string, Icon> = {
   'smith-perfect': frame(smithPerfect, 30, 58, 0, 30),
   'smith-one-off': frame(smithOneOff, 30, 58, 0, 30),
   'smith-far-off': frame(smithFarOff, 30, 58, 0, 30),
+  // The duty report's own 10px cannonball, rather than a scaled puzzle piece.
+  cannonball: frame(cannonball, 10, 10, 0, 10),
 };
 
 /** The game's puzzle icons (24x24), for the station heading. */
-const STATION_ICON: Record<string, number> = { swordfight: 0, 'vampire-carp': 3, 'treasure-haul': 10, forage: 14 };
+const STATION_ICON: Record<string, number> = { swordfight: 0, 'vampire-carp': 3, gunning: 4, navigation: 5, 'treasure-haul': 10, forage: 14 };
 
 export function stationIcon(puzzle: string): Icon | null {
   const index = STATION_ICON[puzzle];

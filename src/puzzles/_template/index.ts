@@ -4,18 +4,20 @@
 // Folders starting with "_" are hidden from the landing page, so this one never shows up.
 import { within } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
-import { PyRandom } from '../../core/pyrandom';
-import { pygameFont } from '../../core/fonts';
+import { Random } from '../../core/random';
+import { seedControls } from '../../core/seeds';
+import { uiFont } from '../../core/fonts';
 
 const SIZE = 5;
 const CELL = 90;
 const LEFT = 25;
 const TOP = 70;
-const font = pygameFont(32);
+const font = uiFont(32);
 
 export default (async ({ screen, panel, store }) => {
   // Images would load here, e.g. `await Images.load(import.meta.glob(...))`; see vampire-carp/index.ts.
-  const rng = new PyRandom();
+  const rng = new Random();
+  const seeds = seedControls(panel, store, () => false);
   let lights: boolean[][] = [];
   let moves = 0;
   let best = store.get<number | null>('best', null);
@@ -28,8 +30,9 @@ export default (async ({ screen, panel, store }) => {
 
   /** Deals a board by pressing random lights, so it can always be solved. */
   function deal(): void {
+    rng.seed(seeds.next());
     lights = Array.from({ length: SIZE }, () => Array<boolean>(SIZE).fill(false));
-    for (let i = 0; i < 12; i++) toggle(rng.randintN(0, SIZE - 1), rng.randintN(0, SIZE - 1));
+    for (let i = 0; i < 12; i++) toggle(rng.integer(0, SIZE - 1), rng.integer(0, SIZE - 1));
     moves = 0;
   }
 
@@ -49,7 +52,7 @@ export default (async ({ screen, panel, store }) => {
         if (!within(event.pos, LEFT, LEFT + SIZE * CELL - 1, TOP, TOP + SIZE * CELL - 1)) continue;
         toggle(Math.floor((event.pos[1] - TOP) / CELL), Math.floor((event.pos[0] - LEFT) / CELL));
         moves++;
-        if (solved() && (best === null || moves < best)) {
+        if (store.scoresEnabled && solved() && (best === null || moves < best)) {
           best = moves;
           store.set('best', best);
         }

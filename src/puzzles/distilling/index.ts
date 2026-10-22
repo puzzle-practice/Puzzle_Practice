@@ -3,30 +3,30 @@
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
 import { copyText, pasteText } from '../../core/clipboard';
-import { loadFont } from '../../core/fonts';
+import { drawGameText, drawPauseLabel, floatAt, gameTextBox, loadGameFont, FLOAT_MS } from '../../core/game-text';
 import { keyMatches } from '../../core/controls';
 import { dutyDesk } from '../../core/duty/desk';
 import type { RatingScale } from '../../core/duty/ratings';
 import { columnOrbs } from './report';
 import { historyGroup } from '../../core/history';
 import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import type { InputEvent, Point } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
 import { excludesUnlikelyReplays, type GameRecord } from '../../core/storage';
 import {
-  convert_seed,
+  convertSeed,
   type Board,
   emptyBoard,
-  generate_board,
-  generate_column,
-  generate_seed,
-  generate_seeded_column,
-  get_create_seed,
-  get_practice_board,
-  get_practice_settings,
-  import_board,
-  next_random_seed,
+  generateBoard,
+  generateColumn,
+  generateSeed,
+  generateSeededColumn,
+  getCreateSeed,
+  getPracticeBoard,
+  getPracticeSettings,
+  importBoard,
+  nextRandomSeed,
   random as simRandom,
   type Seed,
   fromColumns,
@@ -50,7 +50,6 @@ import {
   vialLiquid,
   WIDTH as COLUMNS,
 } from './logic';
-import delarobbUrl from './delarobb.ttf?url';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
@@ -96,10 +95,7 @@ const VIAL_W = 42;
 const VIAL_H = 75;
 /** Message fonts: size 1 for most, 0 for spice and burnt. */
 const FONT_SIZES = [24, 30];
-const FONT = 'Delarobb';
 /** Floating messages drift 30px over 1.5 s, fading in the second half (nenya FloatingTextAnimation). */
-const FLOAT_MS = 1500;
-const FLOAT_PX = 30;
 
 /** Cursor directions (BrewBoardView.b): 0 down-left, 2 up-left, 3 up, 4 up-right, 6 down-right, 7 down. */
 const SW = 0;
@@ -129,23 +125,23 @@ const KEY_MOVES: Record<string, number> = {
 };
 /**
  * The Distilling Simulator's modes: Standard (your spawn rates and timer), Seeded (replay a seed or a
- * recorded piece sequence), Create (paint any board; never ends) and Practice (set boards from practice.ts).
+ * recorded piece sequence), Freeplay (paint any board; never ends) and Practice (set boards from practice.ts).
  */
 type Mode = 'Standard' | 'Seeded' | 'Create' | 'Practice';
 interface DistillingReplayState {
   format: 'distilling-replay-state';
   board: Board;
   simSeed: Seed;
-  randomState: ReturnType<PyRandom['snapshot']>;
+  randomState: ReturnType<Random['snapshot']>;
 }
 
 const MODES: { value: Mode; label: string }[] = [
   { value: 'Standard', label: 'Standard' },
   { value: 'Seeded', label: 'Seeded' },
-  { value: 'Create', label: 'Create' },
+  { value: 'Create', label: 'Freeplay' },
   { value: 'Practice', label: 'Practice' },
 ];
-/** Duty report ratings for Standard and Seeded: the score (points a column distilled). Practice and Create are Learning. */
+/** Duty report ratings for Standard and Seeded: the score (points a column distilled). Practice and Freeplay are Learning. */
 const RATING_SCALES: RatingScale[] = [{ id: 'score', label: 'Score (points a column)', cutoffs: [1, 3, 5, 7, 9], step: 0.25 }];
 
 /** The simulator's spawn weights, in its piece order: black, brown, burnt, spice, white. */
@@ -160,7 +156,7 @@ const SPAWN_BOXES: [number, string][] = [
 ];
 /** Practice drills with a furnace interval this long have no timer. */
 const TIMERLESS = 15000000;
-/** Create mode paints with keys 1-5: black, brown, white, spice, burnt; the wheel cycles in that order. */
+/** Freeplay mode paints with keys 1-5: black, brown, white, spice, burnt; the wheel cycles in that order. */
 const PAINT_ORDER = [HEAVY, MEDIUM, LIGHT, SPICE, BURNT];
 
 const MESSAGES = {
@@ -210,7 +206,7 @@ interface Message {
 }
 
 export default (async ({ screen, input, panel, store, ticks, setReplayTime }) => {
-  const [images] = await Promise.all([Images.load(imageUrls), loadFont(FONT, delarobbUrl)]);
+  const [images] = await Promise.all([Images.load(imageUrls), loadGameFont()]);
   const img = (name: string) => images.get(name);
   const sounds = new SoundBank<Sound>(soundUrls, () => replays?.isSeeking ?? false);
   const ctx = screen.ctx;
@@ -243,26 +239,28 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let mode = store.get<Mode>('mode', 'Standard');
   if (!MODES.some((m) => m.value === mode)) mode = 'Standard';
   let timerOn = store.get<boolean>('timerOn', true);
-  /** Create mode starts without a timer, as in the simulator. */
+  /** Freeplay mode starts without a timer, as in the simulator. */
   let createTimerOn = store.get<boolean>('createTimerOn', false);
   let timerSeconds = store.get<number>('timerSeconds', (TICK_MS * 50) / 1000);
   let difficulty = store.get<number>('difficulty', 50);
   let spawnRates = store.get<number[]>('spawnRates', [...DEFAULT_SPAWN]);
   let practiceNum = store.get<number[]>('practiceNum', [0, 0]);
-  /** The pasted seed: a simulator seed (Seeded) or a board seed (Create); blank for a random one. */
-  let seedText = '';
+  /** The pasted seed: a simulator seed (Seeded) or a board seed (Freeplay); blank for a random one. */
+  let seedText = store.get<string>('sessionSeed', '');
+  let fixedSeed = store.get<boolean>('seedMode', mode === 'Seeded');
+  if (fixedSeed && !/^[0-9]+$/.test(seedText)) seedText = generateSeed();
   /** The seed to replay the last start, in the same form. */
   let lastSeed = '';
   /** The simulator's piece sequence and rng decider, used up as columns are made (boards.ts Seed). */
   let simSeed: Seed = ['', ''];
   /** The simulator's next random rng decider ("7" + 20 digits), counted up each start. */
-  let randomSeed = generate_seed();
+  let randomSeed = generateSeed();
   let replays!: ReplayRecorder;
   let replayStartState: DistillingReplayState | null = null;
   let lastReplayState: DistillingReplayState | null = null;
   let paused = false;
   let startedMode: Mode = mode;
-  /** A piece key (1-5) held down in Create mode paints the piece under the mouse. */
+  /** A piece key (1-5) held down in Freeplay mode paints the piece under the mouse. */
   let paintWith: number | null = null;
   let palettePiece: number | null = null;
 
@@ -356,19 +354,12 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
 
   // ---- Floating messages ----
 
-  function measure(text: string, px: number): number {
-    ctx.save();
-    ctx.font = `${px}px "${FONT}"`;
-    const w = ctx.measureText(text).width * 1.1;
-    ctx.restore();
-    return Math.ceil(w) + 4;
-  }
+  const box = (text: string, px: number) => gameTextBox(ctx, text, { px });
 
   /** A message centred on the board, moved clear of others still showing (BrewBoardView.a(String,...)). */
   function say(text: string, opts: { orange?: boolean; down?: boolean; wait?: boolean } = {}): Message {
     const px = FONT_SIZES[opts.orange || opts.down ? 0 : 1];
-    const w = measure(text, px);
-    const h = Math.round(px * 1.2);
+    const { w, h } = box(text, px);
     let y = (VIEW_H - h) / 2;
     const now = ticks();
     for (const m of messages) {
@@ -384,31 +375,18 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   /** The Crystal Clear streak number, at the message's top-right corner (BrewBoardView.a(String, Animation)). */
   function sayBeside(text: string, beside: Message): void {
     const px = FONT_SIZES[0];
-    messages.push({ text, px, colour: '#fff', x: beside.x + beside.w, y: beside.y - 6, w: measure(text, px), h: Math.round(px * 1.2), start: ticks(), down: false });
+    messages.push({ text, px, colour: '#fff', x: beside.x + beside.w, y: beside.y - 6, ...box(text, px), start: ticks(), down: false });
   }
 
   function messageY(m: Message, now: number): number {
-    const t = Math.min(1, (now - m.start) / FLOAT_MS);
-    return m.y + (m.down ? 1 : -1) * Math.trunc(FLOAT_PX * t);
+    return m.y + floatAt(now - m.start, FLOAT_MS, m.down).dy;
   }
 
   function drawMessages(now: number): void {
     messages = messages.filter((m) => now < m.start + FLOAT_MS);
     for (const m of messages) {
-      const t = (now - m.start) / FLOAT_MS;
-      ctx.save();
-      ctx.globalAlpha = t < 0.5 ? 1 : Math.max(0, 1 - (t - 0.5) * 2);
-      ctx.translate(VIEW_X + m.x + m.w / 2, VIEW_Y + messageY(m, now) + m.px);
-      ctx.scale(1.1, 1);
-      ctx.font = `${m.px}px "${FONT}"`;
-      ctx.textAlign = 'center';
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#000';
-      ctx.strokeText(m.text, 0, 0);
-      ctx.fillStyle = m.colour;
-      ctx.fillText(m.text, 0, 0);
-      ctx.restore();
+      const { alpha } = floatAt(now - m.start);
+      drawGameText(ctx, m.text, VIEW_X + m.x, VIEW_Y + messageY(m, now), { px: m.px, fill: m.colour, alpha });
     }
   }
 
@@ -420,7 +398,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   /** The settings this start runs with: Practice brings its own (practice.ts). */
   function runSettings(): { spawn: number[]; difficulty: number; interval: number | null } {
     if (mode === 'Practice') {
-      const [spawn, interval, diff] = get_practice_settings(practiceNum);
+      const [spawn, interval, diff] = getPracticeSettings(practiceNum);
       return { spawn, difficulty: diff, interval: interval >= TIMERLESS ? null : interval };
     }
     const timed = mode === 'Create' ? createTimerOn : timerOn;
@@ -431,9 +409,11 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   function newGame(now = ticks()): BrewGame {
     const run = runSettings();
     const options: GameOptions = { tickMs: run.interval ? run.interval / 50 : TICK_MS, timerless: run.interval === null, endless: mode === 'Create' };
-    const boardSeed = BigInt.asIntN(64, BigInt(Math.floor(Math.random() * 2 ** 48)));
-    const text = seedText.trim();
-    // The simulator's modes. A seed is [piece sequence, rng decider] (boards.ts convert_seed).
+    // The simulator supplies every refill. Keep the unused native generator stable too,
+    // so fingerprints do not vary between identical sessions or their replays.
+    const boardSeed = 0;
+    const text = fixedSeed || mode === 'Create' ? seedText.trim() : '';
+    // The simulator's modes. A seed is [piece sequence, rng decider] (boards.ts convertSeed).
     let board: Board;
     if (replayStartState) {
       const snapshot = replayStartState;
@@ -443,23 +423,23 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       if (!simRandom.restore(snapshot.randomState)) throw new Error('Invalid Distilling replay state');
       lastSeed = '';
     } else if (mode === 'Seeded' || mode === 'Create') {
-      simSeed = /^[0-9]+$/.test(text) ? convert_seed(text) : ['', ''];
+      simSeed = /^[0-9]+$/.test(text) ? convertSeed(text) : ['', ''];
       if (simSeed[1] === '') {
         simSeed[1] = randomSeed.slice(1);
-        randomSeed = next_random_seed(randomSeed);
+        randomSeed = nextRandomSeed(randomSeed);
       }
       const sequence = simSeed[0];
       lastSeed = sequence + '7' + simSeed[1];
       simRandom.seed(simSeed[1]);
-      if (sequence !== '') [board, simSeed] = import_board(simSeed);
-      else [board, simSeed] = generate_board(emptyBoard(), run.spawn, 8, run.difficulty, simSeed);
+      if (sequence !== '') [board, simSeed] = importBoard(simSeed);
+      else [board, simSeed] = generateBoard(emptyBoard(), run.spawn, 8, run.difficulty, simSeed);
     } else {
-      simSeed = ['', randomSeed.slice(1)];
-      randomSeed = next_random_seed(randomSeed);
+      simSeed = ['', fixedSeed ? convertSeed(seedText)[1] || seedText : randomSeed.slice(1)];
+      randomSeed = nextRandomSeed(randomSeed);
       lastSeed = '7' + simSeed[1];
       simRandom.seed(simSeed[1]);
-      if (mode === 'Practice') [board, simSeed] = get_practice_board(emptyBoard(), practiceNum, run.spawn, run.difficulty, simSeed);
-      else [board, simSeed] = generate_board(emptyBoard(), run.spawn, 8, run.difficulty, simSeed);
+      if (mode === 'Practice') [board, simSeed] = getPracticeBoard(emptyBoard(), practiceNum, run.spawn, run.difficulty, simSeed);
+      else [board, simSeed] = generateBoard(emptyBoard(), run.spawn, 8, run.difficulty, simSeed);
     }
     lastReplayState = {
       format: 'distilling-replay-state',
@@ -475,14 +455,15 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     brew.makeColumn = (tall) => {
       const height = tall ? HEIGHT : HEIGHT - 1;
       let column: number[];
-      if (seeded) [column, simSeed] = generate_seeded_column(run.spawn, run.difficulty, simSeed, height);
-      else [column, simSeed] = generate_column(run.spawn, run.difficulty, simSeed);
+      if (seeded) [column, simSeed] = generateSeededColumn(run.spawn, run.difficulty, simSeed, height);
+      else [column, simSeed] = generateColumn(run.spawn, run.difficulty, simSeed);
       return column.filter((p) => p !== -1).slice(0, height).map(toBrewPiece);
     };
     return new BrewGame(brew, now, options);
   }
 
   function start(): void {
+    if (!replays.isPlaying) store.setScoresEnabled(!fixedSeed && mode !== 'Create');
     const now = ticks();
     swaps = 0;
     sessionStartedAt = now;
@@ -555,7 +536,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     }
   }
 
-  /** Create mode: change the piece under the mouse (the simulator's modify_piece). */
+  /** Freeplay mode: change the piece under the mouse (the simulator's modify_piece). */
   function paint(pos: Point, type: number | ((old: number) => number)): void {
     if (!game || !running || !inView(pos) || waitCount) return;
     hover(pos);
@@ -572,7 +553,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     }
   }
 
-  /** Create mode: the whole board one piece (the simulator's middle-click on its palette). */
+  /** Freeplay mode: the whole board one piece (the simulator's middle-click on its palette). */
   function fillBoard(type: number): void {
     if (!game || !running || waitCount) return;
     game.board.columns = game.board.columns.map((c) => c.map(() => type));
@@ -898,7 +879,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
             mouseHeld = true;
           }
         } else if (event.type === 'mousedown' && creating) {
-          // The wheel changes the piece under the mouse in Create mode.
+          // The wheel changes the piece under the mouse in Freeplay mode.
           const step = event.button === 4 ? 1 : -1;
           paint(event.pos, (old) => PAINT_ORDER[(PAINT_ORDER.indexOf(old) + step + PAINT_ORDER.length) % PAINT_ORDER.length]);
         } else if (event.type === 'mouseup' && event.button <= 3) {
@@ -970,15 +951,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   }
 
   function banner(text: string): void {
-    ctx.save();
-    ctx.font = `30px "${FONT}"`;
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#000';
-    ctx.fillStyle = '#fff';
-    ctx.strokeText(text, VIEW_X + VIEW_W / 2, 360);
-    ctx.fillText(text, VIEW_X + VIEW_W / 2, 360);
-    ctx.restore();
+    drawPauseLabel(ctx, text, VIEW_X + VIEW_W / 2, VIEW_Y + VIEW_H / 2, VIEW_W);
   }
 
   // ---- Panel ----
@@ -990,11 +963,12 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     return value;
   };
 
-  /** pyperclip.paste in the simulator: a seed of digits only, else nothing changes (is_paste_legal). */
-  async function pasteSeed(): Promise<boolean> {
+  /** Accept a pasted decimal seed; leave the current seed unchanged for other text. */
+  async function pasteSeed(asBoard = false): Promise<boolean> {
     const text = await pasteText('Paste a seed:');
     if (text === null || !/^[0-9]+$/.test(text)) return false;
-    seedText = text;
+    if (asBoard) seedText = text;
+    else setSeed(text);
     return true;
   }
 
@@ -1014,7 +988,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     return (ms > 0 ? swaps * 1000 / ms : 0).toFixed(2);
   }
 
-  /** Finished sessions are kept per mode and settings (per board for Practice); Create, a sandbox, keeps none. */
+  /** Finished sessions are kept per mode and settings (per board for Practice); Freeplay, a sandbox, keeps none. */
   function historyKey(m: Mode): string | null {
     if (m === 'Create') return null;
     if (m === 'Practice') return `Practice:${practiceNum.join('-')}`;
@@ -1035,11 +1009,11 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     ...[1,2,3,4,5].map((n) => ({ id: `paint${n}`, label: `Paint piece ${n}`, defaultKey: String(n) })),
   ]);
   const gameGroup = panel.session();
-  gameGroup.select('Mode', MODES, () => mode, (m) => {
-    mode = save('mode', m);
+  gameGroup.select('Mode', MODES.filter(option => option.value !== 'Seeded'), () => mode === 'Seeded' ? 'Standard' : mode, (m) => {
+    if (m !== 'Standard') { fixedSeed = false; store.set('seedMode', false); seedText = ''; }
+    mode = save('mode', m === 'Standard' && fixedSeed ? 'Seeded' : m);
     resultRows = null;
     game = null;
-    seedText = '';
     lastSeed = '';
   }, {});
   gameGroup.select(
@@ -1061,11 +1035,6 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   });
 
   const actions = panel.group();
-  actions.note(() => {
-    if (mode === 'Practice') return '';
-    const timer = timerShown() ? `${timerSeconds}s burn timer` : 'No burn timer';
-    return `Difficulty ${difficulty} · ${timer}`;
-  });
   actions
     // Starting while a replay is open closes it and starts a game of your own.
     .button('Start', () => { if (replays.isPlaying) { replays.stop(); if (replays.isPlaying) return; } if (running) dismiss(); else start(); }, { variant: 'primary', label: () => (replays?.isPlaying ? 'Start' : running ? 'Dismiss' : 'Start'), title: 'Dismiss saves the current score without processing another column' })
@@ -1118,13 +1087,13 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     title: 'Back to the default spawn rates',
   });
 
-  // The board's seed can be copied in any mode, and pasted or dealt anew while playing in Create.
-  const boardGroup = panel.group('Board');
-  boardGroup.button('Copy', () => game && copyText(get_create_seed(fromColumns(game.board.columns)), 'Copy this seed:'), {
+  // The board's seed can be copied in any mode, and pasted or dealt anew while playing in Freeplay.
+  const boardGroup = panel.controlSettings.group('Board');
+  boardGroup.button('Copy', () => game && copyText(getCreateSeed(fromColumns(game.board.columns)), 'Copy this seed:'), {
     disabled: () => !game,
     title: "Copy the board's seed",
   });
-  boardGroup.button('Paste', () => void pasteSeed().then((ok) => ok && running && start()), {
+  boardGroup.button('Paste', () => void pasteSeed(true).then((ok) => ok && running && start()), {
     hidden: () => mode !== 'Create',
     disabled: () => !running,
     title: 'Play a board from a pasted seed',
@@ -1132,7 +1101,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   boardGroup.button('Generate', () => {
     seedText = '';
     start();
-    copyText(get_create_seed(fromColumns(game!.board.columns)), 'Copy this seed:');
+    copyText(getCreateSeed(fromColumns(game!.board.columns)), 'Copy this seed:');
   }, { hidden: () => mode !== 'Create', disabled: () => !running, title: 'Deal a new board and copy its seed' });
   const palette = document.createElement('div');
   palette.className = 'piece-palette';
@@ -1158,18 +1127,31 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     palette.append(button);
   });
   boardGroup.append(palette, { hidden: () => mode !== 'Create' });
-  boardGroup.note(() => 'Hold 1–5 to paint, or select a piece above and left-click to place it. Select it again to deselect. Scroll to cycle pieces.', { hidden: () => mode !== 'Create' });
+  boardGroup.hint(() => 'Hold 1–5 to paint, or select a piece above and left-click to place it. Select it again to deselect. Scroll to cycle pieces.', { hidden: () => mode !== 'Create' });
   boardGroup.select('Fill piece', pieceNames.map((label, i) => ({ value: i, label })), () => Math.max(0, PAINT_ORDER.indexOf(palettePiece ?? PAINT_ORDER[0])), (i) => { palettePiece = PAINT_ORDER[i]; }, { hidden: () => mode !== 'Create' });
   boardGroup.button('Fill board', () => fillBoard(palettePiece ?? PAINT_ORDER[0]), { hidden: () => mode !== 'Create', disabled: () => !running });
 
-  const seedGroup = panel.group('Seed', { hidden: () => mode !== 'Seeded' });
-  seedGroup.button('Copy', () => lastSeed && copyText(lastSeed, 'Copy this seed:'), {
-    disabled: () => !lastSeed,
+  function setSeed(text: string): void {
+    text = text.trim();
+    if (!/^[0-9]+$/.test(text)) return;
+    seedText = text; fixedSeed = true; mode = 'Seeded';
+    store.set('sessionSeed', seedText); store.set('seedMode', true); store.set('mode', mode);
+  }
+  const seedGroup = panel.seedSettings.group('Seed');
+  seedGroup.toggle('Fixed seed', () => fixedSeed, on => {
+    if (on) { seedText = lastSeed || seedText || generateSeed(); store.set('sessionSeed', seedText); }
+    fixedSeed = on; store.set('seedMode', on);
+    if (mode === 'Standard' || mode === 'Seeded') mode = save('mode', on ? 'Seeded' : 'Standard');
+  }, { disabled: () => running || !!replays?.isPlaying, title: 'On: repeat this seed without setting PBs. Off: a fresh seed for every run.' });
+  seedGroup.text('Seed', () => fixedSeed ? seedText : lastSeed, setSeed,
+    { inputMode: 'numeric', disabled: () => running || !!replays?.isPlaying });
+  seedGroup.button('Copy', () => copyText(fixedSeed ? seedText : lastSeed, 'Copy this seed:'), {
+    disabled: () => !(fixedSeed ? seedText : lastSeed),
     title: 'Copy the seed of the last start',
   });
   seedGroup.button('Paste', () => void pasteSeed(), { disabled: () => running, title: 'Use a pasted seed for the next start' });
   seedGroup.button('New', () => {
-    seedText = generate_seed();
+    setSeed(generateSeed());
     copyText(seedText, 'Copy this seed:');
   }, { disabled: () => running, title: 'Make a new seed, copy it and use it for the next start' });
 
@@ -1181,7 +1163,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     difficulty = save('difficulty', 50);
     spawnRates = save('spawnRates', [...DEFAULT_SPAWN]);
     practiceNum = save('practiceNum', [0, 0]);
-    seedText = '';
+    seedText = ''; fixedSeed = false; store.set('seedMode', false);
     lastSeed = '';
     resultRows = null;
     game = null;
@@ -1233,12 +1215,12 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     if (state.format !== 'distilling-replay-state' || !Array.isArray(state.board) || state.board.length !== 10 ||
         !state.board.every((column) => Array.isArray(column) && column.length === 9 && column.every((piece) => Number.isInteger(piece) && piece >= -1 && piece <= 4)) ||
         !Array.isArray(state.simSeed) || state.simSeed.length !== 2 || typeof state.simSeed[0] !== 'string' || state.simSeed[1] !== '') return false;
-    return new PyRandom(0).restore(state.randomState);
+    return new Random(0).restore(state.randomState);
   };
 
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 1,
-    simulatorVersion: 1,
+    simulatorVersion: 2,
     migrate: (version, value) => {
       if (version !== 1 || !value || typeof value !== 'object') return null;
       const s = value as Record<string, unknown>;

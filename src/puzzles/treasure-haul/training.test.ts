@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import { createDrill, createRubyBoard, rubySpawnScore, emeraldRowsInColumn, type ClearPack } from './training';
 import { colourAboveChest } from './colour-training';
 import { HaulBoard, isChestOrigin, EMERALD, RUBY, EMPTY, W, H } from './logic';
@@ -11,7 +11,7 @@ describe('Rubies spawn practice', () => {
     const rows = new Set<number>();
     const layouts = new Set<string>();
     for (let seed = 0; seed < 1000; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const board = createRubyBoard(() => rng.random());
       const rubies = board.cells.flatMap((piece, i) => piece === RUBY ? [{ x: i % W, y: Math.floor(i / W) }] : []);
       expect([1, 2]).toContain(rubies.length);
@@ -86,7 +86,7 @@ describe('Rubies spawn practice', () => {
 describe('Clear Chests packs', () => {
   it('efficient drills make same-colour threes below the chest and across its other column', () => {
     for (let seed = 0; seed < 100; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest, opening } = createDrill(() => rng.random(), 'efficient', 5);
       board.gemRates = [0, 0];
       expect(opening).toBeDefined();
@@ -108,7 +108,7 @@ describe('Clear Chests packs', () => {
 
   it('Colour Cleanup puts three problem coins above the chest in one column and more in the other, and its solution clears them from above it', () => {
     for (let seed = 0; seed < 40; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest, colourGoal, solution } = createDrill(() => rng.random(), 'efficient');
       expect(colourGoal).toBeDefined();
       expect(board.findRuns()).toHaveLength(0);
@@ -134,7 +134,7 @@ describe('Clear Chests packs', () => {
 
   it('Middle chests start with the chest already in the middle four columns and rows', () => {
     for (let seed = 0; seed < 50; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest } = createDrill(() => rng.random(), 'standard');
       expect(board.findRuns()).toHaveLength(0);
       expect(isChestOrigin(board.get(chest.x, chest.y))).toBe(true);
@@ -149,7 +149,7 @@ describe('Clear Chests packs', () => {
     const columns = new Set<number>();
     const heights = new Set<number>();
     for (let seed = 0; seed < 200; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest } = createDrill(() => rng.random(), 'emeralds');
       expect(board.findRuns()).toHaveLength(0);
       expect(isChestOrigin(board.get(chest.x, chest.y))).toBe(true);
@@ -167,7 +167,7 @@ describe('Clear Chests packs', () => {
   it('every pack is stable, with middle placement or a solvable edge opening', () => {
     for (const pack of ['standard', 'efficient', 'emeralds', 'edges'] as ClearPack[]) {
       for (let seed = 0; seed < 30; seed++) {
-        const rng = new PyRandom(seed);
+        const rng = new Random(seed);
         const drill = createDrill(() => rng.random(), pack, pack === 'efficient' ? 5 : pack === 'edges' ? undefined : 6);
         const { board, chest, solution } = drill;
         expect(board.findRuns()).toHaveLength(0);
@@ -201,7 +201,7 @@ describe('Clear Chests packs', () => {
     const underneath = new Set<string>();
     let edgeCount = 0;
     for (let seed = 0; seed < 500; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest, opening } = createDrill(() => rng.random(), 'emeralds', 6);
       positions.add(chest.x);
       underneath.add([2, 3, 4].flatMap((y) => [board.get(chest.x, y), board.get(chest.x + 1, y)]).join(''));
@@ -239,7 +239,7 @@ describe('Clear Chests packs', () => {
   it('constructs varied edge solutions without rubies or automatic opening matches', () => {
     const patterns = new Set<string>();
     for (let seed = 0; seed < 1000; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest, solution, edgePattern } = createDrill(() => rng.random(), 'edges', 3);
       patterns.add(edgePattern!);
       expect(board.cells).not.toContain(RUBY);
@@ -294,7 +294,7 @@ describe('Clear Chests packs', () => {
     let verticals = 0;
     let doubles = 0;
     for (let seed = 0; seed < 500; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest, solution, edgePattern, impossible } = createDrill(() => rng.random(), 'edges', 4);
       expect(impossible).toBe(false);
       families.add(edgePattern!); heights.add(chest.y); sides.add(chest.x);
@@ -335,7 +335,7 @@ describe('Clear Chests packs', () => {
     let impossibleCount = 0;
     const layouts = new Set<string>();
     for (let seed = 0; seed < 1000; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest, impossible, solution } = createDrill(() => rng.random(), 'edges', 5, { impossibleChests: true });
       if (!impossible) { expect(solution).toBeDefined(); continue; }
       impossibleCount++;
@@ -355,8 +355,8 @@ describe('Clear Chests packs', () => {
       // The certificate survives rearranging coins, clearing the adjacent column,
       // and arbitrary refills elsewhere; it is not a failed search for a solution.
       for (let move = 0; move < 60; move++) {
-        const column = move % 3 === 0 ? outer : rng.randintN(0, W - 1);
-        const row = rng.randintN(1, H - 1);
+        const column = move % 3 === 0 ? outer : rng.integer(0, W - 1);
+        const row = rng.integer(1, H - 1);
         board.swap(column, row);
         for (let step = 0; step < 300; step++) {
           const result = board.step();
@@ -381,7 +381,7 @@ describe('Clear Chests packs', () => {
     const gemPositions = new Set<number>();
     let gemBoards = 0; let remote = 0; let opposite = 0;
     for (let seed = 0; seed < 500; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest, solution, impossible } = createDrill(() => rng.random(), 'edges');
       expect(impossible).toBe(false);
       expect(board.findRuns()).toHaveLength(0);
@@ -427,7 +427,7 @@ describe('Clear Chests packs', () => {
   }, 60000);
 
   it('retains earlier edge emerald positions for historical replays', () => {
-    const rng = new PyRandom(7);
+    const rng = new Random(7);
     const { board } = createDrill(() => rng.random(), 'emeralds', 1);
     expect(board.get(7, 6)).toBe(EMERALD);
     expect(board.get(0, 7)).toBe(EMERALD);
@@ -435,7 +435,7 @@ describe('Clear Chests packs', () => {
 
   it('retains the previous middle chests and top-row emeralds for version 2 training', () => {
     for (let seed = 0; seed < 30; seed++) {
-      const rng = new PyRandom(seed);
+      const rng = new Random(seed);
       const { board, chest } = createDrill(() => rng.random(), 'emeralds', 2);
       expect(board.get(0, 7)).toBe(EMERALD);
       expect(board.get(7, 7)).toBe(EMERALD);

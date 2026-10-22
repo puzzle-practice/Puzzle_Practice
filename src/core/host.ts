@@ -1,13 +1,12 @@
 // Runs one puzzle on a canvas: builds its context, then calls frame() at up to 60 fps.
 import { FrameClock } from './frame-clock';
-import { loadPygameFont } from './fonts';
+import { loadUiFont } from './fonts';
 import { Input } from './input';
 import { Panel } from './panel';
 import type { PuzzleFactory, PuzzleInstance, PuzzleMeta } from './puzzle';
 import { Screen } from './screen';
 import { Store } from './storage';
-
-const FRAME_MS = 1000 / 60;
+import { Simulation } from './simulation';
 
 export interface RunningPuzzle {
   stop(): void;
@@ -21,13 +20,14 @@ export async function runPuzzle(
   factory: PuzzleFactory,
 ): Promise<RunningPuzzle> {
   const screen = new Screen(canvas, meta.width ?? 800, meta.height ?? 600);
-  const input = new Input(screen);
+  let start = performance.now();
+  const input = new Input(screen, () => performance.now() - start);
   const store = new Store(id);
   const panel = new Panel(panelRoot, canvas);
   panel.onUsed = () => canvas.focus();
-  await loadPygameFont();
-  const start = performance.now();
-  const clock = new FrameClock(() => Math.floor(performance.now() - start));
+  await loadUiFont();
+  const simulation = new Simulation();
+  const clock = new FrameClock(() => simulation.time);
   const { ticks, setReplayTime } = clock;
 
   let instance: PuzzleInstance;
@@ -37,17 +37,18 @@ export async function runPuzzle(
     input.dispose();
     throw error;
   }
+  start = performance.now();
+  input.drain();
+  const catchUp = () => simulation.advance(performance.now() - start, time => clock.frame(() => instance.frame(input.drain(time))));
+  // Panel actions use the same logical time even if a display has not painted yet.
+  for (const event of ['click', 'change', 'input']) panelRoot.addEventListener(event, catchUp, true);
 
   let stopped = false;
   let handle = 0;
-  let last = -Infinity;
   const loop = (now: number) => {
     if (stopped) return;
     handle = requestAnimationFrame(loop);
-    // Hold high-refresh displays to 60 fps: several games step animations once per frame.
-    if (now - last < FRAME_MS - 2) return;
-    last = now;
-    clock.frame(() => instance.frame(input.drain()));
+    simulation.advance(now - start, time => clock.frame(() => instance.frame(input.drain(time))));
     panel.sync();
   };
   handle = requestAnimationFrame(loop);
@@ -57,6 +58,7 @@ export async function runPuzzle(
       stopped = true;
       cancelAnimationFrame(handle);
       input.dispose();
+      for (const event of ['click', 'change', 'input']) panelRoot.removeEventListener(event, catchUp, true);
       instance.dispose?.();
     },
   };

@@ -1,8 +1,5 @@
-// Puzzle setup from the Forage simulator (board_calc, board_matches, board_movement,
-// reserve_top_off, puzzles_randomize and Scramble_keys): colouring, filling and scrambling the
-// hand-made puzzles. The order of random draws is unchanged, so with the same seed these
-// produce the same puzzle boards as the Python code. Play itself follows the real game's
-// rules, in engine.ts.
+// Colouring, filling and scrambling the hand-made puzzles.
+// Play itself follows the game rules in engine.ts.
 //
 // The board is 10 rows by 7 columns, indexed board[row][column] with row 0 at the top.
 // Letters:
@@ -13,7 +10,7 @@
 //   g h / i j  jar (2x2, top-left g)
 //   a b c / d e f  chest (3x2, top-left a)
 //   m machete, n shovel, o earthquake, p monkey, q ants
-import type { PyRandom } from '../../core/pyrandom';
+import type { Random } from '../../core/random';
 
 export type Board = string[][];
 
@@ -25,10 +22,14 @@ const COLOUR_SET = new Set<string>(COLOURS);
 const FALLS_ALONE = new Set(['u', 'v', 'w', 'x', 'y', 'k', 'm', 'n', 'o', 'p', 'q']);
 const MULTI_CELL = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']);
 /** CI is cursed isle (Gauntlet) foraging; Normal plays it with normal foraging's scoring and crates. */
-export type Mode = 'puzzle' | 'ci' | 'infinite' | 'normal' | 'chaos';
+export type Mode = 'puzzle' | 'ci' | 'infinite' | 'normal' | 'chaos' | 'werewolf' | 'create';
 
 export interface Settings {
   mode: Mode;
+  /** Gauntlet: use the Werewolf Isle forest, treasures and wolf presentation. */
+  werewolfArt?: boolean;
+  /** Gauntlet: enable the Werewolf moons and their beams. */
+  moons?: boolean;
   /** Which crate sizes spawn outside puzzle mode. */
   bb: boolean;
   fj: boolean;
@@ -76,7 +77,7 @@ function dropPool(settings: Settings, specials: boolean): [string[], number[]] {
   const pieces: string[] = [...COLOURS];
   const weights = [0.196, 0.196, 0.196, 0.196, 0.196];
   if (specials && settings.mode !== 'puzzle') {
-    // Order and odds from reserve_top_off.py: earthquake, machete, shovel, monkey (ants never enabled).
+    // Refill tools and their odds: earthquake, machete, shovel, monkey (ants never enabled).
     const enabled = [settings.eq, settings.machete, settings.shovel, settings.monkey];
     const specialPieces = ['o', 'm', 'n', 'p'];
     const specialWeights = [0.004, 0.004, 0.004, 0.008];
@@ -200,7 +201,7 @@ export function boardMovement(board: Board, cleared: Cleared): boolean {
 }
 
 /** Drops pieces from the reserve into empty cells at the top, and refills the reserve. Returns whether anything dropped. */
-export function reserveTopOff(board: Board, reserve: Board, settings: Settings, rng: PyRandom, specials = true): boolean {
+export function reserveTopOff(board: Board, reserve: Board, settings: Settings, rng: Random, specials = true): boolean {
   let moved = false;
   const reserveMove = Array<number>(COLS).fill(0);
   for (let c = 0; c < COLS; c++) {
@@ -227,7 +228,7 @@ export function reserveTopOff(board: Board, reserve: Board, settings: Settings, 
 }
 
 /** Cascades the board until nothing matches or moves. Returns the chests cleared. */
-export function boardCalc(board: Board, reserve: Board, settings: Settings, rng: PyRandom, specials = true): Cleared {
+export function boardCalc(board: Board, reserve: Board, settings: Settings, rng: Random, specials = true): Cleared {
   const cleared: Cleared = [0, 0, 0];
   let moved = true;
   let matched = false;
@@ -246,8 +247,8 @@ export function boardCalc(board: Board, reserve: Board, settings: Settings, rng:
   return cleared;
 }
 
-/** puzzles_randomize.py: swaps the five colours of a puzzle for a random permutation. */
-export function randomizeColours(puzzle: Board, rng: PyRandom): Board {
+/** Swaps the five colours of a puzzle for a random permutation. */
+export function randomizeColours(puzzle: Board, rng: Random): Board {
   const order: string[] = [];
   while (order.length < 5) {
     const pick = rng.choice(COLOURS);
@@ -260,7 +261,7 @@ export function randomizeColours(puzzle: Board, rng: PyRandom): Board {
  * Fills a puzzle's "s" cells with random colours, retrying until the board is stable:
  * nothing matches and every fixed cell is as the author placed it.
  */
-export function fillPuzzle(puzzle: Board, reserve: Board, settings: Settings, rng: PyRandom): Board {
+export function fillPuzzle(puzzle: Board, reserve: Board, settings: Settings, rng: Random): Board {
   for (;;) {
     const board = puzzle.map((row) => row.map((p) => (p === 's' ? rng.choice(COLOURS) : p)));
     boardCalc(board, reserve, settings, rng);
@@ -274,7 +275,7 @@ export function fillPuzzle(puzzle: Board, reserve: Board, settings: Settings, rn
   }
 }
 
-/** Scramble_keys.py: cells marked 0 keep their colour when a puzzle is scrambled. */
+/** Cells marked 0 keep their colour when a puzzle is scrambled. */
 const SCRAMBLE_KEYS: Record<number, readonly string[]> = {
   1: ['1111111', '1111111', '1111111', '1111111', '1111111', '1111111', '1111100', '1111100', '1111100', '1111000'],
   3: ['1111111', '1111111', '1111111', '1111111', '1111111', '1111111', '1111111', '1111111', '1111111', '1111100'],
@@ -284,7 +285,7 @@ const SCRAMBLE_KEYS: Record<number, readonly string[]> = {
 };
 
 /** Re-rolls every colour of a puzzle (except its key cells), retrying until the result is stable. */
-export function scramblePuzzle(id: number, puzzle: Board, reserve: Board, settings: Settings, rng: PyRandom): Board {
+export function scramblePuzzle(id: number, puzzle: Board, reserve: Board, settings: Settings, rng: Random): Board {
   const key = SCRAMBLE_KEYS[id];
   const scrambled = (r: number, c: number) => (!key || key[r][c] === '1') && (COLOUR_SET.has(puzzle[r][c]) || puzzle[r][c] === 's');
   for (;;) {

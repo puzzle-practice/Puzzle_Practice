@@ -11,7 +11,7 @@
 //   - Your attacks land on top of its columns as plain pieces, at most one every few of its pairs.
 // AI skill is a preset for all of these. A second kind, GameNpc at the end, uses the game's own AI
 // numbers instead: base and maximum destruction, a chain chance, and slowing down when targeted.
-import type { PyRandom } from '../../core/pyrandom';
+import type { Random } from '../../core/random';
 import { type Attack, swordFor } from './attack';
 import { Board, BREAKER, colour, EMPTY, H, isBreaker, W } from './board';
 import type { FighterStats } from './fighter';
@@ -92,7 +92,7 @@ abstract class TallyNpc<S extends BaseStyle> {
   private incoming: number[] = [];
   private pairsSinceAttack = 0;
 
-  constructor(readonly index: number, readonly style: S, protected readonly rng: PyRandom, protected readonly hooks: NpcHooks, started: number) {
+  constructor(readonly index: number, readonly style: S, protected readonly rng: Random, protected readonly hooks: NpcHooks, started: number) {
     this.nextAt = started + style.pairMs;
   }
 
@@ -307,13 +307,13 @@ abstract class TallyNpc<S extends BaseStyle> {
     for (let i = 0; i < amount % W; i++) share[FILL_ORDER[i % W]]++;
     let overflow = 0;
     for (const x of FILL_ORDER) {
-      for (let i = 0; i < share[x]; i++) if (!this.stack(x, this.rng.randintN(0, 3))) overflow++;
+      for (let i = 0; i < share[x]; i++) if (!this.stack(x, this.rng.integer(0, 3))) overflow++;
     }
     while (overflow > 0) {
       let fitted = false;
       for (const x of FILL_ORDER) {
         if (overflow === 0) break;
-        if (this.stack(x, this.rng.randintN(0, 3))) {
+        if (this.stack(x, this.rng.integer(0, 3))) {
           overflow--;
           fitted = true;
         }

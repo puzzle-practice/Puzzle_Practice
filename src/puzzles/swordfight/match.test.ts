@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import { GameNpc, gameSkillStyle, Npc, skillStyle } from './npc';
 import { attackFor, swordFor } from './attack';
 import { Board, BREAKER, findClear } from './board';
@@ -43,7 +43,7 @@ function play(seed: number, until = 10 * 60_000, opponents = 1) {
 describe('the opponents', () => {
   it('stack their pieces on their lowest column, edges first', () => {
     const pairs: Array<[number, number]> = [[0, 1], [2, 3], [0, 0]];
-    const npc = new Npc(1, { ...skillStyle(50), pairMs: 100 }, new PyRandom(1), { nextPair: () => pairs.shift()!, attack: () => {} }, 0);
+    const npc = new Npc(1, { ...skillStyle(50), pairMs: 100 }, new Random(1), { nextPair: () => pairs.shift()!, attack: () => {} }, 0);
     npc.update(300);
     const tops = [0, 1, 2, 3, 4, 5].map((x) => npc.board.get(x, 12));
     expect(tops).toEqual([0, 2, 0, 0, 3, 1]);
@@ -53,7 +53,7 @@ describe('the opponents', () => {
     const attacks: number[] = [];
     const pairs: Array<[number, number]> = [...Array.from({ length: 20 }, (): [number, number] => [0, 0]), [BREAKER, 1]];
     const style = { ...skillStyle(100), pairMs: 100, breakAverage: 100, variation: 0, storeChance: 0 };
-    const npc = new Npc(1, style, new PyRandom(2), { nextPair: () => pairs.shift()!, attack: (a) => attacks.push(a.sprinkles + a.swords.reduce((n, [w, h]) => n + w * h, 0)) }, 0);
+    const npc = new Npc(1, style, new Random(2), { nextPair: () => pairs.shift()!, attack: (a) => attacks.push(a.sprinkles + a.swords.reduce((n, [w, h]) => n + w * h, 0)) }, 0);
     npc.update(2100);
     expect(npc.stats.shattered).toBeGreaterThan(20);
     expect(attacks.length).toBe(1);
@@ -64,7 +64,7 @@ describe('the opponents', () => {
     const links: number[] = [];
     const pairs: Array<[number, number]> = [...Array.from({ length: 10 }, (): [number, number] => [0, 1]), [BREAKER | 1, 2], [BREAKER, 3]];
     const style = { ...skillStyle(50), pairMs: 100, breakAverage: 100, variation: 0, storeChance: 100, comboMax: 1, strikeShare: 0 };
-    const npc = new Npc(1, style, new PyRandom(3), { nextPair: () => pairs.shift()!, attack: (a) => links.push(a.sprinkles) }, 0);
+    const npc = new Npc(1, style, new Random(3), { nextPair: () => pairs.shift()!, attack: (a) => links.push(a.sprinkles) }, 0);
     npc.update(1100);
     // The green breaker was stored; the red one can't be (one at most), so it goes off and takes the green with it.
     expect(npc.board.cells.some((p) => p === (BREAKER | 1))).toBe(true);
@@ -79,7 +79,7 @@ describe('the opponents', () => {
       const sent: Array<{ swords: number; sprinkles: number }> = [];
       const pairs: Array<[number, number]> = [...Array.from({ length: 30 }, (): [number, number] => [0, 0]), [BREAKER, 1]];
       const style = { ...skillStyle(50), pairMs: 100, breakAverage: 100, variation: 0, storeChance: 0, strikeShare: share };
-      const npc = new Npc(1, style, new PyRandom(4), { nextPair: () => pairs.shift()!, attack: (a) => sent.push({ swords: a.swords.length, sprinkles: a.sprinkles }) }, 0);
+      const npc = new Npc(1, style, new Random(4), { nextPair: () => pairs.shift()!, attack: (a) => sent.push({ swords: a.swords.length, sprinkles: a.sprinkles }) }, 0);
       npc.update(3100);
       if (share === 0) expect(sent[0].swords).toBe(0);
       else expect(sent[0].swords).toBeGreaterThan(0);
@@ -94,7 +94,7 @@ describe("the game-numbers opponents", () => {
     for (let seed = 1; seed <= 20; seed++) {
       const pairs = [...filled(20), [BREAKER, 1] as [number, number]];
       const style = { ...gameSkillStyle(50), pairMs: 100, chainChance: 0 };
-      const npc = new GameNpc(1, style, new PyRandom(seed), { nextPair: () => pairs.shift()!, attack: () => {} }, 0);
+      const npc = new GameNpc(1, style, new Random(seed), { nextPair: () => pairs.shift()!, attack: () => {} }, 0);
       npc.update(2100);
       // 40 reds, 30% to 60% of them shattered, plus the breaker.
       expect(npc.stats.shattered).toBeGreaterThanOrEqual(12 + 1);
@@ -107,7 +107,7 @@ describe("the game-numbers opponents", () => {
     for (const chain of [0, 100]) {
       const pairs: Array<[number, number]> = [...Array.from({ length: 10 }, (): [number, number] => [0, 1]), [BREAKER, 2]];
       const style = { ...gameSkillStyle(50), pairMs: 100, baseDestroy: 100, maxDestroy: 100, chainChance: chain, strikeShare: 0 };
-      const npc = new GameNpc(1, style, new PyRandom(1), { nextPair: () => pairs.shift()!, attack: (a) => sent.push(a.sprinkles) }, 0);
+      const npc = new GameNpc(1, style, new Random(1), { nextPair: () => pairs.shift()!, attack: (a) => sent.push(a.sprinkles) }, 0);
       npc.update(1100);
       expect(npc.board.cells.filter((p) => p === 1).length).toBe(10);
       expect(npc.board.cells.filter((p) => p === 0).length).toBe(0);
@@ -116,7 +116,7 @@ describe("the game-numbers opponents", () => {
   });
 
   it('play more slowly while targeted', () => {
-    const npc = new GameNpc(1, { ...gameSkillStyle(50), pairMs: 1000, targetedSlowdown: 100 }, new PyRandom(1), { nextPair: () => [0, 1], attack: () => {} }, 0);
+    const npc = new GameNpc(1, { ...gameSkillStyle(50), pairMs: 1000, targetedSlowdown: 100 }, new Random(1), { nextPair: () => [0, 1], attack: () => {} }, 0);
     npc.targeted = () => 1;
     npc.update(10_000);
     expect(npc.stats.pairs).toBe(5);

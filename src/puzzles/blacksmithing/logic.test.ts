@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import {
   BISHOP,
   boardDifficulty,
@@ -26,7 +26,7 @@ import {
 
 /** A board with every square set to `type` (or per square from `at`), all hot. */
 function boardOf(difficulty: number, at: (x: number, y: number) => number, seed = 1): IronBoard {
-  const rng = new PyRandom(seed);
+  const rng = new Random(seed);
   const board = new IronBoard(difficulty, () => rng.random());
   for (let x = 0; x < SIZE; x++) for (let y = 0; y < SIZE; y++) board.pieces[x][y].type = at(x, y);
   return board;
@@ -163,13 +163,13 @@ describe('board', () => {
   });
 
   it('plays out a whole sword without breaking the rules', () => {
-    const rng = new PyRandom(7);
+    const rng = new Random(7);
     for (let game = 0; game < 50; game++) {
       const board = new IronBoard(game % 4, () => rng.random());
       for (;;) {
         const options = board.findHittable();
         if (!options.length) break;
-        const p = options[rng.randintN(0, options.length - 1)];
+        const p = options[rng.integer(0, options.length - 1)];
         const before = p.condition;
         expect(board.hit(p.x, p.y)).not.toBeNull();
         expect(p.condition).toBe(before - 1);
@@ -211,7 +211,7 @@ describe('spawning (iron/a/a)', () => {
 
 describe('perfect boards', () => {
   it('can always be cleared, at every size and difficulty', () => {
-    const rng = new PyRandom(3);
+    const rng = new Random(3);
     const random = () => rng.random();
     for (let size = 1; size <= MAX_PERFECT_SIZE; size++) {
       for (let difficulty = 0; difficulty < 4; difficulty++) {
@@ -230,7 +230,7 @@ describe('perfect boards', () => {
   });
 
   it('takes one strike per square and never restamps', () => {
-    const rng = new PyRandom(4);
+    const rng = new Random(4);
     const layout = perfectBoard(3, 3, () => rng.random());
     const board = new IronBoard(3, () => rng.random(), layout);
     const [x, y] = layout.solution[0];

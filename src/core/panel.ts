@@ -5,10 +5,9 @@
 //
 // Play, Settings and History are always available.
 //
-//   Play      session choices (Mode) with Start / Stop, the clock and main score, then any other
-//             controls that matter during a game.
+//   Play      Start / Stop, Pause and session actions, the clock and live stats.
 //   Settings  everything chosen before a game, in Mode, Controls and Global subtabs: this puzzle's options (the game's
-//             own, then Look and keys), then what applies to every puzzle (pirate, display, sound,
+//             own, then gameplay controls and keys), then what applies to every puzzle (pirate, display, sound,
 //             replays).
 //   History   past games and replays only.
 //
@@ -16,7 +15,6 @@
 //   panel.clock(() => (timed ? { label: 'Time left', ms: left, countdown: true } : null));
 //   const session = panel.session();
 //   session.select('Mode', MODES, () => settings.mode, (m) => (settings.mode = m), { disabled: () => running });
-//   session.note(() => `Difficulty ${settings.difficulty}`);
 //   session.button('Start', start, { variant: 'primary', label: () => (running ? 'Stop' : 'Start') });
 //   panel.score().stats(['', 'Now', 'Best'], () => [['Moves', String(moves), String(best)]]);
 //   panel.settings.group('Game').toggle('Ants', () => settings.ants, (on) => (settings.ants = on), { disabled: () => running });
@@ -157,6 +155,7 @@ export class Page {
 
   /** A card of related controls, with an optional heading. */
   group(title?: string, options: GroupOptions = {}): Group {
+    if (title && ['Game', 'Look', 'Reset', 'Seed', 'Score', 'Session', 'Board', 'Keys', 'Controls'].includes(title) && options.collapsed === undefined) title = undefined;
     const card = el('section', 'panel-group');
     if (title && options.collapsed !== undefined) {
       // A heading that folds the card: the arrow shows which way it goes.
@@ -176,7 +175,7 @@ export class Page {
       card.classList.add('is-columns');
       card.style.setProperty('--columns', String(options.columns));
     }
-    this.element.append(card);
+    this.element.insertBefore(card, this.element.querySelector(':scope > .panel-seed-settings'));
     this.panel.watch(card, options);
     return new Group(this.panel, card);
   }
@@ -193,6 +192,7 @@ export class Panel {
   readonly play: Page;
   /** What's chosen before a game, for this puzzle only. */
   readonly settings: Page;
+  readonly seedSettings: Page;
   readonly controlSettings: Page;
   /** Settings shared by every puzzle, in the Global subtab. */
   readonly globalSettings: Page;
@@ -227,6 +227,9 @@ export class Panel {
       return new Page(this, area);
     };
     this.settings = part();
+    const seedSettings = el('div', 'panel-seed-settings');
+    this.settings.element.append(seedSettings);
+    this.seedSettings = new Page(this, seedSettings);
     this.controlSettings = part();
     this.globalSettings = part();
     const scopes = [this.settings, this.controlSettings, this.globalSettings];
@@ -295,7 +298,7 @@ export class Panel {
       (on) => this.preferences.set('compressReplays', on),
       { title: 'New recordings skip cursor travel that does not affect a move; Distilling keeps held-mouse paths.' },
     );
-    replayPreferences.note(() => 'Saved replays remain available in this browser. Connect a folder on the home page for automatic PC backups.');
+    replayPreferences.hint(() => 'Saved replays remain available in this browser. Connect a folder on the home page for automatic PC backups.');
     this.show(this.pages[0].name);
   }
 
@@ -378,9 +381,10 @@ export class Panel {
     return this.play.group(title, options);
   }
 
-  /** Session controls follow the tabs on the Play tab and precede the timer and main score. */
+  /** Buttons stay on Play; configuration fields are placed in Settings > Mode. */
   session(title?: string, options: GroupOptions = {}): Group {
-    return this.sessionPage.group(title, options);
+    const actions = this.sessionPage.group(undefined, options);
+    return new Group(this, actions.element, this.settings.group(title, options));
   }
 
   /** The main score, on the Play tab. */
@@ -503,9 +507,12 @@ export class Group {
   constructor(
     private readonly panel: Panel,
     readonly element: HTMLElement,
+    private readonly choices?: Group,
   ) {}
 
   private field(label: string, control: HTMLElement, options: ControlOptions, input?: HTMLInputElement | HTMLSelectElement): HTMLElement {
+    const heading = this.element.querySelector(':scope > .panel-title');
+    if (heading?.textContent === label) heading.remove();
     const row = el('label', 'panel-field');
     row.append(el('span', 'panel-label', label), control);
     this.element.append(row);
@@ -515,6 +522,7 @@ export class Group {
 
   /** A dropdown of exclusive choices. */
   select<T extends string | number>(label: string, options: readonly Option<T>[] | Get<readonly Option<T>[]>, get: Get<T>, set: (value: T) => void, opts: ControlOptions = {}): this {
+    if (this.choices) { this.choices.select(label, options, get, set, opts); return this; }
     const select = el('select', 'panel-select');
     const choices = typeof options === 'function' ? options : () => options;
     let current: readonly Option<T>[] | undefined;
@@ -546,6 +554,7 @@ export class Group {
 
   /** An on/off switch. Consecutive toggles in a group flow into columns. */
   toggle(label: string, get: Get<boolean>, set: (on: boolean) => void, opts: ControlOptions = {}): this {
+    if (this.choices) { this.choices.toggle(label, get, set, opts); return this; }
     const input = el('input', 'panel-switch');
     input.type = 'checkbox';
     input.addEventListener('change', () => {
@@ -574,6 +583,7 @@ export class Group {
 
   /** A number box; the value is set when it's committed (Enter or leaving the box). */
   range(label: string, get: Get<number>, set: (value: number) => void, opts: RangeOptions = {}): this {
+    if (this.choices) { this.choices.range(label, get, set, opts); return this; }
     const input = el('input', 'panel-range');
     input.type = 'range';
     input.min = String(opts.min ?? 0);
@@ -603,6 +613,7 @@ export class Group {
   }
 
   number(label: string, get: Get<number>, set: (value: number) => void, opts: NumberOptions = {}): this {
+    if (this.choices) { this.choices.number(label, get, set, opts); return this; }
     const input = el('input', 'panel-input');
     input.type = 'number';
     input.inputMode = 'numeric';
@@ -630,6 +641,7 @@ export class Group {
 
   /** A text box; the value is set when it's committed (Enter or leaving the box). */
   text(label: string, get: Get<string>, set: (value: string) => void, opts: TextOptions = {}): this {
+    if (this.choices) { this.choices.text(label, get, set, opts); return this; }
     const input = el('input', 'panel-input');
     input.type = 'text';
     input.spellcheck = false;
@@ -734,6 +746,7 @@ export class Group {
 
   /** A line of text that follows the game, e.g. a hint or a result. */
   note(get: Get<string>, opts: ControlOptions = {}): this {
+    if (this.choices) { this.choices.hint(get, opts); return this; }
     const p = el('p', 'panel-note');
     this.element.append(p);
     this.panel.watch(p, opts);
@@ -742,6 +755,13 @@ export class Group {
       if (p.textContent !== text) p.textContent = text;
       p.hidden = !text || (opts.hidden?.() ?? false);
     });
+    return this;
+  }
+
+  /** Contextual help without adding a paragraph to the panel. */
+  hint(get: Get<string>, opts: ControlOptions = {}): this {
+    if (this.choices) { this.choices.hint(get, opts); return this; }
+    this.panel.addSync(() => { this.element.title = opts.hidden?.() ? '' : get(); });
     return this;
   }
 

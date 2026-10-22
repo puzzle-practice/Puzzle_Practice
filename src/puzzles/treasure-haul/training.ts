@@ -1,5 +1,5 @@
 import { HaulBoard, W, H, RUBY, EMERALD, EMPTY, isChest, isChestOrigin } from './logic';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import { createVariedEdgeDrill } from './edge-training';
 import { createColourDrill } from './colour-training';
 
@@ -85,7 +85,7 @@ export function createDrill(random: () => number, pack: ClearPack, rules: 1 | 2 
     board.set(W - 1, 7, EMERALD);
     if (!board.findRuns().length) return { board, chest: { x, y } };
   }
-  const fallback = new PyRandom(0);
+  const fallback = new Random(0);
   return createDrill(() => fallback.random(), pack, rules);
 }
 
@@ -153,7 +153,7 @@ function createEmeraldDrill(random: () => number, fallback = false): Drill {
     if (!board.findRuns().length) return { board, chest: { x, y }, ...(opening && { opening }) };
   }
   if (fallback) throw new Error('Unable to construct edge emeralds');
-  const fixed = new PyRandom(0);
+  const fixed = new Random(0);
   return createEmeraldDrill(() => fixed.random(), true);
 }
 
@@ -218,7 +218,7 @@ function createLegacyDrill(random: () => number, pack: ClearPack): Drill {
     if (!board.findRuns().length) return { board, chest: { x, y }, ...(opening && { opening }) };
   }
   // A deterministic, validated fallback still carries the pack's promised solution.
-  const fallback = new PyRandom(0);
+  const fallback = new Random(0);
   return createLegacyDrill(() => fallback.random(), pack);
 }
 
@@ -301,7 +301,7 @@ function createEdgeDrill(random: () => number, fallback = false): Drill {
     }
   }
   if (fallback) throw new Error(`Unable to construct ${edgePattern}`);
-  const fixed = new PyRandom(0);
+  const fixed = new Random(0);
   return createEdgeDrill(() => fixed.random(), true);
 }
 
@@ -430,7 +430,7 @@ function createDeepEdgeDrill(random: () => number, options: DrillOptions,
     }
   }
   if (fallback) throw new Error(`Unable to construct deep ${edgePattern}`);
-  const fixed = new PyRandom(0);
+  const fixed = new Random(0);
   // A fallback retains the requested family and the solvable/impossible decision.
   return createDeepEdgeDrill(() => fixed.random(), options, { impossible, left, y, edgePattern });
 }

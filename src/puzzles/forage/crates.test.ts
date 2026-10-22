@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import { CRATE_SIZES, crateSize, HEIGHT, isCrate, isCrateAnchor, isTool, SHOVEL, WIDTH } from './board';
-import { GauntletChests, CrateRequests } from './crates';
+import { GauntletChests, CrateRequests, CURSED_TILES, WEREWOLF_TILES } from './crates';
 import { Forage, TIMING } from './engine';
 
 /** Plays random clicks, favouring tools, and checks the board stays whole. */
 function play(game: Forage, moves: number, seed: number): void {
-  const pick = new PyRandom(seed);
+  const pick = new Random(seed);
   for (let i = 0; i < moves; i++) {
-    let x = pick.randintN(0, WIDTH - 2);
-    let y = pick.randintN(0, HEIGHT - 2);
+    let x = pick.integer(0, WIDTH - 2);
+    let y = pick.integer(0, HEIGHT - 2);
     const tools = game.cells.flatMap((p, j) => (isTool(p) ? [j] : []));
     if (tools.length && pick.random() < 0.3) {
       const j = pick.choice(tools);
@@ -31,7 +31,7 @@ function play(game: Forage, moves: number, seed: number): void {
 
 describe('crate sources', () => {
   it('Chaos keeps normal move spacing but allows more than three chests and more than nine per board', () => {
-    const source = new GauntletChests(new PyRandom(12), [1, 0, 0], 9, true);
+    const source = new GauntletChests(new Random(12), [1, 0, 0], 9, true);
     const game = new Forage(22n, source);
     game.load(Array.from({ length: WIDTH * HEIGHT }, (_, i) => (i % WIDTH + Math.floor(i / WIDTH)) % 5));
     let spawned = 0;
@@ -65,7 +65,7 @@ describe('crate sources', () => {
     expect(older.steps[0].duration).toBe(TIMING.fall(2));
   });
   it('normal foraging asks for at most one crate per banana, and never more than 3 at once', () => {
-    const source = new CrateRequests(new PyRandom(3), [0.6, 0.35, 0.05], 9);
+    const source = new CrateRequests(new Random(3), [0.6, 0.35, 0.05], 9);
     const game = new Forage(11n, source);
     play(game, 1500, 1);
     expect(source.requested).toBeGreaterThan(2);
@@ -74,7 +74,7 @@ describe('crate sources', () => {
   });
 
   it('the Gauntlet brings 9 chests a board, at most 3 on it, scored 1, 2 or 3', () => {
-    const source = new GauntletChests(new PyRandom(4), [0.5, 0.35, 0.15], 9);
+    const source = new GauntletChests(new Random(4), [0.5, 0.35, 0.15], 9);
     const game = new Forage(12n, source);
     let points = 0;
     let collected = 0;
@@ -92,9 +92,33 @@ describe('crate sources', () => {
 });
 
 describe('paced Gauntlet chests', () => {
+  it('keeps delivery, crate sizes and scoring the same when only Werewolf art changes', () => {
+    let now = 0;
+    const normalSource = new GauntletChests(new Random(8), [0.5, 0.35, 0.15], 9, false, true, () => now);
+    const artSource = new GauntletChests(new Random(8), [0.5, 0.35, 0.15], 9, false, true, () => now);
+    const normal = new Forage(21n, normalSource);
+    const art = new Forage(21n, artSource, 8, false, true);
+    // Exclude monkey throws, whose presentation intentionally differs.
+    normal.board.allowed = art.board.allowed = [true, true, false, true, true];
+    let collected = 0;
+    for (let i = 0; i < 600; i++) {
+      now = i * 1000;
+      for (const game of [normal, art]) game.act(i % (WIDTH - 1), (i * 7) % (HEIGHT - 1), i % 3 === 0);
+      expect(art.cells).toEqual(normal.cells);
+      expect(art.lastResult).toEqual(normal.lastResult);
+      expect(artSource.budget).toBe(normalSource.budget);
+      collected = normal.cratesCollected;
+      for (let size = 0; size < 3; size++) {
+        if (normal.crateArt[size] === CURSED_TILES[size]) expect(art.crateArt[size]).toBe(WEREWOLF_TILES[size]);
+      }
+    }
+    expect(collected).toBeGreaterThan(0);
+    expect(collected).toBeLessThanOrEqual(9);
+  });
+
   it('arrive a move after they are due, through the spawn step, and still 9 a board', () => {
     let now = 0;
-    const source = new GauntletChests(new PyRandom(8), [0.5, 0.35, 0.15], 9, false, true, () => now);
+    const source = new GauntletChests(new Random(8), [0.5, 0.35, 0.15], 9, false, true, () => now);
     const game = new Forage(21n, source);
     let firstDue = -1;
     let firstLanded = -1;
@@ -116,7 +140,7 @@ describe('paced Gauntlet chests', () => {
 describe('paced chest timing', () => {
   it('wait for the next two-second batch and delivery delay', () => {
     let now = 0;
-    const source = new GauntletChests(new PyRandom(8), [0.5, 0.35, 0.15], 9, false, true, () => now);
+    const source = new GauntletChests(new Random(8), [0.5, 0.35, 0.15], 9, false, true, () => now);
     const game = new Forage(21n, source);
     let dueAt = -1;
     for (let i = 0; i < 400 && game.board.bonusMode === 0; i++) {
@@ -133,7 +157,7 @@ describe('paced chest timing', () => {
 describe('paced Normal crates', () => {
   it('asks two moves after the last request, waits for the two-second batch, then arrives with the next move', () => {
     let now = 0;
-    const source = new CrateRequests(new PyRandom(3), [1, 0, 0], 9, true, () => now);
+    const source = new CrateRequests(new Random(3), [1, 0, 0], 9, true, () => now);
     const game = new Forage(5n, source);
     const turn = () => { game.act(0, 8, false); };
     now = 100; turn();
@@ -149,7 +173,7 @@ describe('paced Normal crates', () => {
   });
 
   it('unpaced (older replays) asks before every move with room', () => {
-    const source = new CrateRequests(new PyRandom(3), [1, 0, 0], 9);
+    const source = new CrateRequests(new Random(3), [1, 0, 0], 9);
     const game = new Forage(5n, source);
     source.beforeMove(game);
     expect(game.board.bonusMode & 64).toBe(64);
@@ -158,7 +182,7 @@ describe('paced Normal crates', () => {
 
 describe('Gauntlet chests in a blocked column', () => {
   it('try another column on each later move until one is clear', () => {
-    const source = new GauntletChests(new PyRandom(8), [1, 0, 0], 9, true, false, () => 0, true);
+    const source = new GauntletChests(new Random(8), [1, 0, 0], 9, true, false, () => 0, true);
     const game = new Forage(9n, source);
     // Every top cell is a tool but one: the chest has to keep looking.
     const free = 4;

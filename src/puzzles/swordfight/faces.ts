@@ -2,7 +2,7 @@
 // paint, hair, hat) from the game's face bundles, each placed at its offset in the frame and recoloured
 // with the game's colourisations (skin, hair and the two cloth dyes).
 import { coloursOf, paintLayer, type Zation } from '../../core/duty/paint';
-import type { PyRandom } from '../../core/pyrandom';
+import type { Random } from '../../core/random';
 
 export const FACE = 58;
 
@@ -35,11 +35,11 @@ export interface Look {
 
 export type FaceKind = 'You' | 'Cultist' | 'Homunculus' | 'Thrall' | 'Skilled swabbie' | 'Custom';
 
-const pick = <T>(rng: PyRandom, list: readonly T[]): T => list[rng.randintN(0, list.length - 1)];
+const pick = <T>(rng: Random, list: readonly T[]): T => list[rng.integer(0, list.length - 1)];
 const names = coloursOf;
 
 /** How a pirate of a kind looks: man or woman, with random skin, hair and dyes. */
-export function lookFor(kind: FaceKind, female: boolean, rng: PyRandom): Look {
+export function lookFor(kind: FaceKind, female: boolean, rng: Random): Look {
   const g = female ? 'ffemale' : 'fmale';
   const head: Zation[] = female ? ['skin'] : ['skin', 'hair'];
   const colours: Look['colours'] = {

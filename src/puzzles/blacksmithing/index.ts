@@ -4,17 +4,19 @@ import { SessionPause } from '../../core/pause';
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
 import { TimerWarning } from '../../core/timer-warning';
-import { loadFont } from '../../core/fonts';
+import { drawGameText, drawPauseLabel, floatAt, gameFont, gameTextBox, loadGameFont, FLOAT_MS } from '../../core/game-text';
 import { dutyDesk } from '../../core/duty/desk';
 import type { RatingScale } from '../../core/duty/ratings';
 import { historyGroup } from '../../core/history';
 import { keyMatches } from '../../core/controls';
+import { copyText, pasteText } from '../../core/clipboard';
 import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
 import type { InputEvent, Point } from '../../core/input';
 import type { Option } from '../../core/panel';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { Drawable } from '../../core/screen';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
+import { seedControls } from '../../core/seeds';
 import type { GameRecord } from '../../core/storage';
 import {
   BOARD_DONE,
@@ -27,13 +29,15 @@ import {
   MIN_PERFECT_SIZE,
   perfectBoard,
   perfectPoints,
+  PIECE_CHARS,
+  PIECE_NAMES,
   SET_MESSAGES,
   SIZE,
   type Strike,
   WILD,
   WILD_REVEALED,
 } from './logic';
-import delarobbUrl from './delarobb.ttf?url';
+import { HEATS, PAINTABLE, boardCode, boardIssues, fill as fillBoard, load as loadBoard, markLast, paint as paintSquare, readBoardCode } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
@@ -60,11 +64,7 @@ const FRAME_MS = 1000 / 15;
 const GLOW_HOT = 'rgb(255, 255, 130)';
 const GLOW = 'rgb(255, 255, 65)';
 /** Message sizes: the game fonts, indexed as IronBoardView asks for them. */
-const FONT_SIZES = [24, 30, 36, 42, 52, 68];
-const FONT = 'Delarobb';
 /** Floating messages rise 30px over 1.5s, fading in the second half (nenya FloatingTextAnimation). */
-const FLOAT_MS = 1500;
-const FLOAT_PX = 30;
 
 /** Short names for the done levels, for the panel (the messages are in logic.ts). */
 const BLADE_NAMES = ['Club', 'Hefty blade', 'Finely balanced', 'Keen edge', 'Masterpiece'];
@@ -78,11 +78,15 @@ const RATING_SCALES: RatingScale[] = [
   { id: 'perfect', label: 'Perfect board, points a board', cutoffs: [0.5, 1, 1.5, 2.25, 2.75], step: 0.05 },
 ];
 
-type Mode = 'classic' | 'perfect';
+type Mode = 'classic' | 'perfect' | 'create';
 const MODES: Option<Mode>[] = [
   { value: 'classic', label: 'Classic (6x6, as in the game)' },
   { value: 'perfect', label: 'Perfect board' },
+  { value: 'create', label: 'Freeplay' },
 ];
+/** Freeplay mode paints with the piece's own key held over the board: 1-4, B, K, R, Q, and W for the rum jug. */
+const PAINT_KEYS = PAINTABLE.map((type) => ({ id: `paint${type + 1}`, label: `Paint ${PIECE_NAMES[type].toLowerCase()} (Freeplay)`, defaultKey: PIECE_CHARS[type], type }));
+const HEAT_OPTIONS: Option<number>[] = [3, 2, 1, 0].map((value) => ({ value, label: HEATS[value] }));
 
 /** Perfect-board run lengths: no timer, or 2 minutes. */
 const TIMERS: Option<number>[] = [
@@ -187,13 +191,13 @@ function silhouette(img: HTMLImageElement, colour: string): HTMLCanvasElement {
 export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplayTime: rawReplayTime }) => {
   const pause = new SessionPause(rawTicks, rawReplayTime);
   const { ticks, setReplayTime } = pause;
-  const [images] = await Promise.all([Images.load(imageUrls), loadFont(FONT, delarobbUrl)]);
+  const [images] = await Promise.all([Images.load(imageUrls), loadGameFont()]);
   const img = (name: string) => images.get(name);
   const sounds = new SoundBank<Sound>(soundUrls, () => replays?.isSeeking ?? false);
   const warning = new TimerWarning('gauntlet', () => replays?.isSeeking ?? false);
   const ctx = screen.ctx;
-  const rng = new PyRandom();
-  rng.seedFromCrypto();
+  const rng = new Random();
+  const fxRng = new Random();
   const random = () => rng.random();
   let replays!: ReplayRecorder;
 
@@ -309,9 +313,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const start = ticks();
     const bits = Array.from({ length: count }, (_, i) => ({
       tile: i % 4,
-      vx: (0.45 + random() * (0.6 - 0.45)) * (random() < 0.5 ? -1 : 1),
-      vy: -(0.57 + random() * (0.6 - 0.57)),
-      ay: rng.randintN(5, 39) / 5000,
+      vx: (0.45 + fxRng.random() * (0.6 - 0.45)) * (fxRng.random() < 0.5 ? -1 : 1),
+      vy: -(0.57 + fxRng.random() * (0.6 - 0.57)),
+      ay: fxRng.integer(5, 39) / 5000,
     }));
     return {
       layer: 9,
@@ -330,12 +334,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   /** A floating message centred on the board, moved down clear of any still showing (PuzzleBoardView.f). */
   function say(text: string, sizeIndex: number, duration = FLOAT_MS): void {
-    const px = FONT_SIZES[Math.max(0, Math.min(FONT_SIZES.length - 1, sizeIndex))];
-    const h = Math.round(px * 1.2);
+    const px = gameFont(sizeIndex);
+    const { h } = gameTextBox(ctx, text, { px });
     let y = (600 - h) / 2;
     const now = ticks();
     for (const m of messages) {
-      const my = m.y - (FLOAT_PX * (now - m.start)) / m.duration;
+      const my = m.y + floatAt(now - m.start, m.duration).dy;
       if (y < my + m.h && my < y + h) y = my + m.h;
     }
     messages.push({ text, px, start: now, duration, y, h });
@@ -344,22 +348,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function drawMessages(now: number): void {
     messages = messages.filter((m) => now < m.start + m.duration);
     for (const m of messages) {
-      const t = (now - m.start) / m.duration;
-      const alpha = t < 0.5 ? 1 : Math.max(0, 1 - (t - 0.5) * 2);
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      // The game stretches its message font 10% wide and draws it outlined in black.
-      ctx.translate(WIDTH / 2, m.y - FLOAT_PX * t + m.px);
-      ctx.scale(1.1, 1);
-      ctx.font = `${m.px}px "${FONT}"`;
-      ctx.textAlign = 'center';
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#000';
-      ctx.strokeText(m.text, 0, 0, WIDTH / 1.1);
-      ctx.fillStyle = '#fff';
-      ctx.fillText(m.text, 0, 0, WIDTH / 1.1);
-      ctx.restore();
+      const { dy, alpha } = floatAt(now - m.start, m.duration);
+      drawGameText(ctx, m.text, WIDTH / 2, m.y + dy, { px: m.px, align: 'center', alpha });
     }
   }
 
@@ -373,6 +363,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   function newSword(): void {
     pause.resume();
+    rng.nextBoard();
+    fxRng.seed(JSON.stringify(rng.snapshot()));
     const level = boardDifficulty(difficulty);
     board = mode === 'perfect' ? new IronBoard(level, random, perfectBoard(perfectSize, level, random)) : new IronBoard(level, random);
     lastPoints = null;
@@ -412,7 +404,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const hit = board.hit(x, y);
     if (!hit) return;
     hammerable = false;
-    if (mode === 'classic') announce(hit);
+    if (mode !== 'perfect') announce(hit);
+    // Freeplay never finishes the sword: the board stays to be painted.
     if (hit.finished && mode === 'classic') {
       const level = board.doneLevel();
       if (level === 0) sayDone();
@@ -427,7 +420,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** Messages and sounds for the chain (IronBoardView.a(Chain)), and the tally for the panel. */
   function announce(hit: Strike): void {
     const chain = hit.chain;
-    if (mode === 'classic' && board!.doneLevel() !== doneness) {
+    if (mode !== 'perfect' && board!.doneLevel() !== doneness) {
       doneness = board!.doneLevel();
       sayDone();
     }
@@ -474,19 +467,19 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       onFrame: (i) => {
         if (landed || i < 4) return;
         landed = true;
-        sounds.play((['hammer1', 'hammer2', 'hammer3'] as const)[rng.randintN(0, 2)]);
+        sounds.play((['hammer1', 'hammer2', 'hammer3'] as const)[fxRng.integer(0, 2)]);
         // Big sparks burst out in four mirrored quarters around the square's centre.
         anims.push(frames('big_spark', 108, 114, [0, 1, 2, 3, 4], cx, cy - 114, 9));
         anims.push(frames('big_spark', 108, 114, [0, 1, 2, 3, 4], cx - 108, cy - 114, 9, { flipX: true }));
         anims.push(frames('big_spark', 108, 114, [0, 1, 2, 3, 4], cx - 108, cy, 9, { flipX: true, flipY: true }));
         anims.push(frames('big_spark', 108, 114, [0, 1, 2, 3, 4], cx, cy, 9, { flipY: true }));
-        anims.push(sparks(hx - 27, hy + 75, rng.randintN(10, 24)));
+        anims.push(sparks(hx - 27, hy + 75, fxRng.integer(10, 24)));
         refresh();
       },
       onEnd: () => {
         refresh();
         hammerable = true;
-        if (board && board.findHittable().length === 0) endSword();
+        if (board && board.findHittable().length === 0 && mode !== 'create') endSword();
       },
     });
     later(250, () => anims.push(hammer));
@@ -561,7 +554,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     running = false;
     finished = true;
     if (mode === 'perfect') {
-      if (!replays.isPlaying) {
+      if (store.scoresEnabled && !replays.isPlaying) {
         const record = perfectRecords[perfectKey()] ?? { boards: 0, points: 0, cleared: 0, oneOff: 0 };
         record.boards++;
         record.points += lastPoints ?? 0;
@@ -602,7 +595,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ...duty.fields(report),
       ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? ''} : {}),
     });
-    if (!replays.isPlaying && board && board.numHits > (bests[key] ?? 0)) {
+    if (store.scoresEnabled && !replays.isPlaying && board && board.numHits > (bests[key] ?? 0)) {
       bests[key] = board.numHits;
       store.set('bestStrikes', bests);
     }
@@ -626,6 +619,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     pause.resume();
     warning.reset();
     duty.clear();
+    if (!replays.isPlaying) rng.beginSession(seedMode.next());
     replays.begin({ mode, difficulty, perfectSize, timerMs, scoringRules }, rng.snapshot());
     Object.assign(run, { active: true, start: ticks(), end: ticks(), points: 0, boards: 0, perfect: 0, oneOff: 0, farOff: 0, timeUp: false });
     newSword();
@@ -654,7 +648,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (!timerMs || timeUp) store.addHistory(runHistoryKey(), { score: run.points, boards: run.boards, ...duty.fields(report), ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? ''} : {}) });
     if (!timeUp) return;
     say("Time's up!", 4, 2500);
-    if (timedBests[key] === undefined || run.points > timedBests[key]) {
+    if (store.scoresEnabled && (timedBests[key] === undefined || run.points > timedBests[key])) {
       timedBests[key] = run.points;
       store.set('perfectTimedBests', timedBests);
     }
@@ -774,21 +768,110 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return at;
   }
 
+  // ---- Freeplay mode ----
+
+  /** The palette piece a left click places, the piece a held key paints, the heat painted, and the piece a right click marks as struck last. */
+  let palettePiece: number | null = null;
+  let paintWith: number | null = null;
+  let paintHeat = 3;
+  let lastStruck = 0;
+  let painting = false;
+  let pasteNote = '';
+  let commands: string[] = [];
+  const creating = () => running && mode === 'create';
+  /** The board can change between strikes. */
+  const editable = () => creating() && hammerable && !!board;
+  const queue = (command: string) => { if (creating() && !pause.paused && !replays.isPlaying) commands.push(command); };
+  /** Every change to a Freeplay board and every strike on it is a recorded command, so replays repeat them in order. */
+  function createCommand(command: string): void {
+    if (!board || !creating()) return;
+    if (command.startsWith('strike:')) {
+      const [x, y] = command.slice(7).split(',').map(Number);
+      if (board.pieces[x]?.[y]?.condition) strike(x, y);
+      return;
+    }
+    if (!editable()) return;
+    let changed = false;
+    if (command.startsWith('paint:')) {
+      const [x, y, type, heat] = command.slice(6).split(',').map(Number);
+      changed = paintSquare(board, x, y, type, heat);
+    } else if (command.startsWith('fill:')) {
+      const [type, heat] = command.slice(5).split(',').map(Number);
+      changed = fillBoard(board, type, heat);
+    } else if (command.startsWith('last:')) {
+      const [x, y, type] = command.slice(5).split(',').map(Number);
+      changed = markLast(board, { x, y, type });
+    } else if (command === 'unmark') changed = markLast(board, null);
+    else if (command.startsWith('load:')) {
+      const read = readBoardCode(command.slice(5));
+      if (read) { loadBoard(board, read); changed = true; }
+    } else if (command === 'generate') {
+      board = new IronBoard(boardDifficulty(difficulty), random);
+      changed = true;
+    }
+    if (!changed) return;
+    shown = board.pieces.map((col) => col.map((p) => ({ type: p.type, condition: p.condition })));
+    glowStart = ticks();
+    glows = board.selected ? board.findHittable().map((p) => ({ x: p.x, y: p.y, hot: p.condition === board!.strikesPerSquare })) : [];
+    doneness = board.doneLevel();
+    reblade();
+  }
+  const paintAt = (pos: Point, type: number) => {
+    const at = squareAt(pos);
+    if (at && board && (board.pieces[at[0]][at[1]].type !== type || board.pieces[at[0]][at[1]].condition !== paintHeat)) queue(`paint:${at[0]},${at[1]},${type},${paintHeat}`);
+  };
+
   function frame(events: InputEvent[]): void {
     const liveEvents = pause.input(events, 'blacksmithing', running || run.active);
     if (liveEvents === null) return;
     events = liveEvents;
+    const liveCommands = replays.isPlaying ? [] : commands.splice(0);
+    for (const command of liveCommands) replays.command(command);
     const routed = replays.frame(events, input.mouse, ticks());
     events = routed.events;
     input.mouse = routed.mouse;
     const now = ticks();
     if (!routed.renderOnly) {
+      for (const command of [...liveCommands, ...routed.commands]) createCommand(command);
+      // A Freeplay replay's strikes and paints are commands, so its recorded clicks and keys only move the cursor.
+      const creatingLive = creating() && !replays.isPlaying;
+      const strikeAt = (x: number, y: number) => {
+        if (creatingLive) queue(`strike:${x},${y}`);
+        else if (!creating()) strike(x, y);
+      };
+      if (creatingLive && (input.mouse[0] !== lastMouse[0] || input.mouse[1] !== lastMouse[1])) {
+        if (paintWith !== null) paintAt(input.mouse, paintWith);
+        else if (painting && palettePiece !== null) paintAt(input.mouse, palettePiece);
+      }
       for (const event of events) {
+        if (creatingLive && event.type === 'mousedown' && event.button === 1 && palettePiece !== null) { paintAt(event.pos, palettePiece); painting = true; continue; }
+        if (creatingLive && event.type === 'mouseup' && event.button === 1 && painting) { painting = false; continue; }
+        if (creatingLive && event.type === 'mousedown' && event.button === 3) {
+          const at = squareAt(event.pos);
+          if (at) queue(`last:${at[0]},${at[1]},${lastStruck}`);
+          continue;
+        }
+        if (creatingLive && event.type === 'mousedown' && (event.button === 4 || event.button === 5)) {
+          // The wheel cycles the piece under the pointer.
+          const at = squareAt(event.pos);
+          if (at && board) {
+            const type = board.pieces[at[0]][at[1]].type, n = PAINTABLE.length;
+            queue(`paint:${at[0]},${at[1]},${(type + (event.button === 4 ? 1 : n - 1)) % n},${board.pieces[at[0]][at[1]].condition || paintHeat}`);
+          }
+          continue;
+        }
+        const paintKey = creating() && (event.type === 'keydown' || event.type === 'keyup') ? PAINT_KEYS.find((k) => keyMatches(event.key, 'blacksmithing', k.id, k.defaultKey)) : undefined;
+        if (paintKey) {
+          if (!creatingLive) continue;
+          if (event.type === 'keydown') { paintWith = paintKey.type; paintAt(input.mouse, paintKey.type); }
+          else if (paintWith === paintKey.type) paintWith = null;
+          continue;
+        }
         if (event.type === 'mousedown' && event.button === 1) pressed = squareAt(event.pos);
         else if (event.type === 'mouseup' && event.button === 1) {
           // A click strikes only if it's pressed and released on the same square.
           const square = squareAt(event.pos);
-          if (square && pressed && square[0] === pressed[0] && square[1] === pressed[1]) strike(square[0], square[1]);
+          if (square && pressed && square[0] === pressed[0] && square[1] === pressed[1]) strikeAt(square[0], square[1]);
           pressed = null;
         } else if (event.type === 'keydown') {
           const directions: Array<[string, string]> = [
@@ -798,7 +881,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
           const direction = directions.find(([id, key]) => keyMatches(event.key, 'blacksmithing', id, key));
           const move = direction ? KEY_MOVES[direction[1]] : ['8','2','4','6','7','9','1','3'].includes(event.key) ? KEY_MOVES[event.key] : undefined;
           if (move) moveCursor(move[0], move[1]);
-          else if (keyMatches(event.key, 'blacksmithing', 'strike', 'space', ['enter','5','clear']) && cursor) strike(cursor[0], cursor[1]);
+          else if (keyMatches(event.key, 'blacksmithing', 'strike', 'space', ['enter','5','clear']) && cursor) strikeAt(cursor[0], cursor[1]);
         }
       }
       // The cursor follows the mouse while the board can be struck.
@@ -874,15 +957,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     drawMessages(now);
 
     if (!running && !finished) {
-      ctx.save();
-      ctx.font = `30px "${FONT}"`;
-      ctx.textAlign = 'center';
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#000';
-      ctx.fillStyle = '#fff';
-      ctx.strokeText('Press Start to forge a sword', WIDTH / 2, 230);
-      ctx.fillText('Press Start to forge a sword', WIDTH / 2, 230);
-      ctx.restore();
+      const prompt = mode === 'create' ? 'Press Start, then paint any board' : 'Press Start to forge a sword';
+      drawPauseLabel(ctx, prompt, WIDTH / 2, 220, WIDTH);
     }
     replays.drawOverlay(ctx);
   }
@@ -893,6 +969,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   /** Settings are locked while a sword or a run is going. */
   const busy = () => running || run.active;
+  const seedMode = seedControls(panel, store, () => busy() || !!replays?.isPlaying);
   panel.clock(() => {
     const left = mode === 'perfect' ? timeLeft() : null;
     return left === null ? null : { label: 'Time left', ms: left, countdown: true, warn: run.active && left < 10000 };
@@ -909,17 +986,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     { id: 'downLeft', label: 'Move down-left', defaultKey: 'End' },
     { id: 'downRight', label: 'Move down-right', defaultKey: 'PageDown' },
     { id: 'strike', label: 'Strike', defaultKey: 'Space' },
+    ...PAINT_KEYS.map(({ id, label, defaultKey }) => ({ id, label, defaultKey })),
   ]);
   const session = panel.session();
   session.select('Mode', MODES, () => mode, (m) => {
     mode = m;
     store.set('mode', m);
-  }, {});
+  }, { disabled: () => running || run.active });
   const actions = panel.group();
-  actions.note(() => {
-    const level = `Difficulty ${difficulty}`;
-    return mode === 'perfect' ? `${perfectSize}x${perfectSize} board · ${level}` : level;
-  });
   // Starting while a replay is open closes it and starts a game of your own.
   actions.button('Start', () => {
     if (replays.isPlaying) { replays.stop(); if (replays.isPlaying) return; }
@@ -927,7 +1001,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       if (run.active) endRun(false);
       else startRun();
     } else if (running) { abortBoard(); replays.finish('Stopped'); }
-    else { duty.clear(); replays.begin({ mode, difficulty, perfectSize, timerMs, scoringRules }, rng.snapshot()); newSword(); }
+    else { duty.clear(); rng.beginSession(seedMode.next()); commands = []; paintWith = null; painting = false; pasteNote = ''; replays.begin({ mode, difficulty, perfectSize, timerMs, scoringRules }, rng.snapshot()); newSword(); }
   }, { variant: 'primary', label: () => (replays?.isPlaying ? 'Start' : busy() ? 'Stop' : !finished || mode === 'perfect' ? 'Start' : 'New sword') });
 
   const best = () => bests[String(difficulty)];
@@ -937,7 +1011,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return [
       ['Points', String(run.points), best !== undefined ? String(best) : ''],
     ];
-  }).note(() => (timerMs ? 'Best is the most points in 2 minutes.' : 'Boards keep coming until you press Stop.'));
+  }).hint(() => (timerMs ? 'Best is the most points in 2 minutes.' : 'Boards keep coming until you press Stop.'));
 
   panel.tab('History').group('Perfect board totals', { hidden: () => mode !== 'perfect' }).stats(['', 'Now', 'Total'], () => {
     const record = perfectRecord();
@@ -950,18 +1024,63 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       [`Too far off (${scoringRules === 2 ? '-1' : '0'})`, '', String(record ? record.boards - record.cleared - record.oneOff : 0)],
       ['Points / board', '', record?.boards ? (record.points / record.boards).toFixed(2) : '-'],
     ];
-  }).note(() => `Totals are for ${perfectSize}x${perfectSize} at difficulty ${difficulty}. Cleared: +3; one square left: +1; two or more left: ${scoringRules === 2 ? '−1' : '0'}.`)
+  }).hint(() => `Totals are for ${perfectSize}x${perfectSize} at difficulty ${difficulty}. Cleared: +3; one square left: +1; two or more left: ${scoringRules === 2 ? '−1' : '0'}.`)
     .button('Reset totals', () => {
       delete perfectRecords[perfectKey()];
       store.set('perfectRecords', perfectRecords);
     }, { disabled: () => busy() || !perfectRecord() });
 
-  panel.score('Sword', { hidden: () => mode !== 'classic' }).stats(['', 'Now', 'Best'], () => {
+  panel.score('Sword', { hidden: () => mode === 'perfect' }).stats(['', 'Now', 'Best'], () => {
     const hits = board?.numHits ?? 0;
     return [
       ['Strikes', board ? `${hits} / ${totalStrikes()}` : '-', best() ? String(best()) : '-'],
     ];
   });
+
+  // The board's text can be copied in any mode, and pasted, dealt anew or painted while playing in Freeplay.
+  const createOnly = () => mode !== 'create';
+  const editing = () => !editable() || pause.paused || !!replays?.isPlaying;
+  const boardGroup = panel.group('Board');
+  boardGroup.button('Copy', () => { if (board) copyText(boardCode(board), 'Copy this board:'); }, { disabled: () => !board || board.size !== SIZE, title: 'Copy the board, with the last square struck' });
+  boardGroup.button('Paste', () => void pasteText('Paste a board:').then((text) => {
+    if (text === null) return;
+    if (readBoardCode(text)) { pasteNote = ''; queue(`load:${text.trim()}`); }
+    else pasteNote = 'That isn’t a blacksmithing board. Boards copied here start with S.';
+  }), { hidden: createOnly, disabled: editing, title: 'Play a board from a pasted copy' });
+  boardGroup.button('Generate', () => {
+    queue('generate');
+    window.setTimeout(() => { if (board) copyText(boardCode(board), 'Copy this board:'); }, 50);
+  }, { hidden: createOnly, disabled: editing, title: 'Deal a new board and copy it' });
+  const palette = document.createElement('div');
+  palette.className = 'piece-palette';
+  PAINTABLE.forEach((type) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'panel-button';
+    const icon = document.createElement('canvas');
+    icon.width = icon.height = CELL;
+    icon.setAttribute('aria-hidden', 'true');
+    icon.getContext('2d')!.drawImage(img(TILE_SHEETS[3]), type * CELL, 0, CELL, CELL, 0, 0, CELL, CELL);
+    button.append(icon, document.createTextNode(`${PIECE_CHARS[type]} · ${PIECE_NAMES[type]}`));
+    button.addEventListener('click', () => { palettePiece = palettePiece === type ? null : type; panel.used(); });
+    panel.addSync(() => {
+      button.disabled = !creating();
+      button.setAttribute('aria-pressed', String(palettePiece === type));
+    });
+    palette.append(button);
+  });
+  boardGroup.append(palette, { hidden: createOnly });
+  boardGroup.select('Heat', HEAT_OPTIONS, () => paintHeat, (heat) => { paintHeat = heat; }, { hidden: createOnly, title: 'Strikes left on painted squares: hot 3, warm 2, cool 1' });
+  boardGroup.select('Last struck as', PAINTABLE.map((value) => ({ value, label: PIECE_NAMES[value] })), () => lastStruck, (type) => { lastStruck = type; }, {
+    hidden: createOnly, title: 'The piece a right-clicked square was when it was struck: it decides where the next strike can land',
+  });
+  boardGroup.button('Fill board', () => queue(`fill:${palettePiece ?? 0},${paintHeat}`), { hidden: createOnly, disabled: editing, title: 'Make every square the selected piece and heat' });
+  boardGroup.button('Clear last strike', () => queue('unmark'), { hidden: createOnly, disabled: () => editing() || !board?.selected, title: 'Forget the last square struck, so any square can be struck' });
+  boardGroup.note(() => pasteNote || 'Hold a piece’s key (1–4, B, K, R, Q, or W for the rum jug) to paint it at the chosen heat, or select a piece above and left-click to place it. Right-click a square to mark it as struck last, as the piece chosen above; the squares you can strike next glow. Select a piece again to deselect and strike. Scroll to cycle the piece under the pointer. Freeplay never finishes the sword and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => {
+    const issues = board ? boardIssues(board) : [];
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+  }, { hidden: () => createOnly() || !running });
 
   const replayAction = {
     available: (game: GameRecord) => typeof game.replayAt === 'number' && (replays?.hasPlayableAt(game.replayAt, typeof game.replayId === 'string' ? game.replayId : undefined) ?? false),
@@ -992,7 +1111,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const duty = dutyDesk(panel, store, 'blacksmithing', 'Blacksmithing', RATING_SCALES, {
     shown: (id) => (id === 'perfect') === (mode === 'perfect'),
   });
-  panel.results(() => finished && !busy() ? {
+  panel.results(() => finished && !busy() && mode !== 'create' ? {
     title: mode === 'perfect' ? 'Perfect board results' : 'Sword results',
     report: duty.last,
     averages: mode === 'classic'
@@ -1044,11 +1163,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 2,
-    simulatorVersion: 2,
+    simulatorVersion: 3,
     migrate: (version, value) => {
       if ((version !== 1 && version !== 2) || !value || typeof value !== 'object') return null;
       const s = value as Record<string, unknown>;
-      return (s.mode === 'classic' || s.mode === 'perfect') && Number.isFinite(s.difficulty) &&
+      return (s.mode === 'classic' || s.mode === 'perfect' || s.mode === 'create') && Number.isFinite(s.difficulty) &&
         Number.isInteger(s.perfectSize) && Number.isFinite(s.timerMs) && (s.timerMs as number) >= 0 &&
         (version === 1 || s.scoringRules === 2) ? { ...s, scoringRules: version === 1 ? 1 : 2 } : null;
     },
@@ -1076,7 +1195,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       scoringRules = savedReplaySettings.scoringRules ?? 2;
       savedReplaySettings = null;
     }
-  }, (seed) => new PyRandom(0).restore(seed), setReplayTime, () => frame([]), replaySettingsCodec, () => !busy() || replays.isPlaying);
+  }, (seed) => new Random(0).restore(seed), setReplayTime, () => frame([]), replaySettingsCodec, () => !busy() || replays.isPlaying);
 
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
   replays.onTakeOver = () => {

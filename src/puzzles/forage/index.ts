@@ -1,4 +1,4 @@
-// Forage, rebuilt from the Puzzle Pirates game (duty/forage, build 20260909165753): the rules are
+// Forage, recreated from the Puzzle Pirates game (duty/forage, build 20260909165753): the rules are
 // in board.ts and engine.ts, and this file is ForagePanel and ForageBoardView with their helper
 // classes: the game's art, sounds and timings, the cursor, crates glowing and sparkling, cleared
 // pieces popping, the monkey, ants, the earthquake's bob, the banana meter, the floating messages
@@ -12,7 +12,7 @@ import { SessionPause } from '../../core/pause';
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
 import { TimerWarning } from '../../core/timer-warning';
-import { loadFont } from '../../core/fonts';
+import { drawGameText, drawPauseLabel, floatAt, gameFontFor, gameTextBox, loadGameFont, FLOAT_MS } from '../../core/game-text';
 import { dutyDesk } from '../../core/duty/desk';
 import type { DutyReport } from '../../core/duty/report';
 import type { RatingScale } from '../../core/duty/ratings';
@@ -22,7 +22,8 @@ import { excludesUnlikelyReplays, showsReplayClicks, type GameRecord } from '../
 import type { InputEvent, Point } from '../../core/input';
 import type { Option } from '../../core/panel';
 import type { PuzzleFactory } from '../../core/puzzle';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
+import { seedControls, seedFor, freshSeed } from '../../core/seeds';
 import {
   antCount,
   antFacing,
@@ -35,16 +36,19 @@ import {
   isCrate,
   isCrateAnchor,
   isTool,
-  makeAnts,
-  makeCrate,
   WIDTH,
 } from './board';
-import { GauntletChests, CrateRequests, CURSED_TILES } from './crates';
+import { GauntletChests, CrateRequests, CURSED_TILES, WEREWOLF_TILES } from './crates';
 import { keyMatches } from '../../core/controls';
+import { copyText, pasteText } from '../../core/clipboard';
+import {
+  CRATE_PAINT, EMPTY_PAINT, MOON_PAINT, PAINTABLE, PIECE_NAMES, boardCode, boardIssues, fill as fillCells, lettersToCells, paint as paintCell, paintMoon, paintOf,
+  readBoardCode,
+} from './create';
 import { type Cell, CELL, type Effect, Forage, looks, type SoundName, type Sprite, type Step, TIMING } from './engine';
 import { CHEST_WEIGHTINGS, fillPuzzle, type Mode, parseBoard, randomizeColours, scramblePuzzle, type Settings } from './logic';
+import type { Moon, MoonBlast } from './werewolf';
 import { PUZZLES } from './puzzles';
-import delarobbUrl from './delarobb.ttf?url';
 
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -65,10 +69,7 @@ const BANANA_STEP = 19;
 const BANANA_MS = 500;
 /** The game updates the board every 14ms (about 71 times a second). */
 const FRAME_MS = 14;
-const FONT = 'Delarobb';
 /** Floating messages drift up 30px over 1.5s, fading out in the second half. */
-const FLOAT_MS = 1500;
-const FLOAT_PX = 30;
 /** Ants' counts sit here in their cell, by facing (ForageBoardView.g). */
 const ANT_NUMBER_AT: Cell[] = [
   [28, 13],
@@ -95,6 +96,12 @@ const MODES: Option<Mode>[] = [
   { value: 'ci', label: 'Gauntlet' },
   { value: 'chaos', label: 'Chaos' },
   { value: 'normal', label: 'Normal' },
+  { value: 'create', label: 'Freeplay' },
+];
+/** Freeplay mode paints with keys 1-5 (the colours), 6-9 (shovel, machete, monkey, earthquake), 0 (ants) and - (empty) held over the board. */
+const PAINT_KEYS = [
+  ...PAINTABLE.slice(0, 10).map((paint, i) => ({ id: `paint${i + 1}`, label: `Paint ${PIECE_NAMES[i].toLowerCase()} (Freeplay)`, defaultKey: String((i + 1) % 10), paint })),
+  { id: 'paintEmpty', label: 'Paint empty (Freeplay)', defaultKey: '-', paint: EMPTY_PAINT },
 ];
 /**
  * Duty report ratings. Normal foraging goes by points a move. Gauntlet and Chaos are rated like
@@ -107,7 +114,7 @@ const RATING_SCALES: RatingScale[] = [
 ];
 
 /** Modes that end and keep a best score. */
-const SCORED = new Set<Mode>(['ci', 'infinite', 'normal', 'chaos']);
+const SCORED = new Set<Mode>(['ci', 'infinite', 'normal', 'chaos', 'werewolf']);
 
 /**
  * Normal mode's default chest mix: observed rates of 0.65, 0.345 and 0.0047 for 1x1, 2x2 and
@@ -117,6 +124,8 @@ const NORMAL_RATIOS: Settings['normalRatios'] = [0.6472, 0.3435, 0.0094];
 
 const DEFAULT_SETTINGS: Settings = {
   mode: 'ci',
+  werewolfArt: false,
+  moons: false,
   bb: true,
   fj: true,
   cc: false,
@@ -141,30 +150,7 @@ interface ForageReplaySeed {
   format: 'forage-replay-state';
   seeds: [number, number];
   boards: string[];
-}
-
-/** The simulator's letters as game pieces. Colours u-y are dirt, wood, grass, sand and stone. */
-const LETTER_PIECES: Record<string, number> = { u: 0, v: 4, w: 1, x: 2, y: 3, n: 5, m: 6, p: 7, o: 8, z: EMPTY };
-
-/** A puzzle board in the simulator's letters, as game cells (crates as cursed ones). */
-function lettersToCells(board: string[][]): number[] {
-  const cells: number[] = [];
-  for (let y = 0; y < HEIGHT; y++) {
-    for (let x = 0; x < WIDTH; x++) {
-      const ch = board[y][x];
-      if (ch in LETTER_PIECES) cells.push(LETTER_PIECES[ch]);
-      else if (ch === 'q') cells.push(makeAnts(8, 3));
-      // Crates: k bone box; g h / i j jar (bottom-left i); a b c / d e f chest (bottom-left d).
-      else if (ch === 'k') cells.push(makeCrate(0, 0, 0));
-      else if (ch === 'i') cells.push(makeCrate(0, 1, 1));
-      else if (ch === 'j') cells.push(makeCrate(1, 1, 1));
-      else if (ch === 'g' || ch === 'h') cells.push(makeCrate(2, 1, 1));
-      else if (ch === 'd') cells.push(makeCrate(0, 2, 2));
-      else if (ch === 'e' || ch === 'f') cells.push(makeCrate(1, 2, 2));
-      else cells.push(makeCrate(2, 2, 2));
-    }
-  }
-  return cells;
+  rootSeed?: number;
 }
 
 /** Something drawn for a while that doesn't hold up the board. */
@@ -176,16 +162,26 @@ interface Timed {
 export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplayTime: rawReplayTime }) => {
   const pause = new SessionPause(rawTicks, rawReplayTime);
   const { ticks, setReplayTime } = pause;
-  const [images] = await Promise.all([Images.load(imageUrls), loadFont(FONT, delarobbUrl)]);
+  const [images] = await Promise.all([Images.load(imageUrls), loadGameFont()]);
   const img = (name: string) => images.get(name);
-  const rng = new PyRandom();
+  const rng = new Random();
   /** The pieces' flight paths in and out, seeded per session so a replay's intros last as long. */
-  const flights = new PyRandom();
+  const flights = new Random();
   looks.random = () => flights.random();
-  const sounds = new SoundBank<SoundName>(soundUrls);
+  const sounds = new SoundBank<SoundName | 'forage_night'>(soundUrls);
+  let werewolfIntroPlayed = false;
+  let stopNight: (() => void) | null = null;
   const warning = new TimerWarning('gauntlet', () => replays?.isSeeking ?? false);
 
   const settings: Settings = { ...DEFAULT_SETTINGS, ...store.get<Partial<Settings>>('settings', {}) };
+  // The initial local test exposed a separate mode. Fold saved play settings into Gauntlet.
+  // Replay settings are restored separately below, preserving that version's rules.
+  if (settings.mode === 'werewolf') {
+    settings.mode = 'ci';
+    settings.werewolfArt = true;
+    settings.moons = true;
+    store.set('settings', settings);
+  }
   if (settings.mode === 'infinite') {
     settings.mode = 'ci';
     settings.roundSeconds ??= 0;
@@ -198,10 +194,15 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const ciBest = store.get<Record<string, number>>('ciBest', {});
   // Normal's score is points per move.
   const normalBest = store.get<Record<string, number>>('normalBestPerMove', {});
-  const bests = () => (settings.mode === 'normal' ? normalBest : ciBest);
+  const werewolfBest = store.get<Record<string, number>>('werewolfBestPerMove', {});
+  const legacyWerewolf = () => settings.mode === 'werewolf';
+  const werewolf = () => legacyWerewolf() || (settings.mode === 'ci' && !!settings.werewolfArt);
+  const useMoons = () => legacyWerewolf() || (settings.mode === 'ci' && !!settings.moons);
+  const normalMode = () => settings.mode === 'normal' || legacyWerewolf();
+  const bests = () => (legacyWerewolf() ? werewolfBest : normalMode() ? normalBest : ciBest);
 
   /** Normal foraging looks like the fruit jungle; the rest are cursed isle boards. */
-  const cursed = () => settings.mode !== 'normal';
+  const cursed = () => !normalMode();
 
   /** Dealt once the replay state below exists, since dealing checks for a replay. */
   let game: Forage;
@@ -228,6 +229,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** When the board last called a move over and can take the next click. */
   let settledAt = 0;
   let timed: Timed[] = [];
+  const moonBorn = new Map<number, number>();
+  /** Each moon's phase as last drawn, and when it took that phase: a new phase shows bright. */
+  const moonPhaseSince = new Map<number, { phase: number; since: number }>();
+  /** When each moon's claw count last changed. */
+  const moonCountSince = new Map<number, { count: number; since: number }>();
   /** The intro or outro: pieces flying on or off the board. */
   let flight: { pieces: { piece: number; at: Cell; from: Point; duration: number }[]; start: number; out: boolean } | null = null;
   /** The cursor's top-left cell (ForageBoardView._cpos). */
@@ -242,11 +248,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   let replays!: ReplayRecorder;
   /**
-   * The rules a game is played by (the replay format's simulatorVersion). 2: Normal crates are
-   * paced (two moves, the next two-second batch, then a move), and a Chaos chest whose column is
-   * blocked tries another each move. Replays play by the rules they were recorded with.
+   * The rules a game is played by (the replay format's simulatorVersion). 2: Werewolf art and
+   * moons as Gauntlet toggles. 3: Normal crates are paced (two moves, the next two-second batch,
+   * then a move), and a Chaos chest whose column is blocked tries another each move. Replays play
+   * by the rules they were recorded with. 4 adds native, independent per-board streams.
    */
-  const RULES = 2;
+  const RULES = 4;
   let rules = RULES;
   let sessionSeed: ForageReplaySeed | null = null;
   let recordedAction = false;
@@ -269,14 +276,16 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   const ciKey = () => {
     const base = (['bb', 'fj', 'cc', 'eq', 'machete', 'shovel', 'monkey'] as const).map((k) => (settings[k] ? 'b' : 'a')).join('') +
-      (settings.mode === 'normal' ? settings.normalRatios.join('-') : settings.chestRatios?.join('-') ?? settings.forageLevel) +
+      (normalMode() ? settings.normalRatios.join('-') : settings.chestRatios?.join('-') ?? settings.forageLevel) +
       (settings.ants ? 'ants' : '');
     // Preserve existing scores for the original Gauntlet and Normal round lengths.
-    const original = settings.mode === 'normal' ? 0 : 120;
-    return base + (roundSeconds() === original ? '' : `:timer:${roundSeconds()}`);
+    const original = normalMode() ? 0 : 120;
+    return base + (roundSeconds() === original ? '' : `:timer:${roundSeconds()}`) +
+      (settings.mode === 'ci' && settings.werewolfArt ? ':werewolf-art' : '') +
+      (settings.mode === 'ci' && settings.moons ? ':moons' : '');
   };
 
-  const roundSeconds = () => settings.roundSeconds ?? (settings.mode === 'ci' ? 120 : 0);
+  const roundSeconds = () => settings.mode === 'create' ? 0 : settings.roundSeconds ?? (settings.mode === 'ci' ? 120 : 0);
   const roundDuration = () => roundSeconds() * 1000;
 
   /** Where this game's history is kept: per settings for CI and Normal, per puzzle (unscrambled) for Puzzle. */
@@ -291,29 +300,36 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   /** Crate weights for the mode, with turned-off crates at 0. */
   function crateWeights(): [number, number, number] {
-    const w = settings.mode === 'normal' ? settings.normalRatios : settings.chestRatios ?? CHEST_WEIGHTINGS[settings.forageLevel];
+    const w = normalMode() ? settings.normalRatios : settings.chestRatios ?? CHEST_WEIGHTINGS[settings.forageLevel];
     return [settings.bb ? w[0] : 0, settings.fj ? w[1] : 0, settings.cc ? w[2] : 0];
   }
 
   /** A fresh game board from a random seed, with the mode's crates and the chosen specials. */
+  const seedMode = seedControls(panel, store, () => boardActive || !!replays?.isPlaying);
   function newGame(): Forage {
+    const boardIndex = replay ? nextReplayBoard : sessionSeed?.boards.length ?? 0;
     const seed = replay
       ? BigInt(sessionSeed?.boards[nextReplayBoard++] ?? 0)
-      : BigInt(Math.floor(Math.random() * 2 ** 48));
+      : BigInt(sessionSeed?.rootSeed !== undefined ? seedFor(sessionSeed.rootSeed, 'board', boardIndex) : freshSeed());
+    if (sessionSeed?.rootSeed !== undefined) {
+      rng.seed(seedFor(sessionSeed.rootSeed, 'crates', boardIndex));
+      flights.seed(seedFor(sessionSeed.rootSeed, 'flights', boardIndex));
+    }
     if (!replay && sessionSeed) {
       sessionSeed.boards.push(String(seed));
       replays?.updateSeed(sessionSeed);
     }
     const source =
-      settings.mode === 'normal'
-        ? new CrateRequests(rng, crateWeights(), BANANAS, rules >= 2, () => clock())
-        : settings.mode === 'puzzle'
+      normalMode()
+        ? new CrateRequests(rng, crateWeights(), BANANAS, rules >= 3, () => clock())
+        : settings.mode === 'puzzle' || settings.mode === 'create'
           ? {}
-          : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock(), rules >= 2);
-    const g = new Forage(seed, source);
+          : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock(), rules >= 3);
+    const g = new Forage(seed, source, 8, useMoons(), werewolf(), settings.mode === 'create');
     // Shovel, machete, monkey, earthquake, ants.
     g.board.allowed = [settings.shovel, settings.machete, settings.monkey, settings.eq, settings.ants];
-    if (settings.mode !== 'normal') g.crateArt = [...CURSED_TILES];
+    if (!normalMode()) g.crateArt = [...CURSED_TILES];
+    if (werewolf()) g.crateArt = [...WEREWOLF_TILES];
     return g;
   }
 
@@ -322,6 +338,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     pendingNextBoard = false;
     playing = [];
     timed = [];
+    moonBorn.clear();
+    moonPhaseSince.clear();
+    moonCountSince.clear();
     game = newGame();
     crates = 0;
     meterShown = 0;
@@ -338,6 +357,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     settledAt = 0;
     pendingNextBoard = false;
     ended = false;
+    createStarted = settings.mode === 'create';
+    paintWith = null;
+    painting = false;
+    pasteNote = '';
     const [gameSeed, flightSeed] = sessionSeed!.seeds;
     rng.seed(gameSeed);
     flights.seed(flightSeed);
@@ -365,15 +388,25 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   /** Pieces fly in from beyond the nearest corner, 1 ms a pixel along an arc. */
   function intro(restartClock: boolean): void {
-    if (!replays?.isSeeking) sounds.play(cursed() ? 'cursed_intro' : 'intro');
+    // Werewolf's intro plays for the first game only; its night sounds then loop.
+    if (werewolf()) {
+      if (!werewolfIntroPlayed && !replays?.isSeeking) sounds.play('werewolf_intro');
+      werewolfIntroPlayed = true;
+      stopNight ??= sounds.loop('forage_night');
+    } else {
+      stopNight?.();
+      stopNight = null;
+      if (!replays?.isSeeking) sounds.play(cursed() ? 'cursed_intro' : 'intro');
+    }
     flight = { pieces: flyingPieces(), start: clock(), out: false };
+    if (game.moons) syncMoonBirth(game.moons.active, clock() + flightLength());
     // The clock starts once the pieces are in.
     if (restartClock) startTime = clock() + flightLength();
   }
 
   function outro(delay = 0): void {
     flight = { pieces: flyingPieces(), start: clock() + delay, out: true };
-    if (!replays?.isSeeking && !replays?.isPaused) window.setTimeout(() => { if (!replays.isSeeking && !replays.isPaused) sounds.play('outro'); }, delay);
+    if (!werewolf() && !replays?.isSeeking && !replays?.isPaused) window.setTimeout(() => { if (!replays.isSeeking && !replays.isPaused) sounds.play('outro'); }, delay);
   }
 
   function flyingPieces() {
@@ -396,7 +429,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     boardActive = false;
     const report = endReport();
     const finishedReplay = endRecording(`Puzzle ${puzzleId}, ${movesUsed} moves`, report);
-    if (settings.scramble || replay) return;
+    if (settings.scramble || replay || !store.scoresEnabled) return;
     store.addHistory(historyKey()!, { score: movesUsed, moves: movesUsed, clockwise, anticlockwise, time: timePassed, ...duty.fields(report), ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? '' } : {}) });
     const best = record ?? { moves: movesUsed, time: timePassed };
     record = { moves: Math.min(best.moves, movesUsed), time: Math.min(best.time, timePassed) };
@@ -406,9 +439,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   /** Normal foraging rates a run by points per move; the other modes show total points. */
   function shownScore(): number {
-    return settings.mode === 'normal' ? (movesUsed ? score / movesUsed : 0) : score;
+    return normalMode() ? (movesUsed ? score / movesUsed : 0) : score;
   }
-  const scoreText = (n: number) => (settings.mode === 'normal' ? n.toFixed(2) : String(n));
+  const scoreText = (n: number) => (normalMode() ? n.toFixed(2) : String(n));
 
   /**
    * A Normal session too short to rate: ten for each move plus the seconds played comes to under
@@ -425,20 +458,20 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const report = endReport();
     const dropReplay = unrated() && excludesUnlikelyReplays();
     if (dropReplay && !replay) { replays.cancel(); sessionSeed = null; recordedAction = false; }
-    const finishedReplay = dropReplay ? null : endRecording(settings.mode === 'normal' ? `${scoreText(final)} a move` : `Score ${final}`, report);
-    if (!replay && !unrated()) {
+    const finishedReplay = dropReplay ? null : endRecording(normalMode() ? `${scoreText(final)} a move` : `Score ${final}`, report);
+    if (store.scoresEnabled && !replay && !unrated()) {
       if (final > (best[key] ?? 0)) {
         best[key] = final;
-        store.set(settings.mode === 'normal' ? 'normalBestPerMove' : 'ciBest', best);
+        store.set(legacyWerewolf() ? 'werewolfBestPerMove' : normalMode() ? 'normalBestPerMove' : 'ciBest', best);
       }
-      store.addHistory(historyKey()!, settings.mode === 'normal'
+      store.addHistory(historyKey()!, normalMode()
         ? { score: Number(final.toFixed(2)), points: score, moves: movesUsed, clockwise, anticlockwise, ...duty.fields(report), ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? '' } : {}) }
         : { score: final, clockwise, anticlockwise, ...duty.fields(report), ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? '' } : {}) });
     }
-    if (!unrated()) bestScore = Math.max(bestScore ?? 0, final);
-    // A full meter is "Great work!" in the game, and the pieces fly off a second later.
-    if (settings.mode === 'normal' && boardDone()) {
-      timed.push({ effect: { kind: 'text', text: 'Great work!', size: 32, delay: 0 }, start: clock() });
+    if (store.scoresEnabled && !replay && !unrated()) bestScore = Math.max(bestScore ?? 0, final);
+    // A full meter is "Great work!" in the game, and the pieces fly off a second later. Its text is the 42px level-up size (16 of 32 points).
+    if (normalMode() && boardDone()) {
+      timed.push({ effect: { kind: 'text', text: 'Great work!', size: 16, delay: 0 }, start: clock() });
       outro(TIMING.outroDelay);
     } else outro();
   }
@@ -449,15 +482,15 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const performance = unrated() ? duty.rate(null, null) : settings.mode === 'normal' ? duty.rate('normal', shownScore())
       : gauntlet ? duty.rate('gauntletPoints', score) : duty.rate(null, null);
     return duty.end({
-      mode: MODES.find((m) => m.value === settings.mode)?.label,
+      mode: legacyWerewolf() ? 'Werewolf' : MODES.find((m) => m.value === settings.mode)?.label,
       performance,
       unrated: unrated(),
       score: isPuzzle() ? { label: 'Moves', value: String(movesUsed) }
-        : { label: settings.mode === 'normal' ? 'Points a move' : 'Score', value: scoreText(shownScore()) },
+        : { label: normalMode() ? 'Points a move' : 'Score', value: scoreText(shownScore()) },
       cleared: [{ label: 'Crates Collected', inScore: true, items: [
-        { icon: 'ci-bone-box', label: 'bone boxes', count: sessionCrates[0] },
-        { icon: 'ci-fetish-jar', label: 'fetish jars', count: sessionCrates[1] },
-        { icon: 'ci-cursed-chest', label: 'cursed chests', count: sessionCrates[2] },
+        { icon: werewolf() ? 'werewolf-chest-small' : 'ci-bone-box', label: werewolf() ? 'small treasure crates' : 'bone boxes', count: sessionCrates[0] },
+        { icon: werewolf() ? 'werewolf-chest-medium' : 'ci-fetish-jar', label: werewolf() ? 'medium treasure crates' : 'fetish jars', count: sessionCrates[1] },
+        { icon: werewolf() ? 'werewolf-chest-large' : 'ci-cursed-chest', label: werewolf() ? 'large treasure crates' : 'cursed chests', count: sessionCrates[2] },
       ] }],
     });
   }
@@ -483,14 +516,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (outcome === 'moved') {
       movesUsed++;
       const result = game.lastResult;
-      if (settings.mode === 'normal') score += result.points;
+      if (normalMode()) score += result.points;
       else if (settings.mode !== 'puzzle') score += result.gauntletPoints;
       crates += result.collected[0] + result.collected[1] + result.collected[2];
       sessionCrates = sessionCrates.map((n, i) => n + result.collected[i]);
-      // The score sound, by the move's game points.
-      if (result.points > 0 && !(settings.mode === 'normal' && crates >= BANANAS)) {
+      // The score sound, by the move's game points (Werewolf howls whatever the points).
+      if (result.points > 0 && !(normalMode() && crates >= BANANAS)) {
         const last = game.steps[game.steps.length - 1];
-        last.sounds.push({ name: result.points > 14 ? 'score_big' : result.points > 7 ? 'score_medium' : 'score_small', delay: last.duration });
+        last.sounds.push({ name: werewolf() ? 'chest_howl' : result.points > 14 ? 'score_big' : result.points > 7 ? 'score_medium' : 'score_small', delay: last.duration });
       }
     }
     playing = game.steps;
@@ -503,6 +536,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function startStep(): void {
     const step = playing[0];
     if (!step) return;
+    if (step.moons) syncMoonBirth(step.moons, stepStart);
     const heard = new Set<string>();
     for (const s of replays?.isSeeking || replays?.isPaused ? [] : step.sounds) {
       const key = `${s.name}@${s.delay}`;
@@ -517,7 +551,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function toggleRunning(): void {
     // Dismissing a Normal session ends it there and scores it, counting any crates from the last
     // move that were still on their way off the board.
-    if (boardActive && settings.mode === 'normal') {
+    if (boardActive && normalMode()) {
       if (movesUsed) {
         playing = [];
         finishScored();
@@ -531,8 +565,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ended = true;
       endRecording(settings.mode === 'puzzle' ? `Puzzle ${puzzleId}, stopped` : `Stopped, ${movesUsed} moves`, endReport());
     } else {
-      const seed = () => Math.floor(Math.random() * 2 ** 32);
-      sessionSeed = { format: 'forage-replay-state', seeds: [seed(), seed()], boards: [] };
+      const rootSeed = seedMode.next();
+      sessionSeed = { format: 'forage-replay-state', rootSeed, seeds: [seedFor(rootSeed, 'crates'), seedFor(rootSeed, 'flights')], boards: [] };
       // A game taken over from a replay kept that replay's rules; a new one plays by today's.
       rules = RULES;
       nextReplayBoard = 0;
@@ -582,6 +616,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
 
   function applyReplayAction(action: ReplayAction): void {
+    if (action.type.startsWith('forage-create-')) { edit(action); return; }
     if (action.type !== 'forage-act' && action.type !== 'forage-cursor' &&
         action.type !== 'forage-click' && action.type !== 'forage-new-board') return;
     const data = action.data && typeof action.data === 'object' ? action.data as Record<string, unknown> : {};
@@ -597,6 +632,58 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       replay?.clicks.push({ t: clock(), x: data.x as number, y: data.y as number, b: data.button as number });
     } else if (action.type === 'forage-new-board') newBoard();
   }
+
+  // ---- Freeplay mode ----
+
+  /** The palette piece a left click places, the piece a held key paints, and whether a drag is painting. */
+  let palettePaint: number | null = null;
+  let paintWith: number | null = null;
+  let painting = false;
+  let pasteNote = '';
+  /** The phase (4 new to 1) and claws (0-3) a painted moon gets. */
+  let moonPhase = 4;
+  let moonClaws = 0;
+  let createStarted = false;
+  const creating = () => boardActive && !ended && createStarted;
+  /** The board can change once nothing on it is moving. */
+  const editable = () => creating() && inPlay();
+  /** Freeplay mode: a change to the board, recorded as it's made so replays repeat it in order. */
+  function edit(action: ReplayAction): void {
+    if (!editable()) return;
+    const data = action.data && typeof action.data === 'object' ? action.data as Record<string, unknown> : {};
+    const cells = [...game.cells];
+    let changed = false;
+    if (action.type === 'forage-create-paint' && Number.isInteger(data.x) && Number.isInteger(data.y) && Number.isInteger(data.paint)) {
+      changed = paintCell(cells, data.x as number, data.y as number, data.paint as number);
+    } else if (action.type === 'forage-create-moon' && game.moons && [data.x, data.y, data.phase, data.charge].every(Number.isInteger)) {
+      changed = paintMoon(game.moons, data.x as number, data.y as number, data.phase as number, data.charge as number);
+    } else if (action.type === 'forage-create-fill' && Number.isInteger(data.paint)) changed = fillCells(cells, data.paint as number);
+    else if (action.type === 'forage-create-load' && typeof data.code === 'string') {
+      const read = readBoardCode(data.code);
+      if (read) {
+        read.cells.forEach((p, i) => (cells[i] = p));
+        game.moons?.clear(0, 0, WIDTH, HEIGHT);
+        for (const m of read.moons) game.moons?.place(m.x, m.y, m.phase, m.charge);
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    game.load(cells);
+    refitCursor();
+    if (!replay) {
+      replays.action(action);
+      recordedAction = true;
+    }
+  }
+  const cellAt = ([mx, my]: Point): Cell | null => {
+    const x = Math.floor((mx - LEFT) / CELL), y = Math.floor((my - TOP) / CELL);
+    return x >= 0 && x < WIDTH && y >= 0 && y < HEIGHT ? [x, y] : null;
+  };
+  const paintAt = (pos: Point, paint: number) => {
+    const at = cellAt(pos);
+    if (at && paint === MOON_PAINT) edit({ type: 'forage-create-moon', data: { x: at[0], y: at[1], phase: moonPhase, charge: moonClaws } });
+    else if (at && paintOf(game.board.getPiece(at[0], at[1])) !== paint) edit({ type: 'forage-create-paint', data: { x: at[0], y: at[1], paint } });
+  };
 
   /** While watching: the recorded mouse pointer, a ring where each click landed, and the speed. */
   function drawReplayOverlay(now: number): void {
@@ -616,6 +703,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     ctx.restore();
     replays.drawOverlay(ctx);
   }
+
+  let lastPointer: Point = [-1, -1];
 
   // ---- Cursor  ----
 
@@ -683,14 +772,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       saveSettings();
     },
   });
-  const bind = <K extends 'scramble' | 'bb' | 'fj' | 'cc' | 'eq' | 'machete' | 'shovel' | 'monkey' | 'ants'>(
+  const bind = <K extends 'scramble' | 'bb' | 'fj' | 'cc' | 'eq' | 'machete' | 'shovel' | 'monkey' | 'ants' | 'werewolfArt' | 'moons'>(
     group: ReturnType<typeof panel.group>,
     label: string,
     k: K,
     hidden?: () => boolean,
   ) => {
     const { get, set } = setting(k);
-    group.toggle(label, get, set, { hidden });
+    group.toggle(label, () => !!get(), set, { hidden });
   };
 
   panel.clock(() => {
@@ -707,6 +796,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     { id: 'down', label: 'Move down', defaultKey: 'ArrowDown' },
     { id: 'rotateLeft', label: 'Rotate anticlockwise', defaultKey: 'X' },
     { id: 'rotateRight', label: 'Rotate clockwise', defaultKey: 'C' },
+    ...PAINT_KEYS.map(({ id, label, defaultKey }) => ({ id, label, defaultKey })),
   ]);
   const session = panel.session();
   session.select('Mode', MODES, setting('mode').get, setting('mode').set, {});
@@ -721,23 +811,83 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     { min: 0, hidden: () => !isPuzzle(), title: '0 picks a puzzle at random' },
   );
   const actions = panel.group();
-  actions.note(() => isPuzzle() ? settings.scramble ? 'Scrambled' : '' : roundSeconds() ? `${roundSeconds()} second round` : 'No timer');
   actions
     // Starting while a replay is open closes it and starts a game of your own.
     .button('Start', () => { if (replays.isPlaying) { replays.stop(); if (replays.isPlaying) return; } toggleRunning(); }, {
       variant: 'primary',
-      label: () => (replay || !boardActive ? 'Start' : settings.mode === 'normal' ? 'Dismiss' : 'Stop'),
+      label: () => (replay || !boardActive ? 'Start' : normalMode() ? 'Dismiss' : 'Stop'),
     })
     .button('New board', () => {
       if (!replay) replays.action({ type: 'forage-new-board' });
       newBoard();
     }, {
-      disabled: () => isPuzzle() || settings.mode === 'normal' || !boardActive || !!replay,
+      disabled: () => isPuzzle() || normalMode() || !boardActive || !!replay,
       title: 'Deal a fresh board and bananas without restarting the clock; crates from a move still playing out still count',
     });
 
+  // The board's text can be copied in any mode, and pasted, dealt anew or painted while playing in Freeplay.
+  const createOnly = () => settings.mode !== 'create';
+  const editing = () => !editable() || pause.paused || !!replay;
+  const boardGroup = panel.group('Board');
+  // Outside Freeplay an empty cell is a board still settling.
+  boardGroup.button('Copy', () => copyText(boardCode(game.cells, game.moons?.active), 'Copy this board:'),
+    { disabled: () => !creating() && game.cells.some((p) => p === EMPTY), title: 'Copy the board' });
+  boardGroup.button('Paste', () => void pasteText('Paste a board:').then((text) => {
+    if (text === null) return;
+    if (readBoardCode(text)) { pasteNote = ''; edit({ type: 'forage-create-load', data: { code: text.trim() } }); }
+    else pasteNote = 'That isn’t a Foraging board. Boards copied here start with F.';
+  }), { hidden: createOnly, disabled: editing, title: 'Play a board from a pasted copy' });
+  boardGroup.button('Generate', () => {
+    replays.action({ type: 'forage-new-board' });
+    recordedAction = true;
+    newBoard();
+    window.setTimeout(() => copyText(boardCode(game.cells, game.moons?.active), 'Copy this board:'), 50);
+  }, { hidden: createOnly, disabled: editing, title: 'Deal a new board and copy it' });
+  const palette = document.createElement('div');
+  palette.className = 'piece-palette';
+  PAINTABLE.forEach((paint, i) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'panel-button';
+    const icon = document.createElement('canvas');
+    icon.width = icon.height = CELL;
+    icon.setAttribute('aria-hidden', 'true');
+    const iconCtx = icon.getContext('2d')!;
+    const crate = CRATE_PAINT.indexOf(paint);
+    if (crate >= 0) {
+      const { width, height } = CRATE_SIZES[crate], scale = 1 / Math.max(width, height);
+      // Freeplay plays on cursed isle boards, so its crates are the cursed ones.
+      iconCtx.drawImage(img(`crate${width}x${height}`), CURSED_TILES[crate] * width * CELL, 0, width * CELL, height * CELL, 0, (CELL - height * CELL * scale) / 2, width * CELL * scale, height * CELL * scale);
+    } else if (paint === 9) iconCtx.drawImage(img('ant'), 0, 0, CELL, CELL, 0, 0, CELL, CELL);
+    else if (paint === MOON_PAINT) iconCtx.drawImage(img('moon_phase'), 45, 45, 90, 90, 0, 0, CELL, CELL);
+    else if (paint === EMPTY_PAINT) {
+      iconCtx.strokeStyle = '#8a8a8a';
+      iconCtx.setLineDash([4, 3]);
+      iconCtx.strokeRect(2.5, 2.5, CELL - 5, CELL - 5);
+    } else iconCtx.drawImage(img('pieces'), paint * CELL, 0, CELL, CELL, 0, 0, CELL, CELL);
+    button.append(icon, document.createTextNode(i < 10 ? `${(i + 1) % 10} · ${PIECE_NAMES[i]}` : paint === EMPTY_PAINT ? `- · ${PIECE_NAMES[i]}` : PIECE_NAMES[i]));
+    button.addEventListener('click', () => { palettePaint = palettePaint === paint ? null : paint; panel.used(); });
+    panel.addSync(() => {
+      button.disabled = !creating();
+      button.setAttribute('aria-pressed', String(palettePaint === paint));
+    });
+    palette.append(button);
+  });
+  boardGroup.append(palette, { hidden: createOnly });
+  boardGroup.select('Moon phase', [4, 3, 2, 1].map((value) => ({ value, label: ['', '1, its last', '2', '3', '4, new'][value] })), () => moonPhase, (value) => { moonPhase = value; },
+    { hidden: createOnly, title: 'The phase a painted moon starts at: it wanes a phase after each move that clears pieces, and is gone after the last' });
+  boardGroup.select('Moon claws', [0, 1, 2, 3].map((value) => ({ value, label: String(value) })), () => moonClaws, (value) => { moonClaws = value; },
+    { hidden: createOnly, title: 'Pieces already cleared inside a painted moon: the fourth fires it' });
+  boardGroup.button('Fill board', () => edit({ type: 'forage-create-fill', data: { paint: palettePaint !== null && !CRATE_PAINT.includes(palettePaint) && palettePaint !== MOON_PAINT ? palettePaint : 0 } }),
+    { hidden: createOnly, disabled: editing, title: 'Make every cell the selected colour or special, or empty' });
+  boardGroup.note(() => pasteNote || 'Hold 1–5 for a colour, 6–9 for the shovel, machete, monkey or earthquake, 0 for ants or - to empty a cell, or select a piece above (crates and moons too) and left-click to place it. A crate or moon goes in with its top-left cell under the pointer; click the same moon again to take it away. Empty cells fill from above once a move plays out. Select it again to deselect and turn blocks. Scroll to cycle the piece under the pointer. Freeplay drops in no crates of its own, has no timer and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => {
+    const issues = boardIssues(game.cells, game.moons?.active);
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+  }, { hidden: () => createOnly() || !boardActive || ended });
+
   panel.score().stats(['', 'Now', 'Best'], () => [[
-    isPuzzle() ? 'Moves' : settings.mode === 'normal' ? 'Points / move' : 'Score',
+    isPuzzle() ? 'Moves' : normalMode() ? 'Points / move' : 'Score',
     isPuzzle() ? String(movesUsed) : scoreText(shownScore()),
     isPuzzle() ? !settings.scramble && record ? String(record.moves) : '' : bestScore !== null ? scoreText(bestScore) : '',
   ]]);
@@ -745,7 +895,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     shown: (id) => (id === 'normal' ? settings.mode === 'normal' : settings.mode === 'ci' || settings.mode === 'chaos'),
   });
   panel.results(() => ended && !flight ? {
-    title: 'Forage results',
+    title: 'Foraging results',
     report: duty.last,
     rows: [
       [isPuzzle() ? 'Moves' : 'Score', isPuzzle() ? String(movesUsed) : scoreText(shownScore())],
@@ -753,12 +903,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ...(isPuzzle() ? [] : [['Moves', String(movesUsed)]]),
       ['Clockwise, anticlockwise', `${clockwise}, ${anticlockwise}`],
       // Points are the score except in Normal, where the score is points a move.
-      ...(settings.mode === 'normal' ? [['Points', String(score)]] : []),
+      ...(normalMode() ? [['Points', String(score)]] : []),
       ...(unrated() ? [['Rating', excludesUnlikelyReplays() ? 'Unrated: not saved' : 'Unrated: replay only']] : []),
     ],
     averages: duty.averages(historyKey() ? store.sessionHistory(historyKey()!) : null, isPuzzle()
       ? { scoreLabel: 'Moves', lowerIsBetter: true, digits: 1 }
-      : { scoreLabel: settings.mode === 'normal' ? 'Points a move' : 'Score' }),
+      : { scoreLabel: normalMode() ? 'Points a move' : 'Score' }),
   } : null);
 
   // Every scored game, kept per settings key as the desktop version's score lists were.
@@ -774,6 +924,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     { label: 'Points', value: (g) => String(g.points) },
     { label: 'Moves', value: (g) => String(g.moves) },
   ], 'Past games', replayAction);
+  historyGroup(panel, historyFor('werewolf'), [
+    { label: 'Pts / move', value: (g) => Number(g.score).toFixed(2) },
+    { label: 'Points', value: (g) => String(g.points) },
+    { label: 'Moves', value: (g) => String(g.moves) },
+  ], 'Past games', replayAction);
   historyGroup(panel, historyFor('puzzle'), [
     { label: 'Moves', value: (g) => String(g.moves) },
     { label: 'Time', value: (g) => `${(Number(g.time) / 1000).toFixed(2)}s` },
@@ -781,15 +936,16 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   // The common replay UI owns Forage's history, playback controls, and files too.
   const replaySettingsCodec: ReplaySettingsCodec = {
-    currentVersion: 1,
+    currentVersion: 2,
     simulatorVersion: RULES,
     migrate: (version, value) => {
-      if (version !== 1 || !value || typeof value !== 'object') return null;
+      if ((version !== 1 && version !== 2) || !value || typeof value !== 'object') return null;
       const s = value as Record<string, unknown>;
       const ratios = (v: unknown) => Array.isArray(v) && v.length === 3 && v.every((n) => Number.isFinite(n) && (n as number) >= 0);
-      return ['puzzle', 'ci', 'normal', 'chaos'].includes(String(s.mode)) &&
+      return ['puzzle', 'ci', 'normal', 'chaos', 'werewolf', 'create'].includes(String(s.mode)) &&
         Number.isInteger(s.forageLevel) && (s.forageLevel as number) >= 0 && (s.forageLevel as number) <= 15 &&
         ['bb', 'fj', 'cc', 'eq', 'machete', 'shovel', 'monkey', 'ants', 'scramble'].every((key) => typeof s[key] === 'boolean') &&
+        ['werewolfArt', 'moons'].every((key) => s[key] === undefined || typeof s[key] === 'boolean') &&
         ratios(s.normalRatios) && (s.chestRatios === undefined || ratios(s.chestRatios)) &&
         (s.roundSeconds === undefined || (Number.isFinite(s.roundSeconds) && (s.roundSeconds as number) >= 0)) &&
         typeof s.puzzleId === 'string' && (s.puzzleId === '0' || s.puzzleId in PUZZLES) &&
@@ -800,6 +956,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (!value || typeof value !== 'object') return false;
     const seed = value as ForageReplaySeed;
     return seed.format === 'forage-replay-state' && Array.isArray(seed.seeds) && seed.seeds.length === 2 &&
+      (seed.rootSeed === undefined || (Number.isSafeInteger(seed.rootSeed) && seed.rootSeed >= 0 && seed.rootSeed <= 0xffffffff)) &&
       seed.seeds.every((n) => Number.isSafeInteger(n) && n >= 0) && Array.isArray(seed.boards) &&
       seed.boards.every((board) => typeof board === 'string' && /^\d{1,15}$/.test(board));
   };
@@ -834,25 +991,29 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const setup = panel.settings.group('Game');
   setup.select('Timer', [0, 30, 120, 300].map((value) => ({ value, label: value ? `${value} seconds` : 'No timer' })), roundSeconds, (value) => { settings.roundSeconds = value; saveSettings(); }, { hidden: isPuzzle });
   bind(setup, 'Scramble', 'scramble', () => !isPuzzle());
+  bind(panel.settings.group('Display'), 'Werewolf art', 'werewolfArt', () => settings.mode !== 'ci');
 
   const crateGroup = panel.settings.group('Crates');
-  bind(crateGroup, 'Bone box', 'bb');
-  bind(crateGroup, 'Fetish jar', 'fj');
-  bind(crateGroup, 'Cursed chest', 'cc');
+  bind(crateGroup, 'Bone box', 'bb', werewolf);
+  bind(crateGroup, 'Fetish jar', 'fj', werewolf);
+  bind(crateGroup, 'Cursed chest', 'cc', werewolf);
+  bind(crateGroup, 'Small treasure', 'bb', () => !werewolf());
+  bind(crateGroup, 'Medium treasure', 'fj', () => !werewolf());
+  bind(crateGroup, 'Large treasure', 'cc', () => !werewolf());
 
   const ratios = panel.settings.group('Chest ratios', { columns: 3, hidden: isPuzzle });
   ratios.number('Chest mix preset', setting('forageLevel').get, (level) => { settings.forageLevel = Math.round(level); settings.chestRatios = undefined; saveSettings(); }, {
     min: 0,
     max: 15,
-    hidden: () => settings.mode === 'normal',
+    hidden: () => normalMode(),
     title: 'Changes chest spawn rates only',
   });
   (['1x1', '2x2', '3x2'] as const).forEach((label, i) =>
     ratios.number(
       label,
-      () => settings.mode === 'normal' ? settings.normalRatios[i] : (settings.chestRatios ?? CHEST_WEIGHTINGS[settings.forageLevel])[i],
+      () => normalMode() ? settings.normalRatios[i] : (settings.chestRatios ?? CHEST_WEIGHTINGS[settings.forageLevel])[i],
       (value) => {
-        if (settings.mode === 'normal') settings.normalRatios[i] = value;
+        if (normalMode()) settings.normalRatios[i] = value;
         else { settings.chestRatios ??= [...CHEST_WEIGHTINGS[settings.forageLevel]]; settings.chestRatios[i] = value; }
         saveSettings();
       },
@@ -862,7 +1023,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   ratios.button(
     'Defaults',
     () => {
-      if (settings.mode === 'normal') settings.normalRatios = [...NORMAL_RATIOS];
+      if (normalMode()) settings.normalRatios = [...NORMAL_RATIOS];
       else settings.chestRatios = undefined;
       saveSettings();
     },
@@ -873,8 +1034,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   bind(specials, 'Earthquake', 'eq');
   bind(specials, 'Machete', 'machete');
   bind(specials, 'Shovel', 'shovel');
-  bind(specials, 'Monkey', 'monkey');
+  bind(specials, 'Monkey', 'monkey', werewolf);
+  bind(specials, 'Wolf', 'monkey', () => !werewolf());
   bind(specials, 'Ants', 'ants');
+  bind(specials, 'Moons', 'moons', () => settings.mode !== 'ci');
   panel.settings.group('Reset').button('Reset to defaults', () => {
     Object.assign(settings, structuredClone(DEFAULT_SETTINGS));
     delete settings.roundSeconds;
@@ -931,14 +1094,15 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ctx.globalAlpha = alpha;
     }
     ctx.drawImage(img(`crate${width}x${height}`), art * width * CELL, 0, width * CELL, height * CELL, x, y, width * CELL, height * CELL);
-    const flash = fruit ? (size === 0 ? 'sparks_small_fruit' : size === 1 ? 'sparks_large_fruit' : art === 0 ? 'sparks_gems' : 'sparks_gold') : null;
+    const flash = werewolf() ? (size === 0 ? 'sparks_small_chest' : size === 1 ? 'sparks_medium_chest' : 'sparks_big_chest')
+      : fruit ? (size === 0 ? 'sparks_small_fruit' : size === 1 ? 'sparks_large_fruit' : art === 0 ? 'sparks_gems' : 'sparks_gold') : null;
     if (flash) {
       const sheet = img(flash);
-      const fw = size === 0 ? 76 : size === 1 ? 145 : 135;
-      const fh = size === 0 ? 76 : size === 1 ? 145 : 90;
+      const fw = werewolf() ? width * CELL : size === 0 ? 76 : size === 1 ? 145 : 135;
+      const fh = werewolf() ? height * CELL : size === 0 ? 76 : size === 1 ? 145 : 90;
       const frames = Math.floor(sheet.width / fw);
       const frame = Math.floor(now / 50) % (frames * 3);
-      const off = size === 0 ? -15 : size === 1 ? -27 : 0;
+      const off = werewolf() ? 0 : size === 0 ? -15 : size === 1 ? -27 : 0;
       if (frame < frames) ctx.drawImage(sheet, frame * fw, 0, fw, fh, x + off, y + off, fw, fh);
     }
     ctx.restore();
@@ -949,7 +1113,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (piece === EMPTY || (isCrate(piece) && !isCrateAnchor(piece))) return;
     if (isAnts(piece)) return drawAnts(piece, x, y, alpha, frame);
     if (isCrate(piece)) return drawCrate(piece, x, y, alpha, now);
-    screen.blit(img('pieces'), x, y, { area: [piece * CELL, 0, CELL, CELL], ...(alpha < 1 && { alpha: alpha * 255 }) });
+    screen.blit(img('pieces'), x, y, { area: [(werewolf() && piece === 7 ? 9 : piece) * CELL, 0, CELL, CELL], ...(alpha < 1 && { alpha: alpha * 255 }) });
   }
 
   function drawCells(cells: readonly number[]): void {
@@ -1000,9 +1164,18 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
 
   function drawSprite(s: Sprite, elapsed: number, now: number): void {
+    const ctx = screen.ctx;
     const local = elapsed - s.delay;
     if (s.clear) {
       if (local >= s.duration) return;
+      if (s.moonClear && local >= 0) {
+        const [x, y] = pieceTopLeft(s.piece, s.from);
+        ctx.save();
+        ctx.filter = 'brightness(0) invert(1)';
+        drawPiece(s.piece, x, y, local < 120 ? 1 : Math.max(0, 1 - (local - 120) / 250), 0, now);
+        ctx.restore();
+        return;
+      }
       const alpha = local < 0 ? 1 : 1 - 0.8 * (local / Math.max(1, s.duration));
       const [x, y] = pieceTopLeft(s.piece, s.from);
       return drawPiece(s.piece, x, y, alpha, 0, now);
@@ -1038,6 +1211,96 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
   }
 
+  function drawWolf(step: Step, elapsed: number): void {
+    const wolf = step.wolf;
+    if (!wolf || elapsed >= wolf.duration) return;
+    const frame = wolf.firstFrame + Math.min(4, Math.floor(elapsed / 100));
+    screen.blit(img('wolf_head'), LEFT + wolf.box[0] * CELL, TOP + wolf.box[1] * CELL, { area: [frame * 225, 0, 225, 225] });
+  }
+
+  /** Moon art is 180px square around a fixed 2x2 area. */
+  function moonImage(name: string, frame: number, moon: Moon, alpha = 1): void {
+    screen.blit(img(name), (moon.x - 1) * CELL, (moon.y - 1) * CELL, { area: [frame * 180, 0, 180, 180], alpha: alpha * 255 });
+  }
+
+  /** Track births during simulation too, so seeking does not restart appearance animations. */
+  function syncMoonBirth(moons: readonly Moon[], now: number): void {
+    const present = new Set(moons.map((m) => m.id));
+    for (const id of moonBorn.keys()) if (!present.has(id)) moonBorn.delete(id);
+    for (const id of moonPhaseSince.keys()) if (!present.has(id)) moonPhaseSince.delete(id);
+    for (const id of moonCountSince.keys()) if (!present.has(id)) moonCountSince.delete(id);
+    for (const moon of moons) if (!moonBorn.has(moon.id)) moonBorn.set(moon.id, now);
+  }
+
+  function drawMoons(moons: readonly Moon[], now: number): void {
+    syncMoonBirth(moons, now);
+    for (const moon of moons) {
+      const age = Math.max(0, now - moonBorn.get(moon.id)!);
+      if (age < 500) moonImage('moon_appear', Math.min(5, Math.floor(age * 6 / 500)), moon);
+      else {
+        // A new phase or claw count shows at full strength for 250ms, then fades over 250ms to 60%.
+        const fade = (shown: number) => shown < 250 ? 1 : 1 - 0.4 * Math.min(1, (shown - 250) / 250);
+        const seen = moonPhaseSince.get(moon.id);
+        if (!seen || seen.phase !== moon.phase) moonPhaseSince.set(moon.id, { phase: moon.phase, since: seen ? now : moonBorn.get(moon.id)! + 500 });
+        const shown = now - moonPhaseSince.get(moon.id)!.since;
+        moonImage('moon_phase', Math.min(3, Math.max(0, 4 - moon.phase)), moon, fade(shown));
+        const count = Math.min(moon.charge, 3);
+        const counted = moonCountSince.get(moon.id);
+        if (!counted || counted.count !== count) moonCountSince.set(moon.id, { count, since: now });
+        if (count > 0) moonImage('moon_counter', count - 1, moon, fade(Math.min(shown, now - moonCountSince.get(moon.id)!.since)));
+      }
+    }
+  }
+
+  /** The beams grow one cell per 40ms, beginning 350ms after the moon fires. */
+  function drawMoonEffect(effect: Extract<Effect, { kind: 'moon' }>, age: number): boolean {
+    const { moon, blast } = effect;
+    if (!blast) {
+      if (age >= 400) return false;
+      moonImage('moon_phase', Math.min(3, 4 - Math.max(1, moon.phase)), moon, 0.6 * (1 - age / 400));
+      return true;
+    }
+    if (age < 350) {
+      moonImage('moon_phase', 4 - Math.max(1, moon.phase), moon, 0.6);
+      moonImage('moon_counter', 2, moon);
+      return true;
+    }
+    const local = age - 350;
+    const last = (Math.max(0, ...blast.cells.values()) - 1) * 40;
+    if (local >= Math.max(500, last + 300)) return false;
+    const alpha = local <= last ? 1 : Math.max(0, 1 - (local - last) / 300);
+    drawRays(blast, 1 + local / 40, alpha);
+    if (local < 500) moonImage('moon_clear', Math.min(6, Math.floor(local * 7 / 500)), moon, 1);
+    if (local <= last) moonImage('moon_counter', 2, moon, 1);
+    return true;
+  }
+
+  function drawRays(blast: MoonBlast, length: number, alpha: number): void {
+    const ctx = screen.ctx;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const ray of blast.rays) {
+      ctx.beginPath();
+      ctx.moveTo(ray[0] * CELL / 2, ray[1] * CELL / 2);
+      let travelled = 0;
+      for (let i = 2; i + 1 < ray.length && travelled < length; i += 2) {
+        const dx = ray[i] - ray[i - 2], dy = ray[i + 1] - ray[i - 1];
+        const segment = Math.max(Math.abs(dx), Math.abs(dy)) / 2;
+        const portion = Math.min(1, (length - travelled) / segment);
+        ctx.lineTo((ray[i - 2] + dx * portion) * CELL / 2, (ray[i - 1] + dy * portion) * CELL / 2);
+        travelled += segment;
+      }
+      ctx.lineWidth = CELL * 0.4;
+      ctx.strokeStyle = `rgba(150,215,255,${90 / 255 * alpha})`;
+      ctx.stroke();
+      ctx.lineWidth = CELL * 0.12;
+      ctx.strokeStyle = `rgba(240,250,255,${230 / 255 * alpha})`;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   /** Cleared fruit pops (piece0-4.png, 5 frames of 90px at about 13 fps) over its cell. */
   function drawPop(effect: Extract<Effect, { kind: 'pop' }>, age: number): boolean {
     const frame = Math.floor(age / (1000 / 13));
@@ -1047,32 +1310,22 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return true;
   }
 
-  /** Floating messages, centred over the board, rising and fading. */
+  /** Floating messages centred on the board, sized by their points (GameFonts.get(points, 32)). */
   function drawText(effect: Extract<Effect, { kind: 'text' }>, age: number): boolean {
     if (age >= FLOAT_MS) return false;
-    const size = Math.max(20, Math.min(32, effect.size));
-    const ctx = screen.ctx;
-    ctx.save();
-    ctx.globalAlpha = age < FLOAT_MS / 2 ? 1 : 1 - (age - FLOAT_MS / 2) / (FLOAT_MS / 2);
-    ctx.font = `${size}px "${FONT}"`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = cursed() ? '#2a0d3a' : '#2b1a05';
-    ctx.fillStyle = cursed() ? '#e8d4ff' : '#fff2b0';
-    const y = TOP + VIEW_H / 2 - (FLOAT_PX * age) / FLOAT_MS;
-    ctx.strokeText(effect.text, LEFT + VIEW_W / 2, y);
-    ctx.fillText(effect.text, LEFT + VIEW_W / 2, y);
-    ctx.restore();
+    const style = { px: gameFontFor(effect.size, 32), align: 'center' as const };
+    const { dy, alpha } = floatAt(age);
+    const { h } = gameTextBox(screen.ctx, effect.text, style);
+    drawGameText(screen.ctx, effect.text, LEFT + VIEW_W / 2, TOP + (VIEW_H - h) / 2 + dy, { ...style, alpha });
     return true;
   }
 
-  function drawTimed(now: number, layer: 'pop' | 'text'): void {
+  function drawTimed(now: number, layer: 'pop' | 'text' | 'moon'): void {
     timed = timed.filter((t) => {
       const age = now - t.start;
       if (age < 0) return true;
       if (t.effect.kind !== layer) return true;
-      return t.effect.kind === 'pop' ? drawPop(t.effect, age) : drawText(t.effect, age);
+      return t.effect.kind === 'pop' ? drawPop(t.effect, age) : t.effect.kind === 'moon' ? drawMoonEffect(t.effect, age) : drawText(t.effect, age);
     });
   }
 
@@ -1134,11 +1387,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     ctx.clip();
     ctx.translate(LEFT, TOP);
     let step: [Step, number] | null = null;
+    if (!flight) {
+      step = currentStep(now);
+    }
     if (flight) {
       if (!flight.out || now < flight.start) drawCells(flight.out ? game.cells : []);
       drawFlight(now);
     } else {
-      step = currentStep(now);
       if (step) {
         drawCells(step[0].board);
         // Pieces waiting to be replaced go underneath, so the monkey's new pieces show over them as they fly.
@@ -1146,9 +1401,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         for (const s of step[0].sprites) if (!s.clear) drawSprite(s, step[1], now);
       } else drawCells(game.cells);
     }
+    if (!flight && (boardActive || step || game.cells.some((p) => p !== EMPTY))) {
+      drawMoons(step?.[0].moons ?? game.moons?.active ?? [], now);
+      drawTimed(now, 'moon');
+    }
     ctx.translate(-LEFT, -TOP);
     drawTimed(now, 'pop');
     if (step) drawMonkey(step[0], step[1]);
+    if (step) drawWolf(step[0], step[1]);
     ctx.restore();
     // The cursor shows while the board is in play; over a tool it shrinks to that cell.
     if (boardActive && !flight) {
@@ -1159,20 +1419,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
 
   function bigText(lines: string[]): void {
-    const ctx = screen.ctx;
-    ctx.save();
-    ctx.font = `48px "${FONT}"`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 6;
-    ctx.strokeStyle = '#1a1020';
-    ctx.fillStyle = '#ffffff';
-    lines.forEach((line, i) => {
-      const y = TOP + VIEW_H / 2 + (i - (lines.length - 1) / 2) * 56;
-      ctx.strokeText(line, LEFT + VIEW_W / 2, y);
-      ctx.fillText(line, LEFT + VIEW_W / 2, y);
-    });
-    ctx.restore();
+    drawPauseLabel(screen.ctx, lines.join('\n'), LEFT + VIEW_W / 2, TOP + VIEW_H / 2, VIEW_W);
   }
 
   function advanceGame(now: number): void {
@@ -1189,10 +1436,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (!isPuzzle() && roundSeconds() > 0 && timePassed >= roundDuration()) finishScored();
     else if (pendingNextBoard) newBoard();
     else if (isPuzzle() && game.crateCount() === 0) { finishPuzzle(); outro(); }
-    else if (settings.mode === 'normal' && boardDone()) finishScored();
-    else if (settings.mode !== 'normal' && settings.mode !== 'puzzle' && settings.mode !== 'chaos' && boardDone()) {
+    else if (normalMode() && boardDone()) finishScored();
+    else if (!normalMode() && settings.mode !== 'puzzle' && settings.mode !== 'chaos' && settings.mode !== 'create' && boardDone()) {
       pendingNextBoard = true;
-      timed.push({ effect: { kind: 'text', text: 'Great work!', size: 32, delay: 0 }, start: now });
+      timed.push({ effect: { kind: 'text', text: 'Great work!', size: 16, delay: 0 }, start: now });
       outro(TIMING.outroDelay);
     }
   }
@@ -1214,8 +1461,33 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (!routed.renderOnly) {
       const pointer = replay ? replay.mouse : input.mouse;
       if (boardActive && overBoard(pointer)) cursorFromMouse(pointer);
+      if (!replay && creating() && (pointer[0] !== lastPointer[0] || pointer[1] !== lastPointer[1])) {
+        if (paintWith !== null) paintAt(pointer, paintWith);
+        else if (painting && palettePaint !== null && palettePaint !== MOON_PAINT) paintAt(pointer, palettePaint);
+      }
+      lastPointer = [pointer[0], pointer[1]];
       // While watching a replay the player's own clicks and keys don't reach the board.
       for (const event of replay ? [] : events) {
+        if (creating() && event.type === 'mousedown' && event.button === 1 && palettePaint !== null && overBoard(event.pos)) {
+          paintAt(event.pos, palettePaint);
+          painting = true;
+          continue;
+        }
+        if (event.type === 'mouseup' && event.button === 1) painting = false;
+        if (creating() && event.type === 'mousedown' && (event.button === 4 || event.button === 5)) {
+          // The wheel cycles the colour or special under the pointer.
+          const at = cellAt(event.pos);
+          const i = at ? PAINTABLE.indexOf(paintOf(game.board.getPiece(at[0], at[1]))) : -1;
+          if (at && i >= 0 && i < 10) paintAt(event.pos, PAINTABLE[(i + (event.button === 4 ? 1 : 9)) % 10]);
+          continue;
+        }
+        const paintKey = event.type === 'keydown' || event.type === 'keyup' ? PAINT_KEYS.find((k) => keyMatches(event.key, 'forage', k.id, k.defaultKey)) : undefined;
+        if (paintKey) {
+          if (!creating()) continue;
+          if (event.type === 'keydown') { paintWith = paintKey.paint; paintAt(input.mouse, paintKey.paint); }
+          else if (paintWith === paintKey.paint) paintWith = null;
+          continue;
+        }
         // The game acts as the button goes down; left is anticlockwise, right clockwise.
         if (event.type === 'mousedown' && (event.button === 1 || event.button === 3) && boardActive && overBoard(event.pos)) {
           replays.action({ type: 'forage-click', data: { button: event.button, x: Math.round(event.pos[0]), y: Math.round(event.pos[1]) } });
@@ -1231,7 +1503,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     // Seeking advances the same simulation state without painting every 60 fps intermediate
     // frame, keeping long replay scrubs responsive.
     if (replays.isSeeking || replays.isAdvancing) return;
-    screen.blit(img(cursed() ? 'background_cursed' : 'background'), 0, 0);
+    screen.blit(img(werewolf() ? 'background_werewolf' : cursed() ? 'background_cursed' : 'background'), 0, 0);
     const title = img(cursed() ? 'title_cursed' : 'title');
     screen.blit(title, Math.round((450 - title.width) / 2), Math.round((TOP - title.height) / 2));
     if (boardActive || ended || flight) drawBoard(now);
@@ -1244,8 +1516,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (boardActive && !replay) toggleRunning(); });
-  return { frame, dispose: () => { if (!recordedAction) replays.cancel(); replays.dispose(); sounds.dispose(); warning.dispose(); } };
+  return { frame, dispose: () => { if (!recordedAction) replays.cancel(); stopNight?.(); replays.dispose(); sounds.dispose(); warning.dispose(); } };
 }) satisfies PuzzleFactory;
 
-/** board_pool_reserve.py's first reserve, which the desktop version used when filling puzzles. */
+/** Initial reserve used when filling hand-made puzzles. */
 const RESERVE = ['xxxuuxw', 'wywvvuy', 'uxyyxwv', 'vuxvxxw', 'wwuuyxy', 'wvyyvuu', 'uxuxvwx', 'yxyywxu', 'xuwuxyx', 'wvwwxuu'];

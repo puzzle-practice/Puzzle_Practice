@@ -1,7 +1,7 @@
 import { setReplayPirate } from './duty/profile';
 import { readReport, showsDutyReport, type DutyReport } from './duty/report';
 import type { InputEvent, Point } from './input';
-import type { Panel } from './panel';
+import { isTyping, type Panel } from './panel';
 import { showsReplayClicks, Store } from './storage';
 import { readArchivedReplay, readReplayArchive, REPLAY_REMOVED, replayRetentionLimit } from './data-backups';
 import { replayId, replayWrites, saveReplayFile, type ReplayMetadata } from './replay-storage';
@@ -24,6 +24,10 @@ export interface PuzzleReplay {
   settingsVersion?: number;
   /** Puzzle simulation semantics at recording time; useful when rules change. */
   simulatorVersion?: number;
+  /** Native seed stream version; recordings without it are unsupported for playback. */
+  randomVersion?: 1;
+  /** A deliberately chosen seed: the replay and any take-over cannot set PBs. */
+  practice?: boolean;
   /** Opaque replay state; this can be a board snapshot and PRNG state rather than a game seed. */
   seed: unknown;
   frames: ReplayFrame[];
@@ -52,6 +56,9 @@ export interface CompactPuzzleReplay {
   settings: unknown;
   settingsVersion?: number;
   simulatorVersion?: number;
+  /** Native seed stream version; recordings without it are unsupported for playback. */
+  randomVersion?: 1;
+  practice?: boolean;
   seed: unknown;
   frames: Array<Array<unknown>>;
   /** Delta-encoded simulation frame times. */
@@ -111,6 +118,16 @@ export function replayMetadata(tape: PuzzleReplay, bytes: number): ReplayMetadat
     result: tape.result, settingsVersion: tape.settingsVersion ?? 1, simulatorVersion: tape.simulatorVersion ?? 1, bytes };
 }
 
+/** Download name: the local date and time it was recorded, plus its run, so each replay saves to its own file. */
+export function replayFileName(entry: Pick<ReplayMetadata, 'puzzle' | 'at' | 'runId'>): string {
+  const d = new Date(entry.at);
+  const two = (n: number) => String(n).padStart(2, '0');
+  const when = d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate()) + '_' +
+    two(d.getHours()) + '-' + two(d.getMinutes()) + '-' + two(d.getSeconds());
+  const run = entry.runId ? entry.runId.slice(0, 8) : String(entry.at % 1000).padStart(3, '0');
+  return entry.puzzle + '-replay-' + when + '-' + run + '.json.gz';
+}
+
 export interface ReplayAction {
   type: string;
   data?: unknown;
@@ -132,6 +149,8 @@ function isCompactPuzzleReplay(value: unknown): value is CompactPuzzleReplay {
   if (!value || typeof value !== 'object') return false;
   const tape = value as CompactPuzzleReplay;
   return tape.format === 'puzzle-practice-replay' && tape.version === 2 && typeof tape.puzzle === 'string' &&
+    (tape.randomVersion === undefined || tape.randomVersion === 1) &&
+    (tape.practice === undefined || typeof tape.practice === 'boolean') &&
     Number.isFinite(tape.at) && Number.isFinite(tape.duration) && tape.duration >= 0 && typeof tape.result === 'string' &&
     Array.isArray(tape.frames);
 }
@@ -162,9 +181,10 @@ export function packReplay(tape: PuzzleReplay): CompactPuzzleReplay {
   return {
     format: 'puzzle-practice-replay', version: 2, puzzle: tape.puzzle, at: tape.at, duration: tape.duration,
     ...(tape.runId ? { runId: tape.runId } : {}),
+    ...(tape.practice ? { practice: true } : {}),
     ...(tape.clockStart !== undefined ? { clockStart: tape.clockStart } : {}),
     result: tape.result, settings: tape.settings, ...(tape.settingsVersion ? { settingsVersion: tape.settingsVersion } : {}),
-    ...(tape.simulatorVersion ? { simulatorVersion: tape.simulatorVersion } : {}), seed: tape.seed, frames,
+    ...(tape.simulatorVersion ? { simulatorVersion: tape.simulatorVersion } : {}), seed: tape.seed, frames, ...(tape.randomVersion ? { randomVersion: tape.randomVersion } : {}),
     ...(tape.steps ? { steps: tape.steps.map((time, index) => time - (tape.steps![index - 1] ?? 0)) } : {}),
     ...(tape.report ? { report: tape.report } : {}),
     ...(tape.checks?.length ? { checks: tape.checks.map(([time, hash], index): [number, number] => [time - (tape.checks![index - 1]?.[0] ?? 0), hash]) } : {}),
@@ -226,7 +246,8 @@ export function unpackReplay(value: unknown): PuzzleReplay | null {
     }) : undefined;
     const replay: PuzzleReplay = {
       format: 'puzzle-practice-replay', version: 1, puzzle: value.puzzle, at: value.at, duration: value.duration,
-      result: value.result, settings: value.settings, seed: value.seed, frames,
+      result: value.result, settings: value.settings, seed: value.seed, frames, ...(value.randomVersion ? { randomVersion: value.randomVersion } : {}),
+      ...(value.practice ? { practice: true } : {}),
       ...(value.runId ? { runId: value.runId } : {}),
       ...(value.clockStart !== undefined ? { clockStart: value.clockStart } : {}),
       ...(value.settingsVersion ? { settingsVersion: value.settingsVersion } : {}),
@@ -266,6 +287,13 @@ export function decodeReplaySettings(tape: PuzzleReplay, codec: ReplaySettingsCo
   catch { return null; }
 }
 
+/**
+ * Puzzles whose pointer moves the game on its own, between clicks and keys: compression keeps their
+ * hover. Weaving's hover places the next incoming shuttle; Gunning, Bilging and Alchemistry's moves
+ * the cursor the keys act on; Rumble's aims the fists a key fires when it is let go.
+ */
+const HOVER_PUZZLES = new Set(['weaving', 'gunning', 'bilging', 'alchemistry', 'rumble']);
+
 export function compressReplay(tape: PuzzleReplay): PuzzleReplay {
   const heldButtons = new Set<number>();
   const heldKeys = new Set<string>();
@@ -278,11 +306,12 @@ export function compressReplay(tape: PuzzleReplay): PuzzleReplay {
       else if (event.type === 'keyup') heldKeys.delete(event.key);
     }
     const meaningful = frame.events.length > 0 || (frame.commands?.length ?? 0) > 0 || (frame.actions?.length ?? 0) > 0;
-    // Distilling's held-mouse path causes match swaps and create-mode painting. Carpentry applies
+    // Distilling and Shipwrightery use held-mouse paths for swaps. Carpentry applies
     // a drag at release, so it needs the pickup/release coordinates but not cursor samples between.
-    // The last hover sample before a key press establishes keyboard cursor/selection state.
-    const beforeKey = tape.frames[index + 1]?.events.some((event) => event.type === 'keydown');
-    return meaningful || !!beforeKey || (tape.puzzle === 'distilling' && (wasHeld || heldButtons.size > 0 || heldKeys.size > 0));
+    // The last hover sample before a key or button press establishes cursor/selection state, and
+    // where a drag that starts with the press comes from.
+    const beforePress = tape.frames[index + 1]?.events.some((event) => event.type === 'keydown' || event.type === 'mousedown');
+    return meaningful || !!beforePress || HOVER_PUZZLES.has(tape.puzzle) || ((tape.puzzle === 'distilling' || tape.puzzle === 'shipwrightery') && (wasHeld || heldButtons.size > 0 || heldKeys.size > 0));
   });
   return {
     ...tape,
@@ -300,6 +329,8 @@ export function isPuzzleReplay(value: unknown, puzzle?: string): value is Puzzle
       (r.clockStart !== undefined && (!Number.isFinite(r.clockStart) || r.clockStart < 0)) ||
       (r.settingsVersion !== undefined && (!Number.isInteger(r.settingsVersion) || r.settingsVersion < 1)) ||
       (r.simulatorVersion !== undefined && (!Number.isInteger(r.simulatorVersion) || r.simulatorVersion < 1)) ||
+      (r.randomVersion !== undefined && r.randomVersion !== 1) ||
+      (r.practice !== undefined && typeof r.practice !== 'boolean') ||
       !Array.isArray(r.frames)) return false;
   if (r.checks !== undefined && (!Array.isArray(r.checks) || r.checks.some((check, i) => !Array.isArray(check) || check.length !== 2 ||
       !Number.isFinite(check[0]) || check[0] < 0 || !Number.isInteger(check[1]) || (i > 0 && check[0] < r.checks![i - 1][0])))) return false;
@@ -359,6 +390,8 @@ export class ReplayRecorder {
   private disposed = false;
   private request = 0;
   private jumpSeconds = 0;
+  /** Arrow-key skips not yet made, in ms: the next frame makes them all at once. */
+  private pendingSeek = 0;
   private scrubSeconds: number | null = null;
   private replaySpeed = 1;
   private compressRecording = true;
@@ -367,6 +400,8 @@ export class ReplayRecorder {
   private readonly preferences = new Store('global');
   private readonly mouseButtonsDown = new Set<number>();
   private readonly keysDown = new Set<string>();
+  /** Buttons and keys the replay held when it was taken over: the player's first frame lets them go. */
+  private releases: InputEvent[] = [];
   /** When a recorded input's effect still needs checking: the next frame hashes the state it left. */
   private pendingCheck: number | null = null;
   /** When the last replay watched first differed from its recording; null if it never did. */
@@ -448,14 +483,35 @@ export class ReplayRecorder {
       if (!tape) return this.replayStorageError || 'No replays recorded yet.';
       const drift = this.playback?.divergedAt ?? null;
       const warning = (this.replayStorageError ? ' · ' + this.replayStorageError : '') +
-        (drift !== null ? ' · This replay drifted from the game it recorded at ' + (drift / 1000).toFixed(1) + 's' : '');
+        (drift !== null ? ' · This replay drifted from the game it recorded at ' + (drift / 1000).toFixed(1) + 's' : '') +
+        (this.playback ? ' · ← → skip a second' : '');
       return (tape.duration / 1000).toFixed(1) + 's · ' + (tape.bytes / 1024).toFixed(1) + ' KB · ' +
         (this.totalBytes / 1024).toFixed(1) + ' KB archived (' + this.tapes.length + ' replays)' + warning;
     });
     this.syncPicker();
     void this.loadTapes();
     panel.sessionLock?.(() => !!this.playback || this.loading || !this.canStartPlayback(), () => this.abandon());
-    if (typeof window !== 'undefined') window.addEventListener(REPLAY_REMOVED, this.forget);
+    if (typeof window !== 'undefined') {
+      window.addEventListener(REPLAY_REMOVED, this.forget);
+      window.addEventListener('keydown', this.arrowKeys);
+    }
+  }
+
+  /** While a replay plays, Left and Right skip back and forward a second; held, they keep skipping. */
+  private readonly arrowKeys = (event: KeyboardEvent): void => {
+    if (!this.playback || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || isTyping(event.target)) return;
+    const step = event.key === 'ArrowLeft' ? -1000 : event.key === 'ArrowRight' ? 1000 : 0;
+    if (!step) return;
+    event.preventDefault();
+    this.seekBy(step);
+  };
+
+  /** Skips the replay being watched by `ms` (negative is back), from where it is now. */
+  seekBy(ms: number): void {
+    if (!this.playback) return;
+    this.pendingSeek += ms;
+    // Skipping back from the very end carries on watching instead of closing the replay.
+    if (ms < 0) this.playback.finishPending = false;
   }
 
   /** A replay was deleted from the History tab: it leaves the list (and stops if it's playing). */
@@ -489,7 +545,8 @@ export class ReplayRecorder {
     this.recording = {
       format: 'puzzle-practice-replay', version: 1, puzzle: this.puzzle, at: this.lastAt, duration: p.elapsed,
       runId: crypto.randomUUID(), clockStart: p.start,
-      settingsVersion: this.settingsCodec.currentVersion, simulatorVersion: tape.simulatorVersion ?? 1,
+      settingsVersion: this.settingsCodec.currentVersion, simulatorVersion: tape.simulatorVersion ?? 1, ...(tape.randomVersion ? { randomVersion: tape.randomVersion } : {}),
+      ...(tape.practice ? { practice: true } : {}),
       result: 'In progress', settings: structuredClone(settings), seed: structuredClone(tape.seed),
       frames: structuredClone(tape.frames.slice(0, p.frame)),
       steps: tape.steps ? tape.steps.slice(0, p.step) : [],
@@ -501,9 +558,21 @@ export class ReplayRecorder {
     this.compressRecording = this.preferences.get<boolean>('compressReplays', true);
     this.previousMouse = [...p.mouse]; this.pendingMouse = null; this.pendingCheck = null;
     this.mouseButtonsDown.clear(); this.keysDown.clear();
+    // Whatever the replay was holding, the player isn't: their first frame releases it, and the
+    // release is recorded, so the saved game lets go at the same moment.
+    const buttons = new Set<number>(), keys = new Set<string>();
+    for (const frame of this.recording.frames) for (const event of frame.events) {
+      if (event.type === 'mousedown') buttons.add(event.button);
+      else if (event.type === 'mouseup') buttons.delete(event.button);
+      else if (event.type === 'keydown') keys.add(event.key);
+      else if (event.type === 'keyup') keys.delete(event.key);
+    }
+    this.releases = [...[...buttons].map((button): InputEvent => ({ type: 'mouseup', button, pos: [...p.mouse] as Point })),
+      ...[...keys].map((key): InputEvent => ({ type: 'keyup', key }))];
     this.playback = null;
     ++this.request;
     this.store.setReadOnly(false);
+    this.store.setScoresEnabled(!tape.practice);
     // The clock carries on from the replay's time instead of jumping back.
     this.setReplayTime?.(null);
     setReplayPirate(null);
@@ -524,12 +593,13 @@ export class ReplayRecorder {
     this.takeOverFrom = null;
     this.compressRecording = this.preferences.get<boolean>('compressReplays', true);
     this.recordStart = start; this.previousMouse = [-1, -1]; this.pendingMouse = null; this.pendingCheck = null;
-    this.mouseButtonsDown.clear(); this.keysDown.clear();
+    this.mouseButtonsDown.clear(); this.keysDown.clear(); this.releases = [];
     this.lastAt = Math.max(Date.now(), this.lastAt + 1);
     this.recording = { format: 'puzzle-practice-replay', version: 1, puzzle: this.puzzle, at: this.lastAt, duration: 0,
       runId: crypto.randomUUID(),
       clockStart: start,
-      settingsVersion: this.settingsCodec.currentVersion, simulatorVersion: this.settingsCodec.simulatorVersion ?? 1,
+      settingsVersion: this.settingsCodec.currentVersion, simulatorVersion: this.settingsCodec.simulatorVersion ?? 1, randomVersion: 1,
+      ...(!this.store.scoresEnabled ? { practice: true } : {}),
       result: 'In progress', settings: structuredClone(settings), seed: structuredClone(seed), frames: [], steps: [],
       ...(this.fingerprint ? { checks: [] } : {}) };
   }
@@ -573,6 +643,7 @@ export class ReplayRecorder {
     if (this.injected) return this.injected;
     if (this.playback) {
       const p = this.playback;
+      if (this.pendingSeek && !this.loading && !this.seeking && !this.advancing) this.skip(p);
       if (p.finishPending) {
         this.stopPlayback();
         // The run is over: show the report it was saved with, as it was then.
@@ -589,12 +660,14 @@ export class ReplayRecorder {
       return { ...this.routed([], p.mouse, p.elapsed), renderOnly: true };
     }
     if (this.recording) {
+      if (this.releases.length) events = [...this.releases.splice(0), ...events];
       const t = Math.max(0, now - this.recordStart);
       // The frame before has finished: hash the state its inputs left, before this frame changes it.
-      if (this.pendingCheck !== null && this.fingerprint && this.recording.checks) {
-        this.recording.checks.push([this.pendingCheck, stateHash(this.fingerprint())]);
+      // A command recorded just now, at this frame's time, is applied by this frame: it's checked next frame.
+      if (this.pendingCheck !== null && this.pendingCheck < t) {
+        if (this.fingerprint && this.recording.checks) this.recording.checks.push([this.pendingCheck, stateHash(this.fingerprint())]);
+        this.pendingCheck = null;
       }
-      this.pendingCheck = null;
       this.recording.duration = Math.max(this.recording.duration, t);
       this.recording.steps!.push(t);
       const changed = mouse[0] !== this.previousMouse[0] || mouse[1] !== this.previousMouse[1];
@@ -605,10 +678,10 @@ export class ReplayRecorder {
         else if (event.type === 'keydown') this.keysDown.add(event.key);
         else if (event.type === 'keyup') this.keysDown.delete(event.key);
       }
-      if (events.some((event) => event.type === 'keydown') && this.pendingMouse) {
+      if (events.some((event) => event.type === 'keydown' || event.type === 'mousedown') && this.pendingMouse) {
         this.recording.frames.push(this.pendingMouse); this.pendingMouse = null;
       }
-      const keepPath = this.puzzle === 'distilling' && (wasHeld || this.mouseButtonsDown.size > 0 || this.keysDown.size > 0);
+      const keepPath = HOVER_PUZZLES.has(this.puzzle) || ((this.puzzle === 'distilling' || this.puzzle === 'shipwrightery') && (wasHeld || this.mouseButtonsDown.size > 0 || this.keysDown.size > 0));
       const frame: ReplayFrame = { t, mouse: [...mouse],
         events: events.map((event) => 'key' in event ? { ...event } : { ...event, pos: [...event.pos] as Point }) };
       if (events.length || (changed && (!this.compressRecording || keepPath))) {
@@ -618,6 +691,23 @@ export class ReplayRecorder {
       this.previousMouse = [...mouse];
     }
     return this.routed(events, mouse, 0);
+  }
+  /**
+   * Makes the arrow-key skips: forward plays the replay on to the new time at once, back rebuilds it
+   * from the start to there, as Jump does. Either way it stays paused or playing as it was.
+   */
+  private skip(p: Playback): void {
+    const target = Math.max(0, Math.min(p.tape.duration, p.elapsed + this.pendingSeek));
+    this.pendingSeek = 0;
+    if (target >= p.elapsed) {
+      this.seeking = true;
+      try { this.advancePlayback(target); } finally { this.seeking = false; }
+      this.setReplayTime?.(p.start + p.elapsed);
+      p.lastReal = performance.now();
+      return;
+    }
+    this.jumpSeconds = target / 1000;
+    void this.jumpSelected();
   }
   private routed(events: InputEvent[], mouse: Point, elapsed: number): RoutedReplayFrame {
     return { events, mouse, elapsed, commands: [], actions: [], renderOnly: false };
@@ -646,9 +736,10 @@ export class ReplayRecorder {
           }
         }
         this.injected = routed;
-        this.stepFrame();
+        this.stepFrame!();
         this.injected = null;
-        this.compareCheck(time);
+        // A command and the frame's input are recorded as two frames at the same time: check after both.
+        if (p.tape.frames[p.frame]?.t !== time) this.compareCheck(time);
       }
       p.elapsed = target;
     } finally { this.injected = null; this.advancing = false; }
@@ -691,7 +782,10 @@ export class ReplayRecorder {
     if (this.disposed) return;
     if (this.playback) this.stopPlayback(); else this.finish('Stopped when leaving puzzle');
     this.disposed = true; ++this.request;
-    if (typeof window !== 'undefined') window.removeEventListener(REPLAY_REMOVED, this.forget);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener(REPLAY_REMOVED, this.forget);
+      window.removeEventListener('keydown', this.arrowKeys);
+    }
   }
   private stopPlayback(): void {
     ++this.request; this.loading = false;
@@ -763,7 +857,7 @@ export class ReplayRecorder {
    */
   abandon(): void {
     if (this.playback || this.loading) { this.stopPlayback(); return; }
-    this.recording = null; this.pendingMouse = null; this.pendingCheck = null; this.takenOverAt = null;
+    this.recording = null; this.pendingMouse = null; this.pendingCheck = null; this.takenOverAt = null; this.releases = [];
     this.store.setReadOnly(true);
     try { this.stopRestored?.(); }
     finally { this.store.setReadOnly(false); }
@@ -779,7 +873,7 @@ export class ReplayRecorder {
     const index = from ? this.tapeIndices.get(from.id) : undefined;
     if (!from || index === undefined || this.loading) return;
     if (this.playback) this.stopPlayback();
-    this.recording = null; this.pendingMouse = null; this.pendingCheck = null; this.takenOverAt = null;
+    this.recording = null; this.pendingMouse = null; this.pendingCheck = null; this.takenOverAt = null; this.releases = [];
     this.selected = index; this.jumpSeconds = from.at / 1000;
     await this.jumpSelected(true);
     if (!this.playback) return;
@@ -880,7 +974,7 @@ export class ReplayRecorder {
     return this.settingsCache.get(tape) ?? null;
   }
   private validateTape(tape: PuzzleReplay): boolean {
-    return this.validateSeed(tape.seed) && this.migratedSettings(tape) !== null &&
+    return tape.randomVersion === 1 && this.validateSeed(tape.seed) && this.migratedSettings(tape) !== null &&
       (tape.simulatorVersion ?? 1) <= (this.settingsCodec.simulatorVersion ?? 1);
   }
   private canPlay(entry: ReplayMetadata | undefined): boolean {
@@ -944,7 +1038,7 @@ export class ReplayRecorder {
       const blob = tape ? await this.blob(tape) : await readArchivedReplay(entry);
       if (!blob) throw new Error('Missing replay');
       const url = URL.createObjectURL(blob); const a = document.createElement('a');
-      a.href = url; a.download = this.puzzle + '-replay-' + new Date(entry.at).toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.json.gz';
+      a.href = url; a.download = replayFileName(entry);
       a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch { this.replayStorageError = 'The replay file could not be exported.'; }
   }
