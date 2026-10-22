@@ -156,6 +156,9 @@ describe('Rumble fire inputs', () => {
     harness.buttons.get('Play::Start')!();
     instance.frame([]);
     const f = (updates.mock.contexts.at(-1)! as RumbleMatch).player;
+    // Input-boundary checks need a shot that cannot start a random clear animation.
+    f.board.cells.fill(0);
+    f.board.sparks = [];
     const frame = (at: number, events: InputEvent[] = []) => { now = at; instance.frame(events); };
     return { instance, f, frame, draws };
   }
@@ -171,6 +174,21 @@ describe('Rumble fire inputs', () => {
     h.frame(100);
     const balls = h.draws.mock.calls.filter(args => args[0]?.name?.startsWith('balls-') && args[6] >= 0 && args[6] < 19 * 23);
     expect(balls).toHaveLength(before);
+    h.instance.dispose();
+  });
+
+  it('draws impact fists above the balls and removes them after the third pulse', async () => {
+    const h = await setup();
+    h.f.punchHits.push({ side: 1, row: 4, at: 100 });
+    h.draws.mockClear();
+    h.frame(150);
+    const names: string[] = h.draws.mock.calls.map(args => args[0]?.name ?? 'canvas');
+    const lastBall = Math.max(...names.map((name, i) => name.startsWith('balls-') ? i : -1));
+    expect(names.lastIndexOf('fist_hit')).toBeGreaterThan(lastBall);
+    expect(names[names.lastIndexOf('fist_hit') + 1]).toBe('canvas');
+    h.draws.mockClear();
+    h.frame(400);
+    expect(h.draws.mock.calls.some(args => args[0]?.name === 'fist_hit')).toBe(false);
     h.instance.dispose();
   });
 

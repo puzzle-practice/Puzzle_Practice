@@ -11,6 +11,7 @@ import {
 import type { Glove } from './gloves';
 import { charged, colourOf, EMPTY, FURBALL, isCharged } from './pieces';
 import { punchSteps } from './punch';
+import { IMPACT_MS } from './impact';
 
 /** Ball flight, px per ms. */
 export const FLIGHT_SPEED = 0.8;
@@ -317,7 +318,7 @@ export class Fighter {
     this.grapes = this.grapes.filter((g) => now < g.start + g.ms);
     this.shouts = this.shouts.filter((s) => now < s.start + s.ms);
     if (this.punch && now >= this.punch.end) this.punch = null;
-    this.punchHits = this.punchHits.filter(hit => now < hit.at + 300);
+    this.punchHits = this.punchHits.filter(hit => now < hit.at + IMPACT_MS);
     if (this.sprinkle && now >= this.sprinkle.end) this.sprinkle = null;
   }
 

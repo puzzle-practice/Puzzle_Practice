@@ -13,6 +13,7 @@ import { SoundBank } from '../../core/audio';
 import { RumbleAudio } from './audio';
 import { punchPosition } from './punch';
 import { paintGlove } from './portrait';
+import { drawImpact, impactHighlight } from './impact';
 import { keyMatches } from '../../core/controls';
 import { drawGameText, drawPauseLabel, floatAt, gameTextBox, loadGameFont, wrapGameText, BOARD_FONT_SMALL } from '../../core/game-text';
 import { sessionAverages } from '../../core/duty/desk';
@@ -251,6 +252,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     Images.load(imageUrls), Images.load(gloveUrls), Images.load(faceUrls), Images.load(dotUrls), loadGameFont(),
   ]);
   const img = (name: string) => images.get(name);
+  const fistHighlight = impactHighlight(img('fist_hit'));
   let replays!: ReplayRecorder;
   const sounds = new SoundBank(soundUrls, () => replays?.isSeeking ?? false);
   const rumbleAudio = new RumbleAudio(sounds);
@@ -990,7 +992,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (creating()) drawPainting();
     if (aiming() && aim) drawAimTargets();
     if (punch) drawPunch(f, now);
-    drawPunchHits(f, now);
     if (sprinkle) {
       for (const ball of sprinkle.balls) {
         const at = b.pixel(ball.cell);
@@ -1036,6 +1037,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     drawFists(f, now);
     drawWarnings(f, now);
     drawShouts(f, now);
+    drawPunchHits(f, now);
     // One or two shots from a drop, the board's edge goes magenta, then red.
     if (!f.out && (b.shots === 6 || b.shots === 7)) {
       ctx.strokeStyle = b.shots === 7 ? '#ff0000' : '#ff00ff';
@@ -1150,12 +1152,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function drawPunchHits(f: Fighter, now: number): void {
     // Keep wall impacts visible even when the moving balls have already settled.
     for (const { side, row, at } of f.punchHits) {
-      if (now >= at && now < at + 300) {
-        const right = side === 0;
-        ctx.globalAlpha = Math.floor((now - at) / 50) % 2 ? 0.6 : 1;
-        ctx.drawImage(img('fist_hit'), right ? 120 : 0, 0, 120, 120, right ? VIEW_W - 120 : 0, row * STEP_Y, 120, 120);
-        ctx.globalAlpha = 1;
-      }
+      drawImpact(ctx, img('fist_hit'), fistHighlight, side, row, now - at);
     }
   }
 
