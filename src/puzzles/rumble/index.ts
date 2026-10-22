@@ -37,7 +37,7 @@ import {
   furballColours, furballSlots, recolour, VIEWER_KINDS, viewerBoard, viewerBruises, werewolfPiece,
 } from './create';
 import type { Board } from './board';
-import { AIM_BOARD_SHOTS, AIM_HISTORY, AIM_LIVES, AIM_MS, AIM_REPLAY_VERSION, AimTrainer, type AimTarget } from './aim';
+import { AIM_BOARD_SHOTS, AIM_DIFFICULTIES, AIM_HISTORY, AIM_LIVES, AIM_MS, AIM_REPLAY_VERSION, AimTrainer, type AimDifficulty, type AimTarget } from './aim';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const gloveUrls = import.meta.glob<string>('./media/gloves/*.png', { eager: true, query: '?url', import: 'default' });
@@ -96,7 +96,7 @@ const SOUND_FILES: Record<string, string[]> = {
 };
 
 // The trainer's replay version is separate so Fight replays remain compatible.
-type Settings = MatchSettings & { aimTrainer?: typeof AIM_REPLAY_VERSION };
+type Settings = MatchSettings & { aimTrainer?: typeof AIM_REPLAY_VERSION; aimDifficulty?: AimDifficulty };
 type Kind = NpcSettings['kind'];
 
 const DEFAULT_RULES: FightRules = {
@@ -150,7 +150,8 @@ function validRules(value: unknown): value is FightRules {
 function validSettings(value: unknown): value is Settings {
   if (!value || typeof value !== 'object') return false;
   const s = value as Record<string, unknown>;
-  return (s.aimTrainer === undefined || s.aimTrainer === AIM_REPLAY_VERSION) && validRoster(s.enemyRoster, MAX_ENEMIES) && validRoster(s.allyRoster, MAX_ALLIES) && validStyle(s.ai) && validRules(s.rules) &&
+  return (s.aimTrainer === undefined || s.aimTrainer === AIM_REPLAY_VERSION) &&
+    (s.aimDifficulty === undefined || AIM_DIFFICULTIES.includes(s.aimDifficulty as AimDifficulty)) && validRoster(s.enemyRoster, MAX_ENEMIES) && validRoster(s.allyRoster, MAX_ALLIES) && validStyle(s.ai) && validRules(s.rules) &&
     typeof s.oneFisted === 'boolean' && typeof s.werewolf === 'boolean' && typeof s.rumless === 'boolean' &&
     int(s.damageLevel, 0, 100) && int(s.startRows, 0, 12) && Array.isArray(s.bludgeon) && s.bludgeon.length === 2 &&
     BLUDGEONS.includes(s.bludgeon[0]) && int(s.bludgeon[1], 0, 119);
@@ -169,7 +170,7 @@ const KEYS = [
 /**
  * Fight is the game; Freeplay, as in Distilling, paints any board and never ends. Freeplay keeps no
  * history or replays: its board can change between any two shots. Aim trainer queues precision
- * and bank shots on changing bruise scaffolds, with its own scores and replays.
+ * and bank shots on changing bruise scaffolds, graded Easy to Very hard, with its own scores and replays.
  */
 type Mode = 'Fight' | 'Create' | 'Aim trainer';
 const MODES: Option<Mode>[] = [{ value: 'Fight', label: 'Fight' }, { value: 'Create', label: 'Freeplay' }, { value: 'Aim trainer', label: 'Aim trainer' }];
@@ -275,6 +276,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const creating = () => !!match && startedMode === 'Create';
   const aiming = () => !!match && startedMode === 'Aim trainer';
   let aim: AimTrainer | null = null;
+  let aimDifficulty = store.get<AimDifficulty>('aimDifficulty', 'Mixed');
+  if (!AIM_DIFFICULTIES.includes(aimDifficulty)) aimDifficulty = 'Mixed';
+  /** Each difficulty keeps its own scores. Mixed keeps the trainer's original history. */
+  const aimHistory = () => aimDifficulty === 'Mixed' ? AIM_HISTORY : `${AIM_HISTORY}:${aimDifficulty}`;
   const create = loadCreateSettings(store.get<unknown>('create', CREATE_DEFAULTS));
   const saveCreate = () => store.set('create', create);
   let match: Match | null = null;
@@ -285,6 +290,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let messages: Message[] = [];
   let showColours = store.get<boolean>('showColours', false);
   let showLanding = store.get<boolean>('showLanding', false);
+  /** Aim trainer: each target's bounces and window of working angles. */
+  let aimHints = store.get<boolean>('aimHints', true);
   const listOffsets: [number, number] = [0, 0];
   /** Aim keys held, repeating 20 times a second after 300ms. */
   const held = { left: 0, right: 0, leftNext: 0, rightNext: 0, fine: false };
@@ -304,7 +311,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     pause.resume();
     const s = seed ?? seedMode.next(); seedMode.remember(s);
     startedMode = as;
-    if (seed === undefined && as !== 'Create') replays.begin({ ...structuredClone(settings), ...(as === 'Aim trainer' ? { aimTrainer: AIM_REPLAY_VERSION } : {}) }, { seed: s });
+    if (seed === undefined && as !== 'Create') replays.begin({ ...structuredClone(settings), ...(as === 'Aim trainer' ? { aimTrainer: AIM_REPLAY_VERSION, aimDifficulty } : {}) }, { seed: s });
     const now = ticks();
     messages = [];
     listOffsets[0] = listOffsets[1] = 0;
@@ -330,7 +337,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     finished = false;
     showResults = false;
     startedAt = now;
-    aim = as === 'Aim trainer' ? new AimTrainer(match.player, s, now, play) : null;
+    aim = as === 'Aim trainer' ? new AimTrainer(match.player, s, now, play, aimDifficulty) : null;
     if (as === 'Create') startCreate();
     play('game_start');
     quietGrowl();
@@ -355,8 +362,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       aim.finish('Stopped', now);
       const tape = replays.finish(aim.result!);
       if (aim.result !== 'Stopped' && !replays.isPlaying) {
-        store.addHistory(AIM_HISTORY, {
-          score: aim.score, result: aim.result!, shots: aim.shots, lives: aim.lives,
+        store.addHistory(aimHistory(), {
+          score: aim.score, result: aim.result!, shots: aim.shots, lives: aim.lives, difficulty: aim.difficulty,
           ms: Math.round(aim.endedAt! - startedAt),
           ...(tape ? { replayAt: tape.at, replayId: tape.runId ?? '' } : {}),
         });
@@ -876,23 +883,21 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function drawAimStatus(now: number): void {
     const t = aim!;
     ctx.save();
+    // Score, lives and time are in the side panel; the board shows only the two targets.
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-    ctx.fillRect(3, 48, 84, 226);
-    ctx.fillRect(367, 48, 80, 275);
+    ctx.fillRect(367, 48, 80, 288);
     const label = (text: string, x: number, y: number, px = 13, fill = '#fff') =>
       drawGameText(ctx, text, x, y, { px, family: 'dialog', align: 'center', fill });
-    label('SCORE', 45, 60, 11);
-    label(String(t.score), 45, 82, 26, '#ffff00');
-    label('LIVES', 45, 135, 11);
-    label(`${t.lives} / ${AIM_LIVES}`, 45, 156, 22, t.lives === 1 ? '#ff7777' : '#fff');
-    label('TIME LEFT', 45, 212, 10);
-    const seconds = Math.ceil(t.remaining(now) / 1000);
-    label(`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`, 45, 233, 19);
     const target = (item: AimTarget, y: number, title: string) => {
       label(title, 407, y, 11);
       drawBall(ball(item.colour), 392, y + 22, now);
       label(item.fist === 0 ? 'Left hand' : 'Right hand', 407, y + 59, 11);
-      label(item.kind, 407, y + 79, 11, '#ffffaa');
+      label(item.difficulty, 407, y + 79, 11, '#ffffaa');
+      if (!aimHints) return;
+      // The easiest route: its bounces, and how wide its window of working angles is.
+      const route = item.routes[0];
+      label(route.bounces ? `${route.bounces} bounce${route.bounces > 1 ? 's' : ''}` : 'Direct', 407, y + 95, 10, '#ccc');
+      label(`${(route.hi - route.lo + 1) / DIR_PREC}° window`, 407, y + 109, 10, '#ccc');
     };
     target(t.current, 60, '1 · NOW');
     target(t.next, 203, '2 · NEXT');
@@ -1503,7 +1508,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       '',
       'Left click or Z fires the left hand. Right click or X fires the right. Grey hands are inactive.',
       '',
-      'Target 2 and the next ball stay visible so you can prepare. Every target needs precision or a wall bounce.',
+      'Target 2 and the next ball stay visible so you can prepare. Pick a difficulty from Easy (straight in) to Very hard (two bounces, a tiny window or a far bank), or Mixed.',
       `The board changes every ${AIM_BOARD_SHOTS} shots. Your previewed target stays ready.`,
       '',
       'Each connection scores 1. Each miss costs a life. The round ends at 0 lives or when time runs out.',
@@ -1595,6 +1600,20 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     finished = showResults = false;
     viewer.on = false;
   }, { disabled: () => running || replays?.isPlaying, title: 'Fight against opponents, build a board in Freeplay, or practise precision and bounce shots in Aim trainer (3 lives, 2 minutes).' });
+  session.select('Difficulty', AIM_DIFFICULTIES.map(value => ({ value, label: value })), () => aimDifficulty, (d) => {
+    aimDifficulty = d;
+    store.set('aimDifficulty', d);
+    match = null;
+    aim = null;
+    finished = showResults = false;
+  }, {
+    hidden: () => mode !== 'Aim trainer', disabled: () => running || replays?.isPlaying,
+    title: 'Each target is graded by its easiest route. Easy goes straight in; Medium has a fair spread of angles or a bounce near the target; Hard has a tighter angle and a longer bank; Very hard needs two bounces, a window of a degree or less, or a bounce far from the target. Mixed deals all four.',
+  });
+  session.toggle('Shot hints', () => aimHints, (on) => { aimHints = on; store.set('aimHints', on); }, {
+    hidden: () => mode !== 'Aim trainer',
+    title: 'Shows how many bounces each target\'s easiest route takes, and how wide its window of working angles is.',
+  });
   session.button('Start', () => {
     if (replays.isPlaying) {
       replays.stop();
@@ -1617,7 +1636,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   const recordNow = () => record[settingsKey()] ?? { wins: 0, losses: 0, best: 0 };
   panel.score('Aim trainer', { hidden: () => mode !== 'Aim trainer' }).stats(['', 'Now', 'Best'], () => [
-    ['Connections', String(aim?.score ?? 0), String(Math.max(0, ...store.history(AIM_HISTORY).map(g => g.score)))],
+    ['Connections', String(aim?.score ?? 0), String(Math.max(0, ...store.history(aimHistory()).map(g => g.score)))],
     ['Lives', String(aim?.lives ?? AIM_LIVES), ''],
   ]);
   panel.group('Aim trainer', { hidden: () => mode !== 'Aim trainer' }).note(() =>
@@ -1645,8 +1664,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     // Let the final hit/miss remain visible before the results cover the board.
     if (aiming() && aim?.landing && ticks() < aim.landing.until) return null;
     if (finished && showResults && aiming() && aim) return {
-      title: `Aim trainer · ${aim.result}`,
-      averages: sessionAverages(store.history(AIM_HISTORY).map(g => ({ ...g, duty: '' })), { scoreLabel: 'Connections' }),
+      title: `Aim trainer · ${aim.difficulty} · ${aim.result}`,
+      averages: sessionAverages(store.history(aimHistory()).map(g => ({ ...g, duty: '' })), { scoreLabel: 'Connections' }),
       rows: [
         ['Connections', String(aim.score)], ['Shots', String(aim.shots)],
         ['Accuracy', aim.shots ? `${Math.round(100 * aim.score / aim.shots)}%` : '—'],
@@ -1824,7 +1843,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     { label: 'Damage', value: (g) => String(g.score) },
     { label: 'Time', value: (g) => typeof g.ms === 'number' ? `${(g.ms / 1000).toFixed(0)}s` : '' },
   ], 'Past rumbles', replayAction, false);
-  historyGroup(panel, () => mode === 'Aim trainer' ? store.history(AIM_HISTORY) : null, [
+  historyGroup(panel, () => mode === 'Aim trainer' ? store.history(aimHistory()) : null, [
     { label: 'Result', value: g => String(g.result ?? '') },
     { label: 'Connections', value: g => String(g.score) },
     { label: 'Shots', value: g => String(g.shots ?? 0) },
@@ -1967,12 +1986,16 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   };
   let savedSettings: Settings | null = null;
   let savedMode: Mode | null = null;
+  let savedDifficulty: AimDifficulty | null = null;
   replays = new ReplayRecorder(PUZZLE, store, panel, ticks, (tape: PuzzleReplay) => {
     savedSettings ??= structuredClone(settings);
     savedMode ??= mode;
     settings = structuredClone(tape.settings as Settings);
     mode = settings.aimTrainer ? 'Aim trainer' : 'Fight';
+    savedDifficulty ??= aimDifficulty;
+    aimDifficulty = settings.aimDifficulty ?? 'Mixed';
     delete settings.aimTrainer;
+    delete settings.aimDifficulty;
     const seed = (tape.seed as { seed?: unknown })?.seed;
     if (typeof seed !== 'number') throw new Error('Invalid Rumble replay seed');
     start(seed, mode);
@@ -1981,6 +2004,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (savedSettings) {
       settings = savedSettings;
       savedSettings = null;
+    }
+    if (savedDifficulty !== null) {
+      aimDifficulty = savedDifficulty;
+      savedDifficulty = null;
     }
     if (savedMode !== null) {
       mode = savedMode;
@@ -1995,6 +2022,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   replays.onTakeOver = () => {
     savedSettings = null;
     savedMode = null;
+    if (savedDifficulty !== null) store.set('aimDifficulty', aimDifficulty);
+    savedDifficulty = null;
   };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => aiming() ? stateText(match, aim, running, finished) : stateText(match, running, finished);

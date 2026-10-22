@@ -1,23 +1,40 @@
 import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
-import { AIM_BOARD_SHOTS, AIM_LANDING_MS, AIM_MS, AimTrainer } from './aim';
+import { AIM_BOARD_SHOTS, AIM_LANDING_MS, AIM_MS, AimTrainer, DIFFICULTIES, routeDifficulty, type AimDifficulty, type AimTarget } from './aim';
+import type { Board, Point } from './board';
 import { Fighter } from './fighter';
 import { Glove } from './gloves';
 import { colourOf, isDark } from './pieces';
 
-function trainer(seed = 1, startedAt = 0) {
+function trainer(seed = 1, startedAt = 0, difficulty: AimDifficulty = 'Mixed') {
   const fighter = new Fighter(0, {
     board: new Random(seed), alt: new Random(seed + 1), wobble: new Random(seed + 2),
     fists: [new Random(seed + 3), new Random(seed + 4)],
   }, { gloveOf: () => new Glove(0) }, { startRows: 0 }, startedAt);
-  return new AimTrainer(fighter, seed, startedAt);
+  return new AimTrainer(fighter, seed, startedAt, undefined, difficulty);
+}
+
+/** An aim that lands somewhere other than next to the target. */
+function misses(b: Board, fist: number, dir: number, cells: Point[]): boolean {
+  const shot = b.shoot(b.path(fist, dir));
+  return !!shot && !cells.some(p => b.adjacent(shot.rest, p));
+}
+
+/** Every aim in each of a target's routes connects, with that route's number of wall bounces. */
+function expectRoutes(b: Board, t: Pick<AimTarget, 'cells' | 'fist' | 'routes' | 'angles'>) {
+  for (const route of t.routes) for (let dir = route.lo; dir <= route.hi; dir++) {
+    const shot = b.shoot(b.path(t.fist, dir))!;
+    expect(t.cells.some(p => b.adjacent(shot.rest, p))).toBe(true);
+    expect(shot.flight.length - 2).toBe(route.bounces);
+    expect(t.angles).toContain(dir);
+  }
 }
 
 function shoot(t: AimTrainer, hit: boolean, now: number) {
   const f = t.fighter, fist = t.current.fist;
   const [lo, hi] = f.board.ranges[fist];
   const dir = hit ? t.current.angles[0] : Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
-    .find(d => !t.current.angles.includes(d) && f.board.shoot(f.board.path(fist, d)))!;
+    .find(d => misses(f.board, fist, d, t.current.cells))!;
   f.aim(fist, dir);
   expect(t.fire(fist, now)).toBe(true);
   const end = f.flight!.end;
@@ -33,7 +50,7 @@ describe('Rumble aim trainer', () => {
     const current = t.current, next = t.next, fist = current.fist;
     const [lo, hi] = f.board.ranges[fist];
     f.aim(fist, hit ? current.angles[0] : Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
-      .find(d => !current.angles.includes(d) && f.board.shoot(f.board.path(fist, d)))!);
+      .find(d => misses(f.board, fist, d, current.cells))!);
     t.fire(fist, 0);
     const { end, rest, piece } = f.flight!;
     t.update(end);
@@ -52,22 +69,70 @@ describe('Rumble aim trainer', () => {
     expect(t.score).toBe(hit ? 1 : 0);
     expect(t.lives).toBe(hit ? 3 : 2);
   });
-  it('generates reachable precision and bounce challenges for both hands across seeds', () => {
-    for (let seed = 0; seed < 30; seed++) {
-      const t = trainer(seed), b = t.fighter.board;
-      expect(t.candidates.filter(c => c.kind === 'Bounce').length).toBeGreaterThan(0);
-      expect(t.candidates.filter(c => c.kind === 'Precision').length).toBeGreaterThan(0);
-      for (const fist of [0, 1]) expect(t.candidates.some(c => c.fist === fist)).toBe(true);
+  it('grades a route by its bounces, window and how far the last bounce is from the target', () => {
+    const route = (bounces: number, width: number, distance: number) => routeDifficulty({ bounces, lo: 100, hi: 99 + width, distance });
+    // Window widths are in half-degree aim steps.
+    expect(route(0, 4, 0)).toBe('Easy');
+    expect(route(0, 3, 0)).toBe('Medium');
+    expect(route(1, 6, 5)).toBe('Medium');
+    expect(route(1, 4, 2)).toBe('Medium');
+    expect(route(1, 4, 4)).toBe('Hard');
+    expect(route(1, 5, 6.9)).toBe('Hard');
+    expect(route(1, 12, 7)).toBe('Very hard');
+    expect(route(1, 2, 1)).toBe('Very hard');
+    expect(route(2, 20, 2)).toBe('Very hard');
+  });
+
+  it('generates reachable targets of every difficulty for both hands, graded by their easiest route', () => {
+    const t = trainer(), b = t.fighter.board;
+    const layouts = (t as unknown as { layouts: Array<{ cells: number[]; candidates: AimTarget[] }> }).layouts;
+    for (const d of DIFFICULTIES) for (const fist of [0, 1]) {
+      expect(layouts.flatMap(l => l.candidates).filter(c => c.difficulty === d && c.fist === fist).length, `${d}, fist ${fist}`).toBeGreaterThan(20);
+    }
+    for (const layout of layouts) {
+      b.cells.splice(0, b.cells.length, ...layout.cells);
       expect(b.grapesAfter(new Map())).toEqual([]);
-      for (const c of t.candidates) {
-        for (const dir of c.angles) {
-          const shot = b.shoot(b.path(c.fist, dir))!;
-          expect(c.cells.some(p => b.adjacent(shot.rest, p))).toBe(true);
-          if (c.kind === 'Bounce') expect(shot.flight.length).toBeGreaterThan(2);
-        }
+      for (const c of layout.candidates) {
+        expectRoutes(b, c);
+        expect(c.routes.reduce((n, r) => n + r.hi - r.lo + 1, 0)).toBe(c.angles.length);
+        expect(c.difficulty).toBe(routeDifficulty(c.routes[0]));
+        for (const r of c.routes) expect(DIFFICULTIES.indexOf(routeDifficulty(r))).toBeGreaterThanOrEqual(DIFFICULTIES.indexOf(c.difficulty));
       }
     }
   }, 60000);
+
+  it.each(DIFFICULTIES)('deals only %s targets when that difficulty is chosen', difficulty => {
+    for (let seed = 0; seed < 6; seed++) {
+      const t = trainer(seed, 0, difficulty);
+      let now = 0;
+      for (let shot = 0; shot < AIM_BOARD_SHOTS * 3; shot++) {
+        expect(t.current.difficulty, `seed ${seed}, shot ${shot}`).toBe(difficulty);
+        now = shoot(t, true, now);
+      }
+      // A fixed difficulty can wait up to another eight shots for a board change that keeps its grade.
+      expect(t.boardNumber).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('keeps new targets clear of the last few', () => {
+    const t = trainer(7);
+    let now = 0, clear = 0;
+    const dealt: AimTarget[] = [t.current];
+    for (let shot = 0; shot < 40; shot++) {
+      now = shoot(t, true, now);
+      const earlier = dealt.slice(-3);
+      if (!earlier.some(e => e.cells.some(p => t.current.cells.some(q => q.x === p.x && q.y === p.y)))) clear++;
+      dealt.push(t.current);
+    }
+    expect(clear).toBeGreaterThan(30);
+  });
+
+  it('deals every difficulty in Mixed', () => {
+    const t = trainer(5), seen = new Set<string>();
+    let now = 0;
+    for (let shot = 0; shot < 40; shot++) { seen.add(t.current.difficulty); now = shoot(t, true, now); }
+    expect([...seen].sort()).toEqual([...DIFFICULTIES].sort());
+  });
 
   it('scores one per connection, preserves the preview, and changes the board every eight shots', () => {
     const t = trainer(), b = t.fighter.board;
@@ -120,11 +185,7 @@ describe('Rumble aim trainer', () => {
         expect(b.cells.map(c => c !== 0)).not.toEqual(before);
         expect(b.grapesAfter(new Map())).toEqual([]);
         // A player could have prepared any valid angle while target 2 was on the old board.
-        for (const dir of next.angles) {
-          const landed = b.shoot(b.path(next.fist, dir))!;
-          expect(next.cells.some(p => b.adjacent(landed.rest, p))).toBe(true);
-          if (next.kind === 'Bounce') expect(landed.flight.length).toBeGreaterThan(2);
-        }
+        expectRoutes(b, next);
       }
       expect(t.score).toBe(AIM_BOARD_SHOTS * 3);
       expect(t.lives).toBe(3);

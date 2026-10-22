@@ -69,10 +69,10 @@ export class Input {
       // Typing in the settings panel isn't game input.
       if (event.ctrlKey || event.metaKey || event.altKey || isTyping(event.target)) return;
       unlockAudio();
-      if (event.repeat) return;
       const key = keyName(event);
-      // Keep the page from scrolling while playing.
-      if (key === 'space' || key.startsWith('arrow')) event.preventDefault();
+      // Keep the page from scrolling while playing, including on held-key auto-repeats.
+      if (SCROLL_KEYS.has(key)) event.preventDefault();
+      if (event.repeat) return;
       enqueue({ type: 'keydown', key });
     });
     listen(window, 'keyup', (event) => {
@@ -99,6 +99,9 @@ export class Input {
     for (const remove of this.cleanup.splice(0)) remove();
   }
 }
+
+/** Keys whose browser default is to scroll the page. */
+const SCROLL_KEYS = new Set(['space', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'pageup', 'pagedown', 'home', 'end']);
 
 function keyName(event: KeyboardEvent): string {
   // Digits from the number row or keypad both report as the digit.

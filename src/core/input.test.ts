@@ -24,3 +24,21 @@ describe('timestamped browser input', () => {
     now = 60; send('keydown', { key: 'ArrowRight' }); expect(input.drain()).toEqual([]);
   });
 });
+
+describe('page scrolling', () => {
+  it('blocks scroll keys while playing, including held-key repeats, without queueing repeats', () => {
+    const browser = new EventTarget(); vi.stubGlobal('window', browser);
+    const canvas = Object.assign(new EventTarget(), { focus() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 600 }) });
+    const input = new Input({ canvas, width: 450, height: 600 } as unknown as Screen, () => 0);
+    const press = (key: string, repeat = false) => {
+      const event = Object.assign(new Event('keydown', { cancelable: true }), { key, repeat });
+      browser.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    for (const key of [' ', 'ArrowDown', 'PageDown', 'PageUp', 'Home', 'End']) expect(press(key)).toBe(true);
+    expect(press(' ', true)).toBe(true);
+    expect(press('a')).toBe(false);
+    expect(input.drain().filter((event) => event.type === 'keydown')).toHaveLength(7);
+    input.dispose();
+  });
+});
