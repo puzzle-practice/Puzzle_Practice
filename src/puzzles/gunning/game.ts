@@ -25,10 +25,12 @@ export interface GunningSettings {
   speed: number;
   /** Freeplay paints the deck; Loop drill has independent mirrored circuits. */
   mode: 'normal' | 'create' | 'loop';
+  /** Dragging from a cell picks the arrow's direction; off, a click always lays the selected arrow. */
+  clickDrag: boolean;
 }
 
 export const DEFAULT_SETTINGS: GunningSettings = {
-  cannons: 4, firing: 'volley', volleyMs: 10000, balls: 0, holes: 0, shipMoves: false, timerMs: 0, speed: 500, mode: 'normal',
+  cannons: 4, firing: 'volley', volleyMs: 10000, balls: 0, holes: 0, shipMoves: false, timerMs: 0, speed: 500, mode: 'normal', clickDrag: true,
 };
 export const FIRINGS: readonly Firing[] = ['volley', 'loaded', 'viking'];
 export const VOLLEYS = [5000, 10000, 20000, 30000];
@@ -40,10 +42,10 @@ export function readSettings(value: unknown): GunningSettings | null {
   if (!value || typeof value !== 'object') return null;
   const s = { ...DEFAULT_SETTINGS, ...(value as Partial<GunningSettings>) };
   return (s.mode === 'normal' || s.mode === 'loop' || s.mode === 'create') && CANNON_COUNTS.includes(s.cannons) && FIRINGS.includes(s.firing) && VOLLEYS.includes(s.volleyMs) && BALLS.includes(s.balls) &&
-    HOLES.includes(s.holes) && typeof s.shipMoves === 'boolean' && TIMERS.includes(s.timerMs) &&
+    HOLES.includes(s.holes) && typeof s.shipMoves === 'boolean' && typeof s.clickDrag === 'boolean' && TIMERS.includes(s.timerMs) &&
     Number.isInteger(s.speed) && s.speed >= MIN_TICK && s.speed <= MAX_TICK ? s : null;
 }
-/** The speed slider is a preference, so it stays out of the key that groups history. */
+/** The speed slider and click-drag are preferences, so they stay out of the key that groups history. */
 export const settingsKey = (s: GunningSettings) =>
   s.mode === 'loop' ? `loop-v4-${s.timerMs}` : `c${s.cannons}-${s.firing}${s.firing === 'volley' ? s.volleyMs : ''}-b${s.balls}-h${s.holes}-${s.shipMoves ? 'm' : 's'}-${s.timerMs}`;
 
