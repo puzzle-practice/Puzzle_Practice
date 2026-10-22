@@ -17,6 +17,8 @@ import { setWarningTimer } from '../core/audio';
 import { SailingGame } from './sailing/game';
 import { PatchingBoard, movable as patchingMovable } from './patching/logic';
 import { AIM_HISTORY, AIM_LANDING_MS, AIM_MS, AimTrainer } from './rumble/aim';
+import { Match as RumbleMatch } from './rumble/match';
+import { Glove as RumbleGlove } from './rumble/gloves';
 import type { Board, Point } from './rumble/board';
 import { GunningGame } from './gunning/game';
 import { LOOP, LOOP_SIDES, POWDER, SHOT, WAD } from './gunning/board';
@@ -30,7 +32,7 @@ vi.mock('../core/replay', async (original) => {
 });
 vi.mock('../core/assets', async (original) => ({
   ...await original<typeof import('../core/assets')>(),
-  Images: class { static async load() { return { get: () => ({ width: 450, height: 600 }), has: () => true }; } },
+  Images: class { static async load() { return { get: (name: string) => ({ width: 450, height: 600, name }), has: () => true }; } },
 }));
 vi.mock('../core/fonts', () => ({ loadFont: async () => {} }));
 vi.mock('../core/audio', async (original) => ({
@@ -136,6 +138,87 @@ function misses(b: Board, fist: number, dir: number, cells: Point[]): boolean {
   const shot = b.shoot(b.path(fist, dir));
   return !!shot && !cells.some(p => b.adjacent(shot.rest, p));
 }
+
+describe('Rumble fire inputs', () => {
+  async function setup() {
+    const updates = vi.spyOn(RumbleMatch.prototype, 'update');
+    const store = new Store('rumble'); store.set('mode', 'Create');
+    const harness = panelHarness();
+    let now = 100;
+    const factory = (await import('./rumble/index')).default;
+    const ctx = canvasContext() as unknown as CanvasRenderingContext2D;
+    const draws = vi.fn();
+    ctx.drawImage = draws;
+    const screen = new Proxy({ ctx }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const instance = await factory({ screen, input: { mouse: [-1, -1] },
+      panel: harness.panel, store, ticks: () => now,
+    } as unknown as PuzzleContext);
+    harness.buttons.get('Play::Start')!();
+    instance.frame([]);
+    const f = (updates.mock.contexts.at(-1)! as RumbleMatch).player;
+    // Input-boundary checks need a shot that cannot start a random clear animation.
+    f.board.cells.fill(0);
+    f.board.sparks = [];
+    const frame = (at: number, events: InputEvent[] = []) => { now = at; instance.frame(events); };
+    return { instance, f, frame, draws };
+  }
+
+  it('draws a full board before the punch reaches balls it will destroy', async () => {
+    const h = await setup(), b = h.f.board;
+    for (let y = 0; y < 19; y++) for (let x = 0; x < b.width(y); x++) b.set({ x, y }, 1);
+    const before = b.count();
+    const punch = h.f.strikeNow({ from: 0, id: 1, height: 6, width: 9, count: 0, side: 1, blacks: 0, next: 0 },
+      new RumbleGlove(127), 100)!;
+    expect(punch.result.columns.some(c => c.destroyed.length > 0)).toBe(true);
+    h.draws.mockClear();
+    h.frame(100);
+    const balls = h.draws.mock.calls.filter(args => args[0]?.name?.startsWith('balls-') && args[6] >= 0 && args[6] < 19 * 23);
+    expect(balls).toHaveLength(before);
+    h.instance.dispose();
+  });
+
+  it('draws impact fists above the balls and removes them after the third pulse', async () => {
+    const h = await setup();
+    h.f.punchHits.push({ side: 1, row: 4, at: 100 });
+    h.draws.mockClear();
+    h.frame(150);
+    const names: string[] = h.draws.mock.calls.map(args => args[0]?.name ?? 'canvas');
+    const lastBall = Math.max(...names.map((name, i) => name.startsWith('balls-') ? i : -1));
+    expect(names.lastIndexOf('fist_hit')).toBeGreaterThan(lastBall);
+    expect(names[names.lastIndexOf('fist_hit') + 1]).toBe('canvas');
+    h.draws.mockClear();
+    h.frame(400);
+    expect(h.draws.mock.calls.some(args => args[0]?.name === 'fist_hit')).toBe(false);
+    h.instance.dispose();
+  });
+
+  it.each(['mouse', 'keyboard'])('keeps a held %s press across flight and accepts release at the turn boundary', async device => {
+    const h = await setup(), pos: [number, number] = [220, 120];
+    const down: InputEvent = device === 'mouse' ? { type: 'mousedown', button: 1, pos } : { type: 'keydown', key: 'z' };
+    const up: InputEvent = device === 'mouse' ? { type: 'mouseup', button: 1, pos } : { type: 'keyup', key: 'z' };
+    h.frame(110, [down, up]);
+    const landed = h.f.flight!.end;
+    h.frame(120, [down]);
+    expect(h.f.charging).toBe(-1);
+    h.frame(landed, [up]);
+    expect(h.f.stats.shots).toBe(2);
+    expect(h.f.flight!.start).toBe(landed);
+    h.instance.dispose();
+  });
+
+  it.each(['mouse', 'keyboard'])('does not queue a quick %s click during flight', async device => {
+    const h = await setup(), pos: [number, number] = [220, 120];
+    const down: InputEvent = device === 'mouse' ? { type: 'mousedown', button: 1, pos } : { type: 'keydown', key: 'z' };
+    const up: InputEvent = device === 'mouse' ? { type: 'mouseup', button: 1, pos } : { type: 'keyup', key: 'z' };
+    h.frame(110, [down, up]);
+    const landed = h.f.flight!.end;
+    h.frame(120, [down, up]);
+    h.frame(landed);
+    expect(h.f.stats.shots).toBe(1);
+    expect(h.f.charging).toBe(-1);
+    h.instance.dispose();
+  });
+});
 
 describe('Rumble aim trainer sessions', () => {
   async function setup(difficulty?: string) {

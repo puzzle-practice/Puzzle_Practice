@@ -68,6 +68,8 @@ export interface PunchMove {
   piece: number;
   from: number;
   to: number;
+  /** Steps to wait before this ball starts moving. Incoming balls queue at the entry. */
+  wait: number;
 }
 
 export interface PunchColumn {
@@ -681,39 +683,44 @@ export class Board {
       result.columns.push(column);
       const p = { x: start.x + c, y: start.y };
       const pieces: number[] = [];
-      /** Where each queued ball came from: a path index, or -1 - n for the punch's own balls. */
+      /** Where each queued ball starts, and its delay before moving down the path. */
       const source: number[] = [];
+      const waits: number[] = [];
       const sparkAt = new Map<number, Point | null>();
       for (let r = 0; r < length; r++) {
         pieces[r] = glove.piece(patternStart + c, length - r - 1, true);
         if (blacks[b++]) pieces[r] = dark(pieces[r]);
-        source[r] = r - length;
+        source[r] = -1;
+        waits[r] = length - r - 1;
         if (isCharged(pieces[r])) sparkAt.set(r, null);
       }
       let read = 0;
       let write = 0;
       let dir = shaft.side;
       let step = 0;
+      let empty = 0;
       while (pieces[read] !== -1 && p.y < bottom) {
         const existing = this.get(p);
         const cell = { ...p };
         column.cells.push(cell);
         this.set(p, pieces[read]);
-        if (pieces[read] !== EMPTY) column.moves.push({ piece: pieces[read], from: source[read], to: step });
+        if (pieces[read] !== EMPTY) column.moves.push({ piece: pieces[read], from: source[read], to: step, wait: waits[read] });
         if (isCharged(pieces[read])) this.updateSpark(sparkAt.get(read) ?? null, p);
         read = (read + 1) % length;
         if (existing === EMPTY) {
           pieces[write] = -1;
+          empty++;
         } else if (missing[c] === 0) {
           pieces[write] = existing;
           source[write] = step;
+          waits[write] = empty;
           if (isCharged(existing)) sparkAt.set(write, { ...p });
           write = (write + 1) % length;
         } else {
           if (isCharged(existing)) this.updateSpark(p, null);
           pieces[write] = -1;
           missing[c]--;
-          column.destroyed.push({ piece: existing, at: column.cells.length - 1, step });
+          column.destroyed.push({ piece: existing, at: column.cells.length - 1, step: ++empty });
         }
         const before = dir;
         dir = this.step(p, dir, width, c);

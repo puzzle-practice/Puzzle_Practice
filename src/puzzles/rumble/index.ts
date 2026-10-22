@@ -10,6 +10,10 @@ import { seedControls } from '../../core/seeds';
 import { SessionPause } from '../../core/pause';
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
+import { RumbleAudio } from './audio';
+import { punchPosition } from './punch';
+import { paintGlove } from './portrait';
+import { drawImpact, impactHighlight } from './impact';
 import { keyMatches } from '../../core/controls';
 import { drawGameText, drawPauseLabel, floatAt, gameTextBox, loadGameFont, wrapGameText, BOARD_FONT_SMALL } from '../../core/game-text';
 import { sessionAverages } from '../../core/duty/desk';
@@ -248,8 +252,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     Images.load(imageUrls), Images.load(gloveUrls), Images.load(faceUrls), Images.load(dotUrls), loadGameFont(),
   ]);
   const img = (name: string) => images.get(name);
+  const fistHighlight = impactHighlight(img('fist_hit'));
   let replays!: ReplayRecorder;
   const sounds = new SoundBank(soundUrls, () => replays?.isSeeking ?? false);
+  const rumbleAudio = new RumbleAudio(sounds);
   const soundPick = new Random();
   const ctx = screen.ctx;
   const play = (name: string) => {
@@ -295,7 +301,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const listOffsets: [number, number] = [0, 0];
   /** Aim keys held, repeating 20 times a second after 300ms. */
   const held = { left: 0, right: 0, leftNext: 0, rightNext: 0, fine: false };
-  /** Fists whose press started a shot: only their release fires. A button already down when a ball comes to hand does nothing until it's pressed again. */
+  /** Presses originating on the board. In fights a held press carries into the next turn. */
   const firing = new Map<number, number>();
   /** Fire keys held, so a key's repeat doesn't press again. */
   const keysDown = new Set<number>();
@@ -308,6 +314,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const seedMode = seedControls(panel, store, () => running || !!replays?.isPlaying);
 
   function start(seed?: number, as: Mode = mode): void {
+    rumbleAudio.sync(null);
+    paintedGloves.clear();
     pause.resume();
     const s = seed ?? seedMode.next(); seedMode.remember(s);
     startedMode = as;
@@ -357,6 +365,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   function stop(): void {
     if (!match || !running) return;
+    rumbleAudio.sync(null);
     const now = ticks();
     if (aiming() && aim) {
       aim.finish('Stopped', now);
@@ -784,7 +793,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** With one fist, either button fires it. */
   const fistFor = (f: Fighter, which: number) => (f.fists === 1 ? 0 : which);
 
-  const canPress = (f: Fighter, fist: number) => aiming() ? !!aim?.canFire(fist) : f.canFire;
+  const canPress = (f: Fighter, fist: number) => aiming() ? !!aim?.canFire(fist) : !f.out && !f.halted;
   function press(f: Fighter, fist: number, now: number): void {
     firing.set(fist, f.controlAt);
     if (!aiming()) f.press(fist, now);
@@ -815,7 +824,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         else if (key(event.key, 'fireL') || key(event.key, 'fireR')) {
           const fist = fistFor(f, key(event.key, 'fireL') ? 0 : 1);
           keysDown.delete(fist);
-          if (firing.get(fist) === f.controlAt) release(f, fist, now);
+          if (firing.has(fist) && (!aiming() || firing.get(fist) === f.controlAt)) release(f, fist, now);
           firing.delete(fist);
         }
       } else if (event.type === 'mousedown' && (event.button === 1 || event.button === 3)) {
@@ -837,7 +846,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         const fist = fistFor(f, event.button === 1 ? 0 : 1);
         const turn = firing.get(fist);
         firing.delete(fist);
-        if (turn === f.controlAt) {
+        if (turn !== undefined && (!aiming() || turn === f.controlAt)) {
           const [mx, my] = event.pos;
           if (onBoard(mx, my)) f.aimAt(mx - BOARD_X, my - BOARD_Y);
           release(f, fist, now);
@@ -957,10 +966,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const hidden = new Set<number>();
     const punch = f.punch;
     if (punch) {
-      punch.result.columns.forEach((column, c) => {
-        const t = (now - punch.start) / PUNCH_STEP_MS;
-        for (const move of column.moves) if (t < punch.steps[c]) hidden.add(cellKey(column.cells[move.to]));
-      });
+      for (const column of punch.result.columns) for (const cell of column.cells) hidden.add(cellKey(cell));
     }
     const sprinkle = f.sprinkle;
     if (sprinkle) for (const ball of sprinkle.balls) hidden.add(cellKey(ball.cell));
@@ -1031,12 +1037,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     drawFists(f, now);
     drawWarnings(f, now);
     drawShouts(f, now);
-    // One or two shots from a drop, the board's edge goes magenta, then red.
-    if (!f.out && (b.shots === 6 || b.shots === 7)) {
-      ctx.strokeStyle = b.shots === 7 ? '#ff0000' : '#ff00ff';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(1, 1, VIEW_W - 2, VIEW_H - 2);
-    }
+    drawPunchHits(f, now);
     if (f.rumless) ctx.drawImage(img('rumless_icon'), 90, 475);
     if (f.out) {
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -1115,7 +1116,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const punch = f.punch!;
     const b = f.board;
     const t = (now - punch.start) / PUNCH_STEP_MS;
-    punch.result.columns.forEach((column, c) => {
+    punch.result.columns.forEach((column) => {
       const cells = column.cells.map((p) => b.pixel(p));
       if (!cells.length) return;
       const step = cells.length > 1 ? { x: cells[1].x - cells[0].x, y: cells[1].y - cells[0].y } : { x: punch.side === 1 ? 13 : -13, y: STEP_Y };
@@ -1127,28 +1128,25 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         return { x: cells[lo].x + (cells[hi].x - cells[lo].x) * r, y: cells[lo].y + (cells[hi].y - cells[lo].y) * r };
       };
       for (const move of column.moves) {
-        const pos = Math.max(move.from, Math.min(move.to, move.to - (punch.steps[c] - t)));
+        const pos = punchPosition(move, t);
         const p = at(pos);
         drawBall(move.piece, p.x, p.y, now);
       }
       for (const d of column.destroyed) {
         const frame = Math.floor((now - (punch.start + d.step * PUNCH_STEP_MS)) * 24 / 1000);
         const name = COLOUR_NAMES[colourOf(d.piece)];
-        if (frame < 0 || frame >= 5 || !name) continue;
         const p = cells[d.at];
+        if (frame < 0) { drawBall(d.piece, p.x, p.y, now); continue; }
+        if (frame >= 5 || !name) continue;
         ctx.drawImage(img(`explode_${name}`), frame * BALL, 0, BALL, BALL, p.x, p.y, BALL, BALL);
       }
     });
-    // A fist hits at each bounce, alternating sides, flashing for 300ms.
-    let right = punch.side === 0;
-    for (const row of punch.result.bounces) {
-      const at = punch.start + (row <= 1 ? 1 : PUNCH_STEP_MS * (row - 1));
-      if (now >= at && now < at + 300) {
-        ctx.globalAlpha = Math.floor((now - at) / 50) % 2 ? 0.6 : 1;
-        ctx.drawImage(img('fist_hit'), right ? 120 : 0, 0, 120, 120, right ? VIEW_W - 120 : 0, row * STEP_Y, 120, 120);
-        ctx.globalAlpha = 1;
-      }
-      right = !right;
+  }
+
+  function drawPunchHits(f: Fighter, now: number): void {
+    // Keep wall impacts visible even when the moving balls have already settled.
+    for (const { side, row, at } of f.punchHits) {
+      drawImpact(ctx, img('fist_hit'), fistHighlight, side, row, now - at);
     }
   }
 
@@ -1316,10 +1314,19 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
 
   /** The glove art over a face: the pirate's bludgeon (werewolf claws for everyone in werewolf rumbling). */
-  function gloveArt(m: Match, index: number): HTMLImageElement | null {
-    const type = m.gloves[index].type;
+  const paintedGloves = new Map<string, HTMLCanvasElement>();
+  function gloveArt(m: Match, index: number): HTMLCanvasElement | null {
+    const glove = m.gloves[index];
+    const type = glove.type;
+    const skin = index === 0 ? currentPirate().face.skin : m.looks[index].colours.skin ?? 'tan';
     const names = settings.werewolf || m.settings.werewolf ? [`glove_werewolf${type}`, `glove${type}`] : [`glove${type}`];
-    for (const name of names) if (gloveImages.has(name)) return gloveImages.get(name);
+    for (const name of names) {
+      if (!gloveImages.has(name)) continue;
+      const key = `${name}:${glove.colours}:${skin}`;
+      let image = paintedGloves.get(key);
+      if (!image) paintedGloves.set(key, image = paintGlove(gloveImages.get(name), glove, skin));
+      return image;
+    }
     return null;
   }
 
@@ -1464,6 +1471,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function frame(events: InputEvent[]): void {
     const liveEvents = pause.input(events, PUZZLE, running);
     if (liveEvents === null) {
+      rumbleAudio.sync(null);
       events.forEach(scrollList);
       draw(ticks());
       return;
@@ -1481,12 +1489,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       // Resolve due shots and the deadline before accepting further input. A late frame still
       // credits a ball that actually landed before 2:00, but cannot start a shot after time is up.
       if (aiming() && aim && running) { aim.update(now); if (aim.result) stop(); }
+      else if (match && running) { match.update(now); if (match.settledAt) stop(); }
       handle(events, now);
       if (match && running) {
         if (aiming()) { aim!.update(now); if (aim!.result) stop(); }
         else { match.update(now); if (match.settledAt) stop(); }
       }
     }
+    rumbleAudio.sync(running && !aiming() && !replays.isSeeking && !replays.isAdvancing ? match?.player ?? null : null);
     if (replays.isSeeking || replays.isAdvancing) return;
     draw(now);
   }
@@ -1979,10 +1989,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   panel.settings.group('Reset').button('Reset to defaults', () => { settings = structuredClone(DEFAULTS); save(); }, off);
 
   const replaySettingsCodec: ReplaySettingsCodec = {
-    currentVersion: 3,
-    simulatorVersion: 4,
-    // Earlier versions dealt NPC boards and shots differently, so they can't be replayed now.
-    migrate: (version, value) => (version === 3 && validSettings(value) ? value : null),
+    currentVersion: 4,
+    simulatorVersion: 5,
+    // Old fights selected attacks and handled held buttons differently. Aim drills are unchanged.
+    migrate: (version, value) => (validSettings(value) && (version === 4 || (version === 3 && !!value.aimTrainer)) ? value : null),
   };
   let savedSettings: Settings | null = null;
   let savedMode: Mode | null = null;
@@ -2030,5 +2040,5 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (running) stop(); });
-  return { frame, dispose: () => { quietGrowl(); replays.dispose(); sounds.dispose(); } };
+  return { frame, dispose: () => { rumbleAudio.sync(null); quietGrowl(); replays.dispose(); sounds.dispose(); } };
 }) satisfies PuzzleFactory;
