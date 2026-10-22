@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { ReplayRecorder, type PuzzleReplay } from './replay';
-import { listReplayFiles, replayWrites } from './replay-storage';
+import { decodeReplayBlob, encodeReplayBlob, replayMetadata, ReplayRecorder, type PuzzleReplay } from './replay';
+import { listReplayFiles, replayWrites, saveReplayFile } from './replay-storage';
 import { Store } from './storage';
 import { currentPirate } from './duty/profile';
 import { makeReport } from './duty/report';
@@ -121,6 +121,60 @@ describe('duty reports with replays', () => {
 });
 
 describe('recording and playback regressions', () => {
+  it('preserves practice eligibility through compression, playback and take-over', async () => {
+    const h = harness('test');
+    h.store.setScoresEnabled(false);
+    h.recorder.begin({}, {});
+    h.frame(10, [{ type: 'keydown', key: 'space' }], [1, 0]);
+    const tape = h.finish(20);
+    expect(tape.practice).toBe(true);
+    expect((await decodeReplayBlob(await encodeReplayBlob(tape)))?.practice).toBe(true);
+    await replayWrites.idle();
+    h.store.setScoresEnabled(true);
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await h.recorder.playAt(tape.at, tape.runId)).toBe(true);
+    expect(h.recorder.takeOver()).toBe(true);
+    expect(h.store.scoresEnabled).toBe(false);
+    h.frame(15, [{ type: 'keydown', key: 'space' }], [2, 0]);
+    expect(h.store.history('test')).toEqual([]);
+    expect(h.finish(30).practice).toBe(true);
+    h.recorder.dispose();
+  });
+
+  it('refuses unversioned random streams before restoring the puzzle and retains the saved history', async () => {
+    const first = harness('test');
+    first.recorder.begin({}, {});
+    first.frame(10, [{ type: 'keydown', key: 'space' }], [1, 0]);
+    const tape = first.finish(20);
+    await replayWrites.idle();
+    first.recorder.dispose();
+    delete tape.randomVersion;
+    const blob = await encodeReplayBlob(tape);
+    await saveReplayFile({ metadata: replayMetadata(tape, blob.size), blob });
+
+    const restored = harness('test');
+    await vi.waitFor(() => expect(restored.picker().children).toHaveLength(1));
+    const history = structuredClone(restored.store.history('test'));
+    expect(await restored.recorder.playAt(tape.at, tape.runId)).toBe(false);
+    expect(restored.recorder.isPlaying).toBe(false);
+    expect(restored.recorder.hasPlayableAt(tape.at, tape.runId)).toBe(false);
+    expect(restored.state()).toEqual({ strikes: [], painted: [], updates: [] });
+    expect(restored.store.history('test')).toEqual(history);
+    expect(restored.note()).toContain('unsupported');
+    expect(await listReplayFiles('test')).toHaveLength(1);
+    restored.recorder.dispose();
+  });
+
+  it('records unheld Weaving mouse movement for shuttle entry positioning', () => {
+    const h = harness('weaving');
+    h.recorder.begin({ difficulty: 5 },42);
+    h.frame(10,[],[80,200]);
+    h.frame(20,[],[250,200]);
+    h.frame(30,[],[300,200]);
+    const tape = h.finish(40);
+    expect(tape.frames.map(frame => frame.mouse)).toEqual([[80,200],[250,200],[300,200]]);
+  });
+
   it('keeps distinct runs when two instances start at the same timestamp', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(42);
     const first = harness('test');

@@ -9,15 +9,13 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "new-puzzle": "node scripts/new-puzzle.mjs"
+    "new-puzzle": "node scripts/new-puzzle.mjs",
+    "pick": "node scripts/pick-branch.mjs"
   },
   "devDependencies": {
     "fake-indexeddb": "^6.2.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.2",
     "vitest": "^5.0.3"
-  },
-  "dependencies": {
-    "@noble/hashes": "^2.4.0"
   }
 }

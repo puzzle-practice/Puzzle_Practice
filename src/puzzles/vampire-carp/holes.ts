@@ -1,4 +1,4 @@
-// Hole shapes for speed carp, from HoleCreator.py. Each entry is
+// Hole shapes for Speed Carpentry. Each entry is
 //   [shape, piece combinations that fill it, weight]
 // where the shape lists rows of 1 (hole) and 0 (wood), each row ended by a 2, and each
 // combination is the letters of the pieces that fill it. When speed carp asks for a

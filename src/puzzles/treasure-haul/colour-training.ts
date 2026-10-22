@@ -1,5 +1,5 @@
 import { HaulBoard, H } from './logic';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import { solveColourDrill } from './edge-training';
 
 export { colourAboveChest } from './edge-training';
@@ -61,7 +61,7 @@ function tryColourDrill(random: () => number): Drill | null {
     };
     const meets = (piece: number) => Math.max(above(x, piece), above(x + 1, piece)) >= 3 && Math.min(above(x, piece), above(x + 1, piece)) >= 1;
     if ([0, 1, 2, 3].some((piece) => piece !== colour && meets(piece))) continue;
-    const refillRng = new PyRandom(Math.floor(random() * 0x100000000));
+    const refillRng = new Random(Math.floor(random() * 0x100000000));
     const refills: number[] = [];
     const draw = (index: number) => {
       while (refills.length <= index) refills.push(refillRng.random());

@@ -17,17 +17,14 @@ export function loadFont(family: string, url: string): Promise<void> {
   return promise;
 }
 
-const PYGAME_DEFAULT = 'Pygame Default';
+const UI_FONT = 'Puzzle UI';
 
-/**
- * The font pygame falls back to for `pygame.font.SysFont(<unknown>, size)` and `Font(None, size)`:
- * FreeSansBold, scaled to 0.6875 of the requested size, with the ascent pygame reports.
- */
-export function pygameFont(size: number): FontSpec {
+/** The shared UI font, scaled to the puzzle artwork with its matching baseline. */
+export function uiFont(size: number): FontSpec {
   const px = Math.floor(size * 0.6875);
-  return { family: PYGAME_DEFAULT, px, ascent: Math.ceil(px * 0.8) };
+  return { family: UI_FONT, px, ascent: Math.ceil(px * 0.8) };
 }
 
-export function loadPygameFont(): Promise<void> {
-  return loadFont(PYGAME_DEFAULT, freeSansBoldUrl);
+export function loadUiFont(): Promise<void> {
+  return loadFont(UI_FONT, freeSansBoldUrl);
 }

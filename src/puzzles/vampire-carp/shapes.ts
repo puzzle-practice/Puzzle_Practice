@@ -1,10 +1,9 @@
-// Speed carp's small holes, from hole_calculator.py and HoleCreator.py in the Vampire Carp
-// simulator. Normal holes are the game's now (board.ts).
+// Speed Carpentry's small holes; normal holes are generated in board.ts.
 //
 // A hole is a 4×9 grid of numbers: 0 wood, 1 an empty cell, and +2 for every piece
 // covering a cell (so 3 is filled once, 5 overlapped). Edges mark the empty cells
 // that touch wood: +1 left, +10 right, +100 top, +1000 bottom.
-import type { PyRandom } from '../../core/pyrandom';
+import type { Random } from '../../core/random';
 import type { HoleEntry } from './holes';
 
 export type Grid = number[][];
@@ -43,7 +42,7 @@ export function copyGrid(grid: Grid): Grid {
   return grid.map((row) => [...row]);
 }
 
-/** flip_hole: mirrors a grid left to right. */
+/** Mirrors a grid left to right. */
 export function flipGrid<T>(grid: T[][]): T[][] {
   return grid.map((row) => [...row].reverse());
 }
@@ -146,18 +145,17 @@ export interface SmallHole extends NewHole {
 }
 
 /**
- * hole_creation_small: a hole for speed carp that `size` pieces fill exactly. Size 1 is the
+ * A hole for speed carp that `size` pieces fill exactly. Size 1 is the
  * shape of a single random piece; sizes 2 and 3 come from the tables in holes.ts, never
  * repeating a shape already on the board, filtered to `letter` when one is required.
  */
 export function createSmallHole(
-  rng: PyRandom,
+  rng: Random,
   size: number,
   codesInUse: readonly string[],
   table: readonly HoleEntry[],
   seed: number,
 ): [SmallHole, number] {
-  rng.seed(null);
   if (size === 1) {
     rng.seed(seed);
     seed++;
@@ -171,8 +169,8 @@ export function createSmallHole(
     let x: number;
     let y: number;
     do {
-      x = rng.randintN(53, 197);
-      y = rng.randintN(105, 159);
+      x = rng.integer(53, 197);
+      y = rng.integer(105, 159);
     } while (checkPlacement(full, full, piece, x, y, 0)[1] !== 5);
     applyPiece(full, piece, x, y, 0, true);
     const grid = full.map((row) => row.map((v) => (v === 3 ? 1 : 0)));
@@ -191,12 +189,12 @@ export function createSmallHole(
   let rotateTimes: number;
   let flipTimes: number;
   if (shape[0].length < 5 && shape.length < 5) {
-    rotateTimes = rng.choicesUniform([0, 1, 2, 3]);
-    flipTimes = rng.choicesUniform([0, 1]);
+    rotateTimes = rng.pick([0, 1, 2, 3]);
+    flipTimes = rng.pick([0, 1]);
   } else {
     // Long shapes only turn half-way, ending up lying down.
-    flipTimes = rng.choicesUniform([0, 1]);
-    rotateTimes = rng.choicesUniform([0, 2]);
+    flipTimes = rng.pick([0, 1]);
+    rotateTimes = rng.pick([0, 2]);
     if (shape.length > shape[0].length) rotateTimes++;
   }
   for (let i = 0; i < rotateTimes; i++) shape = rotateGrid(shape);

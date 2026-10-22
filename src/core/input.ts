@@ -1,6 +1,6 @@
-// Browser input translated into pygame-style events, queued until the puzzle's next frame.
+// Browser input queued until the puzzle's next simulation step.
 //
-// Mouse buttons use pygame's numbering: 1 left, 2 middle, 3 right, 4 wheel up, 5 wheel down.
+// Game mouse button codes: 1 left, 2 middle, 3 right, 4 wheel up, 5 wheel down.
 // Keys use KeyboardEvent.key, lower-cased, with ' ' renamed to 'space' (so 'a', '1',
 // 'escape', 'enter', 'backspace', 'arrowleft', ...).
 import { unlockAudio } from './audio';
@@ -14,12 +14,13 @@ export type InputEvent =
   | { type: 'keydown' | 'keyup'; key: string };
 
 export class Input {
-  /** Latest mouse position in screen pixels (pygame.mouse.get_pos()). */
+  /** Latest mouse position in screen pixels. */
   mouse: Point = [-1, -1];
-  private queue: InputEvent[] = [];
+  private queue: { at: number; event?: InputEvent; mouse: Point }[] = [];
+  private pointer: Point = [-1, -1];
   private readonly cleanup: Array<() => void> = [];
 
-  constructor(screen: Screen) {
+  constructor(screen: Screen, private readonly now: () => number = () => performance.now()) {
     const canvas = screen.canvas;
     const listen = <K extends keyof WindowEventMap>(
       target: Window | HTMLElement,
@@ -30,19 +31,21 @@ export class Input {
       target.addEventListener(type, handler as EventListener, options);
       this.cleanup.push(() => target.removeEventListener(type, handler as EventListener, options));
     };
-    const pos = (event: MouseEvent): Point => (this.mouse = toScreen(screen, event.clientX, event.clientY));
+    const pos = (event: MouseEvent): Point => (this.pointer = toScreen(screen, event.clientX, event.clientY));
+    const enqueue = (event?: InputEvent) => this.queue.push({ at: this.now(), event, mouse: [...this.pointer] });
 
     listen(canvas, 'mousedown', (event) => {
       event.preventDefault();
       canvas.focus();
       unlockAudio();
-      this.queue.push({ type: 'mousedown', button: event.button + 1, pos: pos(event) });
+      enqueue({ type: 'mousedown', button: event.button + 1, pos: pos(event) });
     });
     listen(window, 'mouseup', (event) => {
-      this.queue.push({ type: 'mouseup', button: event.button + 1, pos: pos(event) });
+      enqueue({ type: 'mouseup', button: event.button + 1, pos: pos(event) });
     });
     listen(window, 'mousemove', (event) => {
       pos(event);
+      enqueue();
     });
     let wheelDistance = 0;
     listen(
@@ -50,12 +53,12 @@ export class Input {
       'wheel',
       (event) => {
         event.preventDefault();
-        // One pygame wheel event per notch; trackpads send many small deltas, so accumulate them.
+        // One wheel event per notch; trackpads send many small deltas, so accumulate them.
         wheelDistance += event.deltaMode === WheelEvent.DOM_DELTA_PIXEL ? event.deltaY : event.deltaY * 40;
         if (Math.abs(wheelDistance) >= 50) {
           const button = wheelDistance < 0 ? 4 : 5;
           const at = pos(event);
-          this.queue.push({ type: 'mousedown', button, pos: at }, { type: 'mouseup', button, pos: at });
+          enqueue({ type: 'mousedown', button, pos: at }); enqueue({ type: 'mouseup', button, pos: at });
           wheelDistance = 0;
         }
       },
@@ -70,17 +73,26 @@ export class Input {
       const key = keyName(event);
       // Keep the page from scrolling while playing.
       if (key === 'space' || key.startsWith('arrow')) event.preventDefault();
-      this.queue.push({ type: 'keydown', key });
+      enqueue({ type: 'keydown', key });
     });
     listen(window, 'keyup', (event) => {
       if (isTyping(event.target)) return;
-      this.queue.push({ type: 'keyup', key: keyName(event) });
+      enqueue({ type: 'keyup', key: keyName(event) });
     });
   }
 
-  /** Returns and clears the events received since the last call (pygame.event.get()). */
-  drain(): InputEvent[] {
-    return this.queue.splice(0);
+  /** Return and clear events received since the last call. */
+  drain(until = Infinity): InputEvent[] {
+    const events: InputEvent[] = [];
+    let count = 0;
+    for (const entry of this.queue) {
+      if (entry.at > until) break;
+      this.mouse = [...entry.mouse];
+      if (entry.event) events.push(entry.event);
+      count++;
+    }
+    this.queue.splice(0, count);
+    return events;
   }
 
   dispose(): void {
@@ -93,7 +105,7 @@ function keyName(event: KeyboardEvent): string {
   return event.key === ' ' ? 'space' : event.key.toLowerCase();
 }
 
-/** True if (x, y) lies inside the inclusive box, the comparison every pygame game here writes out by hand. */
+/** True if (x, y) lies inside the inclusive box. */
 export function within(pos: Point, x1: number, x2: number, y1: number, y2: number): boolean {
   return x1 <= pos[0] && pos[0] <= x2 && y1 <= pos[1] && pos[1] <= y2;
 }

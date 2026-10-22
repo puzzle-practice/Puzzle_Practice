@@ -47,6 +47,8 @@ export interface Pair {
   bounceAt: number;
   /** Turns that may still lift it a row. */
   kicks: number;
+  /** Freeplay mode: held where it is, this far into the next row, until the drop key is held. */
+  held?: number;
 }
 
 /** The second piece's square. */
@@ -134,6 +136,8 @@ export class Fighter {
   out = false;
   /** The fight is over: what's moving finishes, but no new pair comes. */
   halted = false;
+  /** Freeplay mode: the pair only falls while the drop key is held. */
+  hover = false;
   /** Clears since the pair landed (s.B). */
   chain = 0;
   incoming: Shaft[] = [];
@@ -190,6 +194,7 @@ export class Fighter {
     const p = this.pair;
     if (!p) return 0;
     if (p.bounceAt) return 0;
+    if (p.held !== undefined) return Math.min(1, p.held / ROW_PX);
     return Math.min(1, Math.max(0, now - p.start) * p.speed / ROW_PX);
   }
 
@@ -240,7 +245,7 @@ export class Fighter {
 
   private fallPair(now: number): void {
     const p = this.pair;
-    if (!p || p.bounceAt) return;
+    if (!p || p.bounceAt || p.held !== undefined) return;
     const rowMs = ROW_PX / p.speed;
     while (this.pair === p && !p.bounceAt && now - p.start >= rowMs) {
       p.row++;
@@ -259,6 +264,7 @@ export class Fighter {
       return;
     }
     if (this.bounceStart) return;
+    delete p.held;
     p.speed = this.speed;
     this.bounceMs = (ROW_PX * 0.125) / this.speed;
     this.bounceStart = now;
@@ -270,7 +276,10 @@ export class Fighter {
   private endBounce(now: number): void {
     const p = this.pair!;
     this.bounceStart = 0;
-    if (!this.land(now)) p.bounceAt = 0;
+    if (!this.land(now)) {
+      p.bounceAt = 0;
+      if (this.hover && !this.fast) p.held = 0;
+    }
   }
 
   /** Lands the pair if it can't fall; pieces above the board are lost (c.a(String, boolean, boolean)). */
@@ -334,6 +343,15 @@ export class Fighter {
     this.fast = on;
     const p = this.pair;
     if (!p || this.bounceStart) return;
+    if (this.hover) {
+      if (!on && p.held === undefined) p.held = Math.min(ROW_PX, Math.max(0, now - p.start) * p.speed);
+      if (on && p.held !== undefined) {
+        p.start = now - p.held / FAST_SPEED;
+        p.speed = FAST_SPEED;
+        delete p.held;
+      }
+      return;
+    }
     const speed = on ? FAST_SPEED : this.speed;
     if (speed === p.speed) return;
     // Keep the distance already fallen into the next row (i.a(float)).
@@ -596,6 +614,10 @@ export class Fighter {
     }
     this.next = this.hooks.peekPair();
     this.blocksSeen++;
+    this.deal(pieces, now);
+  }
+
+  private deal(pieces: [number, number], now: number): void {
     // Each pair starts at the normal speed, even with the drop key still held (s.v).
     this.fast = false;
     this.pair = {
@@ -607,10 +629,26 @@ export class Fighter {
       speed: this.speed,
       bounceAt: 0,
       kicks: 2,
+      ...(this.hover ? { held: 0 } : {}),
     };
+    this.bounceStart = 0;
     this.bounceKey = '';
     // A pair that starts with nothing below it can still be blocked straight away.
     if (!this.board.canDrop(this.rows(this.pair), this.cols(this.pair))) this.bounce(now, 'spawned');
+  }
+
+  /** Freeplay mode: the board was changed by hand. It settles again and deals on, even after a knock-out. */
+  edited(now: number): void {
+    this.out = false;
+    this.stable = false;
+    this.busyUntil = Math.max(this.busyUntil, now);
+  }
+
+  /** Freeplay mode: these pieces as a pair just dealt, at the top. */
+  redeal(pieces: [number, number], now: number): void {
+    this.out = false;
+    this.chain = 0;
+    this.deal(pieces, now);
   }
 
   /** Every 10 pairs, then every 13, 16 and so on, the pair falls a little faster (s.z). */

@@ -5,9 +5,15 @@
 // index.ts draws what's here. Positions are in the board view's pixels, 414x558 at (18, 34) on
 // the panel; the board's own pixels ("world") move under it when it scrolls.
 //
+// Ship carpentry (CarpentrySkin "") plays the same way at the duty's difficulty, with its own five
+// ratings, the grain and nice-set messages, a masterpiece streak, and maneuver tokens when a token
+// pool is on: a finished hole hands over one whole token, or none if it took more than two pieces
+// over its size.
+//
 // Speed is the Vampire Carp simulator's mode: small holes that a set number of
 // pieces fill, dealt with the pieces to fill them, without neglect or scrolling.
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
+import { seedFor } from '../../core/seeds';
 import {
   BoardRandom,
   type Cell,
@@ -49,6 +55,11 @@ const TOOLBOX = { x: 4, y: 14, w: 15, h: 5 };
 export const TOOLBOX_AT: Cell = [42, 215];
 /** Holes for a full star meter: 17 at the Vampire Lair's difficulty. */
 export const LEVEL_HOLES = HOLES_PER_LEVEL[VAMPIRE_DIFFICULTY];
+/** The rating's second line (grain, nice set) sounds 1s after the rating's own sound (CarpentryController.a(Hole, int)). */
+const GRAIN_SOUND_DELAY = 1640;
+/** How long a handed-over token takes to fly 500px to the right (our guess; the game's own art for it is blank). */
+export const TOKEN_MS = 1000;
+export const TOKEN_FLIGHT = 500;
 
 /** Floating messages last 1.5s (media/animation/u). */
 export const TEXT_MS = 1500;
@@ -71,7 +82,10 @@ export type SoundName =
   | 'putty_use'
   | 'hole_masterpiece'
   | 'hole_craftsmanship'
+  | 'hole_fair_job'
+  | 'hole_sloppy_work'
   | 'hole_pigs_breakfast'
+  | 'grain_bonus'
   | 'piece_rattle_warning_slow'
   | 'piece_rattle_warning_fast'
   | 'piece_fly_off'
@@ -86,6 +100,24 @@ export const RANKS = [
   { text: 'Creaky Coffin', sound: 'hole_craftsmanship', points: 1 },
   { text: 'Slipshod', sound: 'hole_pigs_breakfast', points: -1 },
 ] as const;
+
+/** Ship carpentry's ratings by Hole.getHoleRank (m.perfect to m.booch) and their sounds. */
+export const SHIP_RANKS = [
+  { text: 'A Masterpiece!', sound: 'hole_masterpiece' },
+  { text: 'Craftsmanship!', sound: 'hole_craftsmanship' },
+  { text: 'A Fair Job.', sound: 'hole_fair_job' },
+  { text: 'Sloppy Work.', sound: 'hole_sloppy_work' },
+  { text: "A Pig's Breakfast!", sound: 'hole_pigs_breakfast' },
+] as const;
+
+/** Which carpentry: the Vampire Lair's, or a ship's at a difficulty with a token pool (BONUS_SETS). */
+export interface CarpentryKind {
+  ship: boolean;
+  difficulty: number;
+  tokens: number;
+  independentStreams?: boolean;
+}
+export const VAMPIRE_LAIR: CarpentryKind = { ship: false, difficulty: VAMPIRE_DIFFICULTY, tokens: 0 };
 
 /**
  * A piece's look: a wood texture (wood_pieces tile 0-7) cropped at random, drawn in the
@@ -140,11 +172,22 @@ export interface Flyer {
 
 export interface FloatText {
   text: string;
-  /** A smaller second line under it (yellow), unused by vampire ratings. */
   colour: string;
   size: number;
+  /** A smaller second line under it, in yellow: the grain and nice set (ship ratings). */
+  sub?: string;
+  /** Masterpieces in a row, shown beside a masterpiece from the second one. */
+  streak?: number;
   /** World pixels of its centre. */
   at: Cell;
+  start: number;
+}
+
+/** A token handed over by a finished hole, flying off to the right. */
+export interface TokenFlyer {
+  type: number;
+  /** World pixels of its centre when it set off. */
+  from: Cell;
   start: number;
 }
 
@@ -171,6 +214,13 @@ export interface Stats {
   /** Slipshod, Creaky Coffin, Vampire Proof. */
   grades: [number, number, number];
   holesFilled: number;
+  /** Ship carpentry: holes by rating, masterpiece first. */
+  ranks: number[];
+  /** Ship carpentry: the holes' points (Hole.computeBonus and the masterpiece streak). */
+  points: number;
+  /** Tokens handed over by type; a masterpiece's counts twice ("Double Bonus!"). */
+  tokens: number[];
+  bestStreak: number;
 }
 
 export function newStats(): Stats {
@@ -189,6 +239,10 @@ export function newStats(): Stats {
     animating: 0,
     grades: [0, 0, 0],
     holesFilled: 0,
+    ranks: [0, 0, 0, 0, 0],
+    points: 0,
+    tokens: [0, 0, 0, 0, 0, 0, 0, 0],
+    bestStreak: 0,
   };
 }
 
@@ -204,7 +258,7 @@ const randInt = (n: number) => (n <= 0 ? 0 : Math.floor(Math.random() * n));
 /** Where a hole's cell (0, 0) sits in the view, in cells: centred in its 10x10 box (CarpentryBoardView.b). */
 export function holeCell(index: number, hole: Hole): Cell {
   const [bx, by] = HOLE_BOX[index];
-  return [bx + Math.trunc((MAX_HOLE - hole.width) / 2), by + Math.trunc((MAX_HOLE - hole.height) / 2)];
+  return [bx + hole.offset[0], by + hole.offset[1]];
 }
 
 /** The letter Jared's stats use for a piece ('b' for the putty). */
@@ -227,6 +281,9 @@ export class Game {
   tentativeAt: Cell | null = null;
   flyers: Flyer[] = [];
   texts: FloatText[] = [];
+  tokenFlyers: TokenFlyer[] = [];
+  /** Holes for a full star meter at this board's difficulty. */
+  readonly levelHoles: number;
   /** World pixels at the view's top-left. */
   view: Cell = [0, 0];
   private scroll: { from: Cell; to: Cell; start: number; ms: number; then: () => void } | null = null;
@@ -250,6 +307,7 @@ export class Game {
   private speedSeed = 0;
   private piecesUntilRefresh = 0;
   private speedHoleDone = false;
+  private readonly speedHoles: Random;
 
   constructor(
     seed: number,
@@ -257,11 +315,14 @@ export class Game {
     readonly stats: Stats,
     private readonly hooks: Hooks,
     readonly speed: SpeedConfig | null,
-    private readonly prng: PyRandom,
+    private readonly prng: Random,
     now: number,
+    readonly kind: CarpentryKind = VAMPIRE_LAIR,
   ) {
     this.now = now;
-    this.board = new CarpentryBoard(seed);
+    this.speedHoles = kind.independentStreams ? new Random(seedFor(seed, 'speed-holes')) : prng;
+    this.board = kind.ship && !speed ? new CarpentryBoard(seed, kind.difficulty, -1, kind.tokens, -1, !!kind.independentStreams) : new CarpentryBoard(seed, undefined, undefined, 0, -1, !!kind.independentStreams);
+    this.levelHoles = HOLES_PER_LEVEL[this.board.difficulty];
     if (speed) this.setUpSpeed();
     else for (let i = 0; i < NUM_TOOLS; i++) this.countFound(this.board.toolbox[i]);
     // CarpentryController.j: fanfare, a fresh toolbox, and the holes scroll in.
@@ -272,8 +333,8 @@ export class Game {
 
   // ---- Sprites ----
 
-  private makeSprite(tool: number): PieceSprite {
-    const piece = new Piece(tool, this.speed || this.board.difficulty >= 2 ? 2 * this.orientRng.nextInt(4) + (tool & 1) : 1);
+  private makeSprite(tool: number, tokens: number[] | null = null): PieceSprite {
+    const piece = new Piece(tool, this.speed || this.board.difficulty >= 2 ? 2 * this.orientRng.nextInt(4) + (tool & 1) : 1, tokens);
     const cells = piece.cells();
     const w = Math.max(...cells.map((c) => c[0])) - Math.min(...cells.map((c) => c[0])) + 1;
     const h = Math.max(...cells.map((c) => c[1])) - Math.min(...cells.map((c) => c[1])) + 1;
@@ -291,7 +352,7 @@ export class Game {
   /** A fresh sprite for toolbox slot i (CarpentryController.c). */
   private newTool(slot: number): void {
     const tool = this.board.toolbox[slot];
-    this.tools[slot] = tool < 0 ? null : this.makeSprite(tool);
+    this.tools[slot] = tool < 0 ? null : this.makeSprite(tool, this.board.toolTokens[slot]);
     this.resetTool(slot);
   }
 
@@ -500,6 +561,42 @@ export class Game {
   keyPick(slot: number): void {
     if (this.blocked()) return;
     this.pickUp(slot, true);
+  }
+
+  // ---- Freeplay mode ----
+
+  /** Freeplay mode: the hole and the square of its 10x10 box under a panel pixel, or null. */
+  static boxAt(px: number, py: number): { index: number; at: Cell } | null {
+    const [cx, cy] = Game.viewCell(px, py);
+    for (let index = 0; index < NUM_HOLES; index++) {
+      const x = cx - HOLE_BOX[index][0], y = cy - HOLE_BOX[index][1];
+      if (x >= 0 && y >= 0 && x < MAX_HOLE && y < MAX_HOLE) return { index, at: [x, y] };
+    }
+    return null;
+  }
+
+  /** Freeplay mode: the board can be painted now, with nothing in hand and nothing moving. */
+  get editable(): boolean {
+    return !this.blocked() && !this.scrolling && !this.waiting && !this.held;
+  }
+
+  /**
+   * Freeplay mode: changes the board's holes or toolbox, then lays out whatever changed. A placed
+   * plank still being nudged is nailed in first. Returns false when nothing changed.
+   */
+  edit(change: () => boolean): boolean {
+    if (!this.editable) return false;
+    this.commitTentative();
+    if (!this.editable) return false;
+    const holes = [...this.board.holes], tools = [...this.board.toolbox];
+    if (!change()) return false;
+    for (let i = 0; i < NUM_HOLES; i++) {
+      if (this.board.holes[i] === holes[i]) continue;
+      this.holeSprites = this.holeSprites.filter((hs) => hs.hole !== holes[i]);
+      this.layOut(i, [0, 0]);
+    }
+    for (let slot = 0; slot < NUM_TOOLS; slot++) if (this.board.toolbox[slot] !== tools[slot]) this.newTool(slot);
+    return true;
   }
 
   // ---- Mouse (carpentry/g) ----
@@ -798,18 +895,22 @@ export class Game {
   }
 
   /** A message rising from the middle of hole `index` (CarpentryBoardView.a(String,...)). */
-  private text(text: string, colour: string, size: number, index: number): void {
+  private text(text: string, colour: string, size: number, index: number, extra: { sub?: string; streak?: number } = {}): void {
     const hole = this.board.holes[index];
     const hs = hole ? this.spriteFor(hole) : undefined;
     const at: Cell = hs
       ? [hs.pos[0] + (hole.width * CELL) / 2, hs.pos[1] + (hole.height * CELL) / 2]
       : [this.view[0] + VIEW_W / 2, this.view[1] + VIEW_H / 2];
-    this.texts.push({ text, colour, size, at, start: this.now });
+    this.texts.push({ text, colour, size, at, start: this.now, ...extra });
   }
 
   // ---- Finished holes (CarpentryController.a(Hole, int)) ----
 
   private holeFilled(hole: Hole, index: number): void {
+    // The game scores the hole and its streak, and looks for a token, before the board moves on.
+    const points = hole.computeBonus();
+    const streak = this.board.checkPerfectBonus(index);
+    const token = hole.takeToken(this.board.desiredBonus, this.board.rng);
     const rank = Math.min(2, hole.rank);
     const grade = 2 - rank;
     this.stats.grades[grade]++;
@@ -827,10 +928,13 @@ export class Game {
       this.speedAfterCommit();
       return;
     }
-    this.text(RANKS[rank].text, '#ffffff', 36, index);
-    this.hooks.sound(RANKS[rank].sound, RANK_SOUND_DELAY);
-    const [dx, dy] = this.board.checkForNewHoles(LEVEL_HOLES - this.filled);
-    if (this.filled >= LEVEL_HOLES) {
+    if (this.kind.ship) this.shipRating(hole, index, points + streak, streak, token);
+    else {
+      this.text(RANKS[rank].text, '#ffffff', 36, index);
+      this.hooks.sound(RANKS[rank].sound, RANK_SOUND_DELAY);
+    }
+    const [dx, dy] = this.board.checkForNewHoles(this.levelHoles - this.filled);
+    if (this.filled >= this.levelHoles) {
       this.waiting = true;
       this.later(TEXT_MS, () => this.levelUp());
     } else if (dx !== 0 || dy !== 0) {
@@ -843,6 +947,44 @@ export class Game {
         this.scrollNewHoles(dx, dy);
       });
     }
+  }
+
+  /** Ship carpentry's rating, grain and nice set, and the hole's token (CarpentryController.a(Hole, int)). */
+  private shipRating(hole: Hole, index: number, points: number, streak: number, token: { type: number; at: Cell } | null): void {
+    const rank = hole.rank;
+    this.stats.ranks[rank]++;
+    this.stats.points += points;
+    if (streak + 1 > this.stats.bestStreak && hole.perfect) this.stats.bestStreak = streak + 1;
+    const lines: string[] = [];
+    if (hole.grainPreserved) {
+      lines.push('Grain Bonus.');
+      this.hooks.sound('grain_bonus', GRAIN_SOUND_DELAY);
+    }
+    if (hole.perfect && hole.homogenous) {
+      lines.push('Nice set.');
+      this.hooks.sound('grain_bonus');
+    }
+    this.text(SHIP_RANKS[rank].text, '#ffffff', 36, index, { sub: lines.length ? lines.join('\n') : undefined, streak: streak > 0 ? streak : undefined });
+    this.hooks.sound(SHIP_RANKS[rank].sound, RANK_SOUND_DELAY);
+    if (!token) return;
+    if (hole.piecesUsed > hole.size + 2) {
+      this.text('No Bonus', '#ffffff', 24, index, { sub: 'Too Sloppy' });
+      return;
+    }
+    if (hole.perfect) this.text('Double Bonus!', '#ffffff', 26, index);
+    this.stats.tokens[token.type] += hole.perfect ? 2 : 1;
+    const hs = this.spriteFor(hole);
+    if (!hs) return;
+    // Token grid cells sit one over from the hole's 10x10 box, so its corner is the block's centre.
+    const off = hole.offset;
+    const from: Cell = [hs.pos[0] + (token.at[0] - off[0]) * CELL, hs.pos[1] + (token.at[1] - off[1]) * CELL];
+    this.tokenFlyers.push({ type: token.type, from, start: this.now });
+  }
+
+  /** Where a token flyer's centre is now, in world pixels. */
+  tokenAt(f: TokenFlyer): Cell {
+    const t = Math.min(1, (this.now - f.start) / TOKEN_MS);
+    return [f.from[0] + TOKEN_FLIGHT * t, f.from[1]];
   }
 
   /** New holes come in beside the ones that stay, and the view scrolls to them (CarpentryBoardView.d). */
@@ -906,6 +1048,7 @@ export class Game {
     }
     this.flyers = this.flyers.filter((f) => now - f.start < FLY_MS);
     this.texts = this.texts.filter((t) => now - t.start < TEXT_MS);
+    this.tokenFlyers = this.tokenFlyers.filter((f) => now - f.start < TOKEN_MS);
   }
 
   /** Where a flyer is now, in world pixels. */
@@ -914,20 +1057,20 @@ export class Game {
     return [lerp(f.from[0], f.to[0], t), lerp(f.from[1], f.to[1], t)];
   }
 
-  /** The star meter's fill, 0-100 (CarpentryController: holes x 100 / 17); speed goes round again. */
+  /** The star meter's fill, 0-100 (CarpentryController: holes x 100 / holes for the level); speed goes round again. */
   get meter(): number {
-    const filled = this.speed ? this.filled % LEVEL_HOLES : this.filled;
-    return Math.min(100, Math.trunc((filled * 100) / LEVEL_HOLES));
+    const filled = this.speed ? this.filled % this.levelHoles : this.filled;
+    return Math.min(100, Math.trunc((filled * 100) / this.levelHoles));
   }
 
   // ---- Speed (Jared's simulator) ----
 
   private setUpSpeed(): void {
     const speed = this.speed!;
-    this.speedSeed = this.prng.randintN(0, 999999999999999);
+    this.speedSeed = this.speedHoles.integer(0, 999999999999999);
     this.board.holes = this.board.holes.map(() => Hole.blank(++this.board.holesGenerated));
     this.board.toolbox.fill(-1);
-    const order = this.prng.shuffle([0, 1, 2, 3]);
+    const order = this.speedHoles.shuffle([0, 1, 2, 3]);
     let made = 0;
     for (const z of order) if (made < speed.holes) {
       this.makeSmallHole(z);
@@ -957,7 +1100,7 @@ export class Game {
   /** A small hole into spot z (hole_creation_small), trimmed to its cells. */
   private makeSmallHole(z: number): void {
     const codes = this.board.holes.map((h) => this.speedCodes.get(h.id) ?? '');
-    const [small, next] = createSmallHole(this.prng, this.speed!.size, codes, this.smallHoleTable(), this.speedSeed);
+    const [small, next] = createSmallHole(this.speedHoles, this.speed!.size, codes, this.smallHoleTable(), this.speedSeed);
     this.speedSeed = next;
     const rows = small.grid;
     const ys = rows.map((row, y) => (row.some((v) => v === 1) ? y : -1)).filter((y) => y >= 0);
@@ -986,8 +1129,8 @@ export class Game {
   private dealCombination(): void {
     const pools = this.board.holes.map((h, i) => ((this.speedNeeded.get(h.id) ?? []).length ? i : -1)).filter((i) => i >= 0);
     if (!pools.length) return;
-    const pool = this.prng.choicesUniform(pools);
-    const combination = this.prng.choicesUniform(this.speedNeeded.get(this.board.holes[pool].id)!);
+    const pool = this.prng.pick(pools);
+    const combination = this.prng.pick(this.speedNeeded.get(this.board.holes[pool].id)!);
     const letters = this.prng.shuffle(combination.split('').concat(Array(3 - combination.length).fill('')));
     letters.forEach((letter, slot) => (letter ? this.setTool(slot, letter) : (this.board.toolbox[slot] = -1)));
   }
@@ -1020,7 +1163,7 @@ export class Game {
     this.speedCodes.delete(old.id);
     this.board.holes[z] = Hole.blank(++this.board.holesGenerated);
     const free = [0, 1, 2, 3].filter((i) => this.board.holes[i].size === 0);
-    if (4 - free.length < this.speed!.holes) this.makeSmallHole(this.prng.shuffle(free)[0]);
+    if (4 - free.length < this.speed!.holes) this.makeSmallHole(this.speedHoles.shuffle(free)[0]);
     this.relayOut();
   }
 
@@ -1039,7 +1182,7 @@ export class Game {
     if (!this.speedHoleDone) {
       // Out of pieces without finishing: one more random piece.
       this.piecesUntilRefresh++;
-      const slot = this.prng.choicesUniform([0, 1, 2]);
+      const slot = this.prng.pick([0, 1, 2]);
       this.setTool(slot, this.randomLetter());
       this.newTool(slot);
       return;

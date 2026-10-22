@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compressReplay, decodeReplaySettings, decodeReplayBlob, encodeReplayBlob, isPuzzleReplay, packReplay, unpackReplay, type PuzzleReplay, type ReplaySettingsCodec } from './replay';
+import { compressReplay, decodeReplaySettings, decodeReplayBlob, encodeReplayBlob, isPuzzleReplay, packReplay, replayFileName, unpackReplay, type PuzzleReplay, type ReplaySettingsCodec } from './replay';
 
 describe('shareable replay format', () => {
   it('stores and restores an individually gzipped compact replay', async () => {
@@ -7,6 +7,7 @@ describe('shareable replay format', () => {
     const replay: PuzzleReplay = {
       format: 'puzzle-practice-replay', version: 1, puzzle: 'forage', at: 42, duration: 100,
       result: 'Score 8', settings: { mode: 'chaos' }, seed: { board: [1, 2] },
+      randomVersion: 1,
       frames: [{ t: 10, mouse: [4, 5], events: [{ type: 'mousedown', button: 1, pos: [4, 5] }] }],
     };
     const stored = await encodeReplayBlob(replay);
@@ -53,21 +54,23 @@ describe('shareable replay format', () => {
     const replay: PuzzleReplay = {
       format: 'puzzle-practice-replay', version: 1, puzzle: 'blacksmithing', at: 1, duration: 500,
       result: 'Score 1', settings: {}, seed: {}, frames: [
+        { t: 10, mouse: [4, 8], events: [], commands: [] },
         { t: 20, mouse: [10, 20], events: [], commands: [] },
         { t: 30, mouse: [12, 22], events: [{ type: 'mousedown', button: 1, pos: [12, 22] }] },
         { t: 40, mouse: [12, 22], events: [], actions: [{ type: 'strike', data: { x: 1, y: 2 } }] },
       ],
     };
     const compressed = compressReplay(replay);
-    expect(compressed.frames).toHaveLength(2);
-    expect(compressed.frames[0].events).toHaveLength(1);
-    expect(compressed.frames[1].actions).toHaveLength(1);
-    expect(replay.frames).toHaveLength(3);
+    // The cursor just before a press stays: a drag that starts with the press comes from there.
+    expect(compressed.frames.map((frame) => frame.t)).toEqual([20, 30, 40]);
+    expect(compressed.frames[1].events).toHaveLength(1);
+    expect(compressed.frames[2].actions).toHaveLength(1);
+    expect(replay.frames).toHaveLength(4);
   });
 
-  it('keeps held-mouse paths in Distilling because the path itself can make matches', () => {
+  it.each(['distilling', 'shipwrightery'])('keeps held-mouse paths in %s because the path itself can make swaps', (puzzle) => {
     const replay: PuzzleReplay = {
-      format: 'puzzle-practice-replay', version: 1, puzzle: 'distilling', at: 1, duration: 500,
+      format: 'puzzle-practice-replay', version: 1, puzzle, at: 1, duration: 500,
       result: 'Score 1', settings: {}, seed: {}, frames: [
         { t: 10, mouse: [1, 1], events: [{ type: 'mousedown', button: 1, pos: [1, 1] }] },
         { t: 20, mouse: [8, 8], events: [] },
@@ -76,6 +79,18 @@ describe('shareable replay format', () => {
       ],
     };
     expect(compressReplay(replay).frames.map((frame) => frame.t)).toEqual([10, 20, 30]);
+  });
+
+  it('keeps Weaving hover samples because they choose incoming shuttle positions', () => {
+    const replay: PuzzleReplay = {
+      format: 'puzzle-practice-replay', version: 1, puzzle: 'weaving', at: 1, duration: 500,
+      result: 'Stopped', settings: { difficulty: 3 }, seed: 42, frames: [
+        { t: 10, mouse: [80, 200], events: [] },
+        { t: 20, mouse: [250, 200], events: [] },
+        { t: 30, mouse: [250, 200], events: [{ type: 'keydown', key: 'space' }] },
+      ],
+    };
+    expect(compressReplay(replay).frames).toEqual(replay.frames);
   });
 
   it('accepts a puzzle replay with an opaque custom seed and ordered input', () => {
@@ -124,5 +139,16 @@ describe('shareable replay format', () => {
     };
     expect(isPuzzleReplay(tape, 'treasure-haul')).toBe(true);
     expect(decodeReplaySettings(tape, { currentVersion: 2, migrate: () => null })).toBeNull();
+  });
+});
+
+describe('replay file names', () => {
+  it('gives replays recorded in the same minute different names', () => {
+    const at = new Date(2026, 9, 15, 18, 4, 5).getTime();
+    const first = replayFileName({ puzzle: 'forage', at, runId: '3913611b-b776-4020-ad34-167a43107233' });
+    const second = replayFileName({ puzzle: 'forage', at: at + 1500, runId: 'bc96e891-7571-4701-b4cf-7b8d323d7005' });
+    expect(first).toBe('forage-replay-2026-10-15_18-04-05-3913611b.json.gz');
+    expect(second).toBe('forage-replay-2026-10-15_18-04-06-bc96e891.json.gz');
+    expect(replayFileName({ puzzle: 'forage', at: at + 7 })).not.toBe(replayFileName({ puzzle: 'forage', at: at + 8 }));
   });
 });

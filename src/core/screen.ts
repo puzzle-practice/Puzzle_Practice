@@ -1,9 +1,9 @@
-// A thin wrapper around a canvas that behaves like a pygame display surface:
+// Shared canvas drawing operations:
 // fixed logical size, images blitted at their top-left, text drawn from its top-left.
 
 export type Drawable = HTMLImageElement | HTMLCanvasElement;
 
-/** A font as pygame would render it: a CSS family, a pixel size, and the ascent pygame reports. */
+/** Text metrics: CSS family, pixel size and baseline ascent. */
 export interface FontSpec {
   family: string;
   px: number;
@@ -11,13 +11,13 @@ export interface FontSpec {
 }
 
 export interface BlitOptions {
-  /** Source rectangle [x, y, w, h], like pygame's `area` argument. */
+  /** Source rectangle [x, y, w, h]. */
   area?: readonly number[];
   /** 0–255, like Surface.set_alpha. */
   alpha?: number;
-  /** Mirror horizontally (pygame.transform.flip(img, True, False)). */
+  /** Mirror horizontally. */
   flipX?: boolean;
-  /** Counter-clockwise degrees in steps of 90 (pygame.transform.rotate). */
+  /** Counter-clockwise degrees in steps of 90. */
   rotate?: number;
 }
 
@@ -45,7 +45,7 @@ export class Screen {
     this.ctx.fillRect(Math.trunc(x), Math.trunc(y), w, h);
   }
 
-  /** pygame truncates float blit positions to whole pixels; so does this. */
+  /** Snap image positions to whole pixels. */
   blit(img: Drawable, x: number, y: number, options: BlitOptions = {}): void {
     const ctx = this.ctx;
     x = Math.trunc(x);
@@ -77,7 +77,7 @@ export class Screen {
     ctx.restore();
   }
 
-  /** Draws text with its top-left at (x, y), the way pygame's font.render + blit places it. */
+  /** Draw text with its top-left at (x, y). */
   text(value: string, x: number, y: number, font: FontSpec, colour = '#ffffff', alpha?: number): void {
     const ctx = this.ctx;
     ctx.save();

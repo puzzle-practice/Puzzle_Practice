@@ -19,6 +19,7 @@ import {
   SHOVEL,
   WIDTH,
 } from './board';
+import { type Moon, type MoonBlast, WerewolfForageBoard } from './werewolf';
 
 /** [x, y] in cells; off the board for pieces coming in or leaving. */
 export type Cell = [number, number];
@@ -78,7 +79,11 @@ export type SoundName =
   | 'outro'
   | 'score_small'
   | 'score_medium'
-  | 'score_big';
+  | 'score_big'
+  | 'wolf_roar'
+  | 'moon_fire'
+  | 'werewolf_intro'
+  | 'chest_howl';
 
 export interface Sprite {
   piece: number;
@@ -93,6 +98,8 @@ export interface Sprite {
   clear?: boolean;
   /** Walking ants cycle their frames. */
   walk?: boolean;
+  /** Moon rays turn a piece white for 120ms, then fade over 250ms. */
+  moonClear?: boolean;
 }
 
 /** The monkey (3x3 cells big), by the top-left cell of its box; facing 1 is mirrored. */
@@ -107,7 +114,8 @@ export interface MonkeyAnim {
 /** Things that don't hold up the board: pops, floating text. */
 export type Effect =
   | { kind: 'pop'; piece: number; at: Cell; delay: number }
-  | { kind: 'text'; text: string; size: number; delay: number };
+  | { kind: 'text'; text: string; size: number; delay: number }
+  | { kind: 'moon'; moon: Moon; blast: MoonBlast | null; delay: number };
 
 export interface Step {
   /** What holds still during the step. */
@@ -117,6 +125,9 @@ export interface Step {
   sounds: { name: SoundName; delay: number }[];
   effects: Effect[];
   duration: number;
+  /** Snapshots keep the view in step with cascades computed ahead of animation. */
+  moons?: Moon[];
+  wolf?: { box: Cell; firstFrame: number; duration: number };
   /** The ants' step, which comes once the board has settled after a move. */
   ants?: boolean;
 }
@@ -170,9 +181,17 @@ export class Forage {
     seed: number | bigint,
     public crateSource: CrateSource = {},
     difficulty = 8,
+    moonsEnabled = false,
+    /** Defaults to the old combined variant for existing engine callers. */
+    readonly werewolf = moonsEnabled,
+    /** Freeplay: moons only where they're painted, none coming up on their own. */
+    paintedMoons = false,
   ) {
-    this.board = new ForageBoard(seed, difficulty);
+    this.board = paintedMoons ? new WerewolfForageBoard(seed, difficulty, false)
+      : moonsEnabled ? new WerewolfForageBoard(seed, difficulty) : new ForageBoard(seed, difficulty);
   }
+
+  get moons() { return this.board instanceof WerewolfForageBoard ? this.board.moons : null; }
 
   static emptyResult(): MoveResult {
     return { points: 0, gauntletPoints: 0, collected: [0, 0, 0], chained: 0, combo: 0 };
@@ -205,8 +224,10 @@ export class Forage {
       if (x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT) still[y * WIDTH + x] = EMPTY;
     }
     step.board = still;
+    if (this.moons) step.moons = this.moons.snapshot();
     step.duration = Math.max(
       0,
+      step.wolf?.duration ?? 0,
       ...step.sprites.map((s) => s.delay + s.duration),
       ...step.monkey.map((m) => m.delay + m.duration),
     );
@@ -228,6 +249,7 @@ export class Forage {
   private clearCell(x: number, y: number, ripple: number, heard: Map<number, Set<number>>): void {
     const piece = this.board.getPiece(x, y);
     if (piece !== EMPTY) {
+      if (!isCrate(piece)) this.board.noteCleared(x, y);
       const delay = ripple * TIMING.ripple;
       const kinds = heard.get(delay) ?? new Set<number>();
       heard.set(delay, kinds);
@@ -265,7 +287,7 @@ export class Forage {
     this.result = Forage.emptyResult();
     if (tool === SHOVEL) this.shovel(x, y);
     else if (tool === MACHETE) this.machete(x, y, ccw);
-    else if (tool === MONKEY) this.monkey(x, y);
+    else if (tool === MONKEY) this.werewolf ? this.wolf(x, y) : this.monkey(x, y);
     else if (tool === EARTHQUAKE) this.earthquake(x, y, ccw);
     else this.turn(x, y, ccw);
     this.points.endStep();
@@ -345,7 +367,6 @@ export class Forage {
    * move, they are always fruit.
    */
   private monkey(x: number, y: number): void {
-    const b = this.board;
     const facing = x < Math.trunc(WIDTH / 2) ? 1 : x > Math.trunc(WIDTH / 2) ? 0 : looks.random() < 0.5 ? 0 : 1;
     const box: Cell = [Math.min(Math.max(0, x - 1), WIDTH - 3), Math.min(Math.max(0, y - 1), HEIGHT - 3)];
     const travel = (box[1] + 3) * CELL;
@@ -358,6 +379,26 @@ export class Forage {
     step.monkey.push({ kind: 'dance', box, facing, delay: 0, duration: TIMING.monkeyDance });
     step.monkey.push({ kind: 'leave', box, facing, delay: TIMING.monkeyDance, duration: travel });
     const centre: Cell = [Math.min(Math.max(1, x), WIDTH - 2), Math.min(Math.max(1, y), HEIGHT - 2)];
+    this.throwPieces(x, y, centre, step);
+    this.end();
+  }
+
+  /** The wolf's first five frames roar; its last five accompany the same 5x5 refill. */
+  private wolf(x: number, y: number): void {
+    const box: Cell = [Math.min(Math.max(0, x - 2), WIDTH - 5), Math.min(Math.max(0, y - 2), HEIGHT - 5)];
+    let step = this.begin();
+    this.sound('wolf_roar');
+    step.wolf = { box, firstFrame: 0, duration: 500 };
+    this.end();
+    step = this.begin();
+    step.wolf = { box, firstFrame: 5, duration: 500 };
+    const centre: Cell = [Math.min(Math.max(2, x), WIDTH - 3), Math.min(Math.max(2, y), HEIGHT - 3)];
+    this.throwPieces(x, y, centre, step);
+    this.end();
+  }
+
+  private throwPieces(x: number, y: number, centre: Cell, step: Step): void {
+    const b = this.board;
     for (let dx = -2; dx <= 2; dx++) {
       for (let dy = -2; dy <= 2; dy++) {
         const [tx, ty] = [x + dx, y + dy];
@@ -372,7 +413,6 @@ export class Forage {
         if (old !== EMPTY) step.sprites.push({ piece: old, from: [tx, ty], to: [tx, ty], delay: duration, duration: 0, path: 'line', clear: true });
       }
     }
-    this.end();
   }
 
   // ---- Settling ----
@@ -384,7 +424,7 @@ export class Forage {
   private settle(moved: boolean): void {
     let antsToTick = moved;
     for (;;) {
-      if (this.gravity() || this.collectCrates() || this.clearRuns() || this.spawnCrate()) continue;
+      if (this.gravity() || this.collectCrates() || this.clearRuns() || this.fireMoon() || this.spawnCrate()) continue;
       if (antsToTick) {
         antsToTick = false;
         this.tickAnts();
@@ -393,6 +433,12 @@ export class Forage {
       break;
     }
     if (!moved) return;
+    if (this.moons) {
+      const { expired } = this.moons.endMove(this.board);
+      const step = this.begin();
+      for (const moon of expired) step.effects.push({ kind: 'moon', moon, blast: null, delay: 0 });
+      this.end();
+    }
     // The end of the move.
     this.result.points = this.points.total;
     this.result.chained = this.points.chained;
@@ -470,6 +516,32 @@ export class Forage {
     if (placed) this.end();
     else this.current = null;
     return placed;
+  }
+
+  /** A charged moon fires after runs, before crate placement, and can charge another moon. */
+  private fireMoon(): boolean {
+    const moons = this.moons;
+    const moon = moons?.takeCharged();
+    if (!moons || !moon) return false;
+    const blast = moons.blast(moon, this.board);
+    const step = this.begin();
+    step.effects.push({ kind: 'moon', moon, blast, delay: 0 });
+    this.sound('moon_fire');
+    moons.firing = true;
+    for (const [key, distance] of blast.cells) {
+      const x = Math.trunc(key / 100), y = key % 100;
+      const piece = this.board.getPiece(x, y);
+      if (piece === EMPTY || isCrate(piece)) continue;
+      const delay = 350 + (distance - 1) * 40;
+      step.sprites.push({ piece, from: [x, y], to: [x, y], delay, duration: 370, path: 'line', clear: true, moonClear: true });
+      if (piece < 5) step.effects.push({ kind: 'pop', piece, at: [x, y], delay });
+      this.board.noteCleared(x, y);
+      this.board.setPiece(x, y, EMPTY);
+    }
+    moons.firing = false;
+    this.points.endStep();
+    this.end();
+    return true;
   }
 
   /** The ants step once a move. */

@@ -150,6 +150,11 @@ export class ForageBoard {
     this.cells[y * WIDTH + x] = p;
   }
 
+  /** Hooks the Werewolf board's fixed moon targets use. */
+  noteCleared(_x: number, _y: number): void {}
+  protected noteEaten(_x: number, _y: number): void {}
+  protected keepsCratesOff(_x: number, _y: number): boolean { return false; }
+
   inBounds(x: number, y: number): boolean {
     return x >= 0 && y >= 0 && x < WIDTH && y < HEIGHT;
   }
@@ -252,7 +257,7 @@ export class ForageBoard {
       for (let dx = 0; dx < width && ok; dx++) {
         for (let y = 0; y < height; y++) {
           const p = this.getPiece(x + dx, y);
-          if (isCrate(p) || isAnts(p) || isTool(p)) {
+          if (isCrate(p) || isAnts(p) || isTool(p) || this.keepsCratesOff(x + dx, y)) {
             ok = false;
             break;
           }
@@ -306,6 +311,7 @@ export class ForageBoard {
             break;
         }
         if (this.inBounds(tx, ty) && isOrdinary(this.getPiece(tx, ty))) {
+          this.noteEaten(tx, ty);
           const count = antCount(p);
           this.setPiece(tx, ty, count > 1 ? makeAnts(count - 1, antFacing(p)) : EMPTY);
           onStep?.(x, y, tx, ty);

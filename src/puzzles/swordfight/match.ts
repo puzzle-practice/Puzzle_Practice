@@ -1,7 +1,7 @@
 // A fight: you, fighter 0, and the chosen teammates against the chosen opponents,
 // or you on your own. Deals the pairs, passes each attack to its target, and decides when
 // the fight is over. How pairs are dealt and when attacks are sent are choices made here.
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import type { Attack } from './attack';
 import { BREAKER } from './board';
 import { Fighter, type FighterHooks, type SoundName } from './fighter';
@@ -49,15 +49,15 @@ export interface NpcSettings {
 
 /** Each fighter gets the same pairs in the same order, from a generator seeded alike. */
 class Dealer {
-  private readonly rng: PyRandom;
+  private readonly rng: Random;
   private readonly queue: Array<[number, number]> = [];
 
   constructor(seed: number, private readonly breakerChance: number) {
-    this.rng = new PyRandom(seed);
+    this.rng = new Random(seed);
   }
 
   private piece(): number {
-    const c = this.rng.randintN(0, 3);
+    const c = this.rng.integer(0, 3);
     return this.rng.random() * 100 < this.breakerChance ? c | BREAKER : c;
   }
 
@@ -74,6 +74,12 @@ class Dealer {
     this.fill();
     return this.queue[0];
   }
+
+  /** Freeplay mode: the next pair is chosen. */
+  replace(pair: [number, number]): void {
+    this.fill();
+    this.queue[0] = pair;
+  }
 }
 
 export interface MatchEvents {
@@ -88,8 +94,8 @@ const TRUNK = 17;
 export type Kind = 'You' | 'Cultist' | 'Homunculus' | 'Thrall' | 'Skilled swabbie' | 'Custom';
 
 /** A name from the game's lists for a kind of pirate. */
-function nameFor(kind: Kind, female: boolean, rng: PyRandom): string {
-  const pick = (list: readonly string[]) => list[rng.randintN(0, list.length - 1)];
+function nameFor(kind: Kind, female: boolean, rng: Random): string {
+  const pick = (list: readonly string[]) => list[rng.integer(0, list.length - 1)];
   switch (kind) {
     case 'Cultist': return `${pick(CULTIST_PREFIXES)} Cultist`;
     case 'Homunculus': return `${pick(HOMUNCULUS_PREFIXES)} Homunculus`;
@@ -126,16 +132,19 @@ export class Match {
   endedAt = 0;
   /** When the boards had finished moving after the fight ended. */
   settledAt = 0;
-  private readonly strikeIds: PyRandom;
-  private readonly picks: PyRandom;
+  private readonly strikeIds: Random;
+  private readonly picks: Random;
   private readonly shaftIds: number[] = [];
   private readonly knockedOut = new Set<number>();
+  private readonly dealers: Dealer[] = [];
+  /** Freeplay mode: practice on your own that a knock-out doesn't end. */
+  endless = false;
 
   constructor(readonly settings: MatchSettings, readonly seed: number, readonly startedAt: number, private readonly events: MatchEvents = {}) {
-    this.strikeIds = new PyRandom(seed ^ 0x5f3759df);
-    this.picks = new PyRandom(seed ^ 0x1b873593);
-    const colours = new PyRandom(seed ^ 0x2c1b3c6d);
-    const people = new PyRandom(seed ^ 0x68e31da4);
+    this.strikeIds = new Random(seed ^ 0x5f3759df);
+    this.picks = new Random(seed ^ 0x1b873593);
+    const colours = new Random(seed ^ 0x2c1b3c6d);
+    const people = new Random(seed ^ 0x68e31da4);
     // You, then your allies, then the enemies.
     const roster = settings.enemyRoster && settings.allyRoster ? [...settings.allyRoster, ...settings.enemyRoster] : null;
     const kinds: Kind[] = roster ? roster.map((npc) => npc.kind) : [
@@ -147,12 +156,13 @@ export class Match {
     };
     for (let i = 0; i <= kinds.length; i++) {
       const dealer = new Dealer(seed, settings.breakers);
+      this.dealers.push(dealer);
       const kind: Kind = i === 0 ? 'You' : kinds[i - 1];
       let sword: [number, number, number] = settings.sword;
       if (i > 0) {
-        const type = roster ? roster[i - 1].sword ?? PLAIN_SWORDS[colours.randintN(0, PLAIN_SWORDS.length - 1)]
-          : kind === 'Cultist' ? SPEAR : kind === 'Homunculus' ? TRUNK : PLAIN_SWORDS[colours.randintN(0, PLAIN_SWORDS.length - 1)];
-        sword = [type, colours.randintN(0, 7), colours.randintN(0, 7)];
+        const type = roster ? roster[i - 1].sword ?? PLAIN_SWORDS[colours.integer(0, PLAIN_SWORDS.length - 1)]
+          : kind === 'Cultist' ? SPEAR : kind === 'Homunculus' ? TRUNK : PLAIN_SWORDS[colours.integer(0, PLAIN_SWORDS.length - 1)];
+        sword = [type, colours.integer(0, 7), colours.integer(0, 7)];
       }
       this.swords.push(new Sword(...sword));
       // Homunculi are all alike; the others are men or women, named from the game's lists, no two the same.
@@ -186,7 +196,7 @@ export class Match {
   }
 
   private ai(i: number, skill: number, hooks: FighterHooks, seed: number, startedAt: number): Npc | GameNpc {
-    const rng = new PyRandom(seed + i * 7919);
+    const rng = new Random(seed + i * 7919);
     const npcHooks = { nextPair: hooks.nextPair, attack: hooks.attack! };
     const style = styleFor(this.settings, skill);
     if (this.settings.opponentType === 'tally') return new Npc(i, style.tally, rng, npcHooks, startedAt);
@@ -222,7 +232,7 @@ export class Match {
   private retarget(index: number): void {
     if (index === 0) return;
     const enemies = this.enemiesOf(index);
-    this.targets[index] = enemies.length ? enemies[this.picks.randintN(0, enemies.length - 1)] : -1;
+    this.targets[index] = enemies.length ? enemies[this.picks.integer(0, enemies.length - 1)] : -1;
   }
 
   /** Steps your target through the enemies still in (target_next_player / target_prev_player). */
@@ -244,7 +254,7 @@ export class Match {
     if (!target || target.out || this.teams[to] === this.teams[from]) return;
     this.shaftIds[from] = (this.shaftIds[from] + 1) & 0xff;
     const strikes: Strike[] = attack.swords.map(([width, height]) => ({
-      id: this.strikeIds.randintN(0, 255), width, height, x: 0, y: 0, orient: 0, pieces: [],
+      id: this.strikeIds.integer(0, 255), width, height, x: 0, y: 0, orient: 0, pieces: [],
     }));
     const shaft: Shaft = { from, id: this.shaftIds[from], strikes, sprinkles: attack.sprinkles };
     target.receive(shaft);
@@ -286,12 +296,24 @@ export class Match {
       }
     }
     if (this.settings.opponents === 0) {
-      if (this.player.out) this.finish('lost', now);
+      if (this.player.out && !this.endless) this.finish('lost', now);
       return;
     }
     // A side loses when everyone on it is out; with allies, you can be out and still win.
     if (!this.alive().length) this.finish('won', now);
     else if (!this.enemiesOf(this.alive()[0]).length) this.finish('lost', now);
+  }
+
+  /** Freeplay mode: your next pair is these pieces. */
+  setNext(pair: [number, number]): void {
+    this.dealers[0].replace(pair);
+    this.player.next = pair;
+  }
+
+  /** Freeplay mode: your board was changed by hand, so a knock-out can be announced again. */
+  edited(now: number): void {
+    this.knockedOut.delete(0);
+    this.player.edited(now);
   }
 
   private finish(result: 'won' | 'lost', now: number): void {

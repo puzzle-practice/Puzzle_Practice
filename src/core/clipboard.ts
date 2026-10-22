@@ -1,4 +1,4 @@
-// pyperclip.copy / pyperclip.paste for the browser. Reading the clipboard is asynchronous and
+// Browser clipboard helpers. Reading the clipboard is asynchronous and
 // may be refused, so both fall back to a prompt the player can copy from or paste into.
 
 export function copyText(value: string, label = 'Copy this:'): void {

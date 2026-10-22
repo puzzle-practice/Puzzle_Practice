@@ -1,4 +1,4 @@
-// Sound playback on the Web Audio API, standing in for pygame.mixer.
+// Sound playback using the Web Audio API.
 // Browsers only allow audio after a user gesture, so the context is created on the
 // first click or key press (see unlockAudio) and sounds decode lazily after that.
 // Ship sounds as MP3: Safari can't decode Ogg Vorbis everywhere.
@@ -43,6 +43,9 @@ export class SoundBank<Name extends string = string> {
   private gain: GainNode | null = null;
   private volume = globalVolume / 100;
   private disposed = false;
+  /** Loops waiting for their sound to load. */
+  private readonly pendingLoops = new Set<() => void>();
+  private readonly loops = new Set<AudioBufferSourceNode>();
 
   constructor(glob: UrlGlob, private readonly isMuted: () => boolean = () => false) {
     banks.add(this);
@@ -56,20 +59,53 @@ export class SoundBank<Name extends string = string> {
         fetch(url)
           .then((response) => response.arrayBuffer())
           .then((data) => ctx.decodeAudioData(data))
-          .then((buffer) => this.buffers.set(name, buffer))
+          .then((buffer) => {
+            this.buffers.set(name, buffer);
+            for (const begin of [...this.pendingLoops]) { this.pendingLoops.delete(begin); begin(); }
+          })
           .catch(() => {});
       }
     });
   }
 
-  play(name: Name): void {
+  play(name: Name, volume = 1): void {
     if (this.isMuted()) return;
     const buffer = this.buffers.get(name);
     if (!context || !this.gain || !buffer || this.disposed) return;
     const source = context.createBufferSource();
     source.buffer = buffer;
-    source.connect(this.gain);
+    if (volume === 1) source.connect(this.gain);
+    else {
+      const gain = context.createGain();
+      gain.gain.value = Math.max(0, Math.min(1, volume));
+      source.connect(gain); gain.connect(this.gain);
+      source.onended = () => gain.disconnect();
+    }
     source.start();
+  }
+
+  /** Plays `name` over and over, from when it has loaded, until the returned function is called. */
+  loop(name: Name): () => void {
+    let source: AudioBufferSourceNode | null = null;
+    let stopped = false;
+    const begin = (): void => {
+      if (stopped || this.disposed) return;
+      const buffer = this.buffers.get(name);
+      if (!context || !this.gain || !buffer) { this.pendingLoops.add(begin); return; }
+      source = context.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      source.connect(this.gain);
+      source.start();
+      this.loops.add(source);
+    };
+    begin();
+    return () => {
+      stopped = true;
+      this.pendingLoops.delete(begin);
+      if (source) { this.loops.delete(source); try { source.stop(); } catch { /* already stopped */ } }
+      source = null;
+    };
   }
 
   /** 0–1, like Sound.set_volume. */
@@ -81,6 +117,9 @@ export class SoundBank<Name extends string = string> {
   dispose(): void {
     banks.delete(this);
     this.disposed = true;
+    this.pendingLoops.clear();
+    for (const source of this.loops) { try { source.stop(); } catch { /* already stopped */ } }
+    this.loops.clear();
     this.gain?.disconnect();
   }
 }

@@ -1,5 +1,5 @@
 import { HaulBoard, H, W, EMERALD, isChestOrigin } from './logic';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import type { Drill } from './training';
 
 type Move = [number, number];
@@ -29,7 +29,7 @@ export function createVariedEdgeDrill(random: () => number): Drill {
       const [gx, gy] = choices[Math.floor(random() * choices.length)];
       board.set(gx, gy, EMERALD);
     }
-    const refillRng = new PyRandom(Math.floor(random() * 0x100000000));
+    const refillRng = new Random(Math.floor(random() * 0x100000000));
     const refills: number[] = [];
     const draw = (index: number) => {
       while (refills.length <= index) refills.push(refillRng.random());

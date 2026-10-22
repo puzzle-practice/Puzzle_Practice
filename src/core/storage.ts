@@ -229,6 +229,10 @@ function writeItem(key: string, json: string): boolean {
 
 export class Store {
   private readOnly = false;
+  private countScores = true;
+  /** Chosen seeds are practice runs; this is fixed when a session starts. */
+  setScoresEnabled(enabled: boolean): void { this.countScores = enabled; }
+  get scoresEnabled(): boolean { return this.countScores; }
   /** Replay simulations can read scores/settings but must never persist or mutate histories. */
   setReadOnly(readOnly: boolean): void { this.readOnly = readOnly; }
   /** Histories read so far, so panels can show them every frame without re-reading storage. */
@@ -309,7 +313,7 @@ export class Store {
    * settings key's history. Returns the history.
    */
   addHistory(key: string, game: { score: number; [stat: string]: number | string }): readonly GameRecord[] {
-    if (this.readOnly) return this.history(key);
+    if (this.readOnly || !this.countScores) return this.history(key);
     const record = { at: Date.now(), ...game, session: browserSession() } as GameRecord;
     const session = this.sessionHistory(key) as GameRecord[];
     session.push(record);

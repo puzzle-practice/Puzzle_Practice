@@ -1,9 +1,7 @@
-// Board making for the practice modes (Standard, Seeded, Create and Practice), kept from the
-// Distilling Simulator (Distilling_Sim.pyw) function for function so its seeds and practice boards
-// still give the same boards. Names and data shapes mirror the Python. The game itself runs on the
-// game's rules in logic.ts; toColumns and fromColumns convert between the two piece numberings.
-import { PyRandom } from '../../core/pyrandom';
-import { contains, deepcopy, eq, range } from '../../core/py';
+// Board construction for Standard, Seeded, Freeplay and Practice. Board/piece-sequence seed
+// formats remain readable; new random draws use the native session generator. The game
+// rules live in logic.ts; toColumns and fromColumns convert between the piece numberings.
+import { Random } from '../../core/random';
 import { BURNT, HEAVY, HEIGHT, LIGHT, MEDIUM, SPICE } from './logic';
 import { practiceSettings, setSeeds } from './practice';
 
@@ -16,96 +14,91 @@ import { practiceSettings, setSeeds } from './practice';
 4 = white
 */
 export type Board = number[][];
-export type Point = number[];
 /** [piece sequence, rng decider] */
 export type Seed = [string, string];
 
-/** The module-level `random` the Python code shares between board making and sound picks. */
-export const random = new PyRandom();
+/** The session generator for board construction and refill columns. */
+export const random = new Random();
 
 export const pieces = [0, 1, 2, 3, 4];
 
 export function emptyBoard(): Board {
-  return range(10).map(() => range(9).map(() => 0));
+  return Array.from({ length: 10 }, () => Array<number>(9).fill(0));
 }
 
-export function board_length(board: Board): number {
+export function boardLength(board: Board): number {
   return board[0][8] === -1 ? 9 : 8;
 }
 
 /** Generates a column from a given set of pieces (K's distilling counter seed) */
-export function generate_seeded_column(
-  spawn_rates: number[],
+export function generateSeededColumn(
+  spawnRates: number[],
   difficulty: number,
   seed: Seed,
-  old_column_height: number,
+  oldColumnHeight: number,
 ): [number[], Seed] {
-  if (seed[0].length >= old_column_height) {
-    const new_column: number[] = [];
-    for (const x of range(old_column_height)) {
-      new_column.push(parseInt(seed[0][0], 10));
+  if (seed[0].length >= oldColumnHeight) {
+    const newColumn: number[] = [];
+    for (let x = 0; x < oldColumnHeight; x++) {
+      newColumn.push(parseInt(seed[0][0], 10));
       seed[0] = seed[0].slice(1);
-      if (new_column[x] === 2) new_column[x] = 4;
+      if (newColumn[x] === 2) newColumn[x] = 4;
     }
-    if (old_column_height === 8) new_column.push(-1);
-    return [new_column, seed];
+    if (oldColumnHeight === 8) newColumn.push(-1);
+    return [newColumn, seed];
   }
-  return generate_column(spawn_rates, difficulty, seed);
+  return generateColumn(spawnRates, difficulty, seed);
 }
 
-export function generate_column(spawn_rates: number[], difficulty: number, seed: Seed): [number[], Seed] {
-  const new_column: number[] = [];
-  const current_spawn_rates = [...spawn_rates];
-  const difficulty_adj = difficulty / 100;
-  const chance_low_black = 2 * spawn_rates[0] * difficulty_adj;
-  const chance_high_black = 2 * spawn_rates[0] - chance_low_black;
-  const chance_high_brown = 2 * spawn_rates[1] * difficulty_adj;
-  const chance_low_brown = 2 * spawn_rates[1] - chance_high_brown;
-  for (const a of range(9)) {
+export function generateColumn(spawnRates: number[], difficulty: number, seed: Seed): [number[], Seed] {
+  const newColumn: number[] = [];
+  const currentSpawnRates = [...spawnRates];
+  const difficultyAdj = difficulty / 100;
+  const chanceLowBlack = 2 * spawnRates[0] * difficultyAdj;
+  const chanceHighBlack = 2 * spawnRates[0] - chanceLowBlack;
+  const chanceHighBrown = 2 * spawnRates[1] * difficultyAdj;
+  const chanceLowBrown = 2 * spawnRates[1] - chanceHighBrown;
+  for (let a = 0; a < 9; a++) {
     if (a < 4) {
-      current_spawn_rates[0] = chance_high_black;
-      current_spawn_rates[1] = chance_high_brown;
+      currentSpawnRates[0] = chanceHighBlack;
+      currentSpawnRates[1] = chanceHighBrown;
     } else if (a === 4) {
-      current_spawn_rates[0] = spawn_rates[0];
-      current_spawn_rates[1] = spawn_rates[1];
+      currentSpawnRates[0] = spawnRates[0];
+      currentSpawnRates[1] = spawnRates[1];
     } else {
-      current_spawn_rates[0] = chance_low_black;
-      current_spawn_rates[1] = chance_low_brown;
+      currentSpawnRates[0] = chanceLowBlack;
+      currentSpawnRates[1] = chanceLowBrown;
     }
-    new_column.push(random.choiceWeighted(pieces, current_spawn_rates));
+    newColumn.push(random.choiceWeighted(pieces, currentSpawnRates));
   }
-  return [new_column, seed];
+  return [newColumn, seed];
 }
 
-/**
- * The Python version fills a module-level `board`, so the board persists between
- * games; callers pass it in here.
- */
-export function generate_board(
+/** Fill the supplied board with a fresh deal. */
+export function generateBoard(
   board: Board,
-  spawn_rates: number[],
-  furnace_height: number,
+  spawnRates: number[],
+  furnaceHeight: number,
   difficulty: number,
   seed: Seed,
 ): [Board, Seed] {
-  for (const a of range(board.length - 1)) {
-    const [output, nextSeed] = generate_column(spawn_rates, difficulty, seed);
+  for (let a = 0; a < board.length - 1; a++) {
+    const [output, nextSeed] = generateColumn(spawnRates, difficulty, seed);
     seed = nextSeed;
-    board[a] = deepcopy(output);
+    board[a] = [...output];
   }
-  for (const c of range(furnace_height)) board[9][c] = 0;
-  for (const d of range((furnace_height + 1) % 2, 10, 2)) board[d][8] = -1;
+  for (let c = 0; c < furnaceHeight; c++) board[9][c] = 0;
+  for (let d = (furnaceHeight + 1) % 2; d < 10; d += 2) board[d][8] = -1;
 
   return [board, seed];
 }
 
 /** Takes an input seed which can be in various forms and transforms it into the form [piece sequence, rng decider] */
-export function convert_seed(input: string): Seed {
+export function convertSeed(input: string): Seed {
   let seed: Seed;
   if (input.includes('7')) {
     if (input[0] === '7') return ['', input.slice(1)]; // We have no board, just an rng decider
-    // We have both a board and an rng decider. (The Python version discards the
-    // result of split() here and then crashes; splitting is what it intended.)
+    // Split the explicit board from its refill sequence seed.
     const split = input.indexOf('7');
     seed = [input.slice(0, split), input.slice(split + 1)];
   } else {
@@ -124,13 +117,13 @@ export function convert_seed(input: string): Seed {
   return seed;
 }
 
-export function import_board(seed: Seed): [Board, Seed] {
-  const board: Board = range(10).map(() => range(9).map(() => -1));
-  const column_lengths = seed[0][0] === '9' ? [8, 9, 8, 9, 8, 9, 8, 9, 8, 9] : [9, 8, 9, 8, 9, 8, 9, 8, 9, 8];
+export function importBoard(seed: Seed): [Board, Seed] {
+  const board: Board = Array.from({ length: 10 }, () => Array<number>(9).fill(-1));
+  const columnLengths = seed[0][0] === '9' ? [8, 9, 8, 9, 8, 9, 8, 9, 8, 9] : [9, 8, 9, 8, 9, 8, 9, 8, 9, 8];
   if (seed[0][0] === '9' || seed[0][0] === '8') seed[0] = seed[0].slice(1); // The first char just tells us the length of the furnace column, can be ditched now
-  for (const x of range(10)) {
-    for (const y of range(column_lengths[x])) {
-      // A seed that runs out early crashes the Python version; here the gap fills with whites.
+  for (let x = 0; x < 10; x++) {
+    for (let y = 0; y < columnLengths[x]; y++) {
+      // Fill missing pieces with whites when an explicit board runs out.
       board[x][y] = seed[0].length > 0 ? parseInt(seed[0][0], 10) : 4;
       seed[0] = seed[0].slice(1);
     }
@@ -138,11 +131,11 @@ export function import_board(seed: Seed): [Board, Seed] {
   return [board, seed];
 }
 
-/** The board in create-mode seed format (the Python version copies this to the clipboard). */
-export function get_create_seed(board: Board): string {
-  let seed = String(board_length(board));
-  for (const x of range(10)) {
-    for (const y of range(9)) {
+/** The board in create-mode seed format. */
+export function getCreateSeed(board: Board): string {
+  let seed = String(boardLength(board));
+  for (let x = 0; x < 10; x++) {
+    for (let y = 0; y < 9; y++) {
       if (board[x][y] !== -1) seed += String(board[x][y]);
     }
   }
@@ -150,82 +143,82 @@ export function get_create_seed(board: Board): string {
 }
 
 /** "7" followed by a random 20 digit number. */
-export function generate_seed(): string {
-  return '7' + random.randint(10n ** 19n, 10n ** 20n - 1n).toString();
+export function generateSeed(): string {
+  return '7' + random.bigInteger(10n ** 19n, 10n ** 20n - 1n).toString();
 }
 
-export function next_random_seed(random_seed: string): string {
-  return '7' + (BigInt(random_seed.slice(1)) + 1n).toString();
+export function nextRandomSeed(randomSeed: string): string {
+  return '7' + (BigInt(randomSeed.slice(1)) + 1n).toString();
 }
 
-export function get_practice_settings(practice_num: number[]): [number[], number, number] {
-  const key = practice_num.join(',');
+export function getPracticeSettings(practiceNum: number[]): [number[], number, number] {
+  const key = practiceNum.join(',');
   const preset = practiceSettings[key];
   if (preset) {
-    const [furnace_interval, difficulty, spawn_rates] = preset;
-    return [[...spawn_rates], furnace_interval, difficulty];
+    const [furnaceInterval, difficulty, spawnRates] = preset;
+    return [[...spawnRates], furnaceInterval, difficulty];
   }
   return [[10, 10, 0, 1, 10], 15000000, 50];
 }
 
-function alternate_8_and_9(number: number): number {
+function alternate8And9(number: number): number {
   return number === 8 ? 9 : 8;
 }
 
-export function create_junk_board(junk: number, spawn_rates: number[], furnace_height: number, seed: Seed): [Board, Seed] {
-  let junk_left = junk;
-  const board: Board = range(10).map(() => range(9).map(() => 4)); // All white starting board
+export function createJunkBoard(junk: number, spawnRates: number[], furnaceHeight: number, seed: Seed): [Board, Seed] {
+  let junkLeft = junk;
+  const board: Board = Array.from({ length: 10 }, () => Array<number>(9).fill(4)); // All white starting board
 
-  // if furnace_height 8 then odd columns have piece removed, if 9 then even columns
-  for (const a of range(9 - furnace_height, 10, 2)) board[a][8] = -1; // Remove extra pieces from short columns
+  // if furnaceHeight 8 then odd columns have piece removed, if 9 then even columns
+  for (let a = 9 - furnaceHeight; a < 10; a += 2) board[a][8] = -1; // Remove extra pieces from short columns
 
-  if (junk_left > 0) {
+  if (junkLeft > 0) {
     // I want atleast one good black and brown
     board[0][0] = 0;
-    junk_left -= 1;
+    junkLeft -= 1;
   }
-  if (junk_left > 0) {
-    board[0][alternate_8_and_9(furnace_height) - 1] = 1;
-    junk_left -= 1;
+  if (junkLeft > 0) {
+    board[0][alternate8And9(furnaceHeight) - 1] = 1;
+    junkLeft -= 1;
   }
 
-  let junk_height = furnace_height;
+  let junkHeight = furnaceHeight;
   let column = 9;
-  while (junk_left >= junk_height) {
+  while (junkLeft >= junkHeight) {
     // Full columns of black junk on the right
-    for (const row of range(junk_height)) board[column][row] = 0;
+    for (let row = 0; row < junkHeight; row++) board[column][row] = 0;
     column -= 1;
-    junk_left -= junk_height;
-    junk_height = alternate_8_and_9(junk_height);
+    junkLeft -= junkHeight;
+    junkHeight = alternate8And9(junkHeight);
   }
-  if (junk_left === 0 && column < 9) {
+  if (junkLeft === 0 && column < 9) {
     // If it added a full column and ran out of junk I want a bottom right brown.
-    board[column + 1][alternate_8_and_9(junk_height) - 1] = 1;
+    board[column + 1][alternate8And9(junkHeight) - 1] = 1;
   } else {
     // Else fill the column with black leaving one junk for bottom right
-    for (const row of range(junk_left - 1)) board[column][row] = 0;
-    board[column][junk_height - 1] = 1;
+    for (let row = 0; row < junkLeft - 1; row++) board[column][row] = 0;
+    board[column][junkHeight - 1] = 1;
   }
 
   // Replace some whites with spices
-  let total_odds = 0;
-  for (const a of spawn_rates) total_odds += a;
-  const whites_and_spice_odds = [spawn_rates[3], total_odds - spawn_rates[3]]; // Odds of spice, odds of white
-  for (const c of range(10)) {
-    for (const row of range(9)) {
-      if (board[c][row] === 4) board[c][row] = random.choiceWeighted([3, 4], whites_and_spice_odds);
+  let totalOdds = 0;
+  for (const a of spawnRates) totalOdds += a;
+  const whitesAndSpiceOdds = [spawnRates[3], totalOdds - spawnRates[3]]; // Odds of spice, odds of white
+  for (let c = 0; c < 10; c++) {
+    for (let row = 0; row < 9; row++) {
+      if (board[c][row] === 4) board[c][row] = random.choiceWeighted([3, 4], whitesAndSpiceOdds);
     }
   }
   return [board, seed];
 }
 
-function create_trap_board(junk: number, spawn_rates: number[], furnace_height: number, seed: Seed): [Board, Seed] {
-  const [board, nextSeed] = create_junk_board(junk - 9, spawn_rates, furnace_height, seed);
+function createTrapBoard(junk: number, spawnRates: number[], furnaceHeight: number, seed: Seed): [Board, Seed] {
+  const [board, nextSeed] = createJunkBoard(junk - 9, spawnRates, furnaceHeight, seed);
   seed = nextSeed;
-  const trap_at_top = random.choice([false, true]);
-  board[0] = generate_column([1, 1, 0, 0, 0], 50, seed)[0];
+  const trapAtTop = random.choice([false, true]);
+  board[0] = generateColumn([1, 1, 0, 0, 0], 50, seed)[0];
   board[0][8] = -1;
-  if (trap_at_top) {
+  if (trapAtTop) {
     board[0][0] = 3;
     board[1][0] = 0;
     board[2][0] = 3;
@@ -241,36 +234,36 @@ function create_trap_board(junk: number, spawn_rates: number[], furnace_height: 
   return [board, seed];
 }
 
-export function get_practice_board(
+export function getPracticeBoard(
   board: Board,
-  practice_num: number[],
-  spawn_rates: number[],
+  practiceNum: number[],
+  spawnRates: number[],
   difficulty: number,
   seed: Seed,
 ): [Board, Seed] {
-  const furnace_height = 8;
-  const requires_generate_board = [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 6], [2, 9], [3, 5], [3, 6], [4, 5], [5, 4]];
-  const requires_junk_board = [[7, 0], [7, 1], [8, 0], [8, 1], [9, 0], [9, 1], [9, 2]];
-  const junk_amounts = [36, 36, 19, 19, 19, 19, 19];
-  const spice_trapped_boards = [[9, 17], [9, 18], [9, 19], [9, 20], [9, 21]];
-  const spice_trapped_junks = [30, 27, 23, 18, 13];
+  const furnaceHeight = 8;
+  const requiresGenerateBoard = [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 6], [2, 9], [3, 5], [3, 6], [4, 5], [5, 4]];
+  const requiresJunkBoard = [[7, 0], [7, 1], [8, 0], [8, 1], [9, 0], [9, 1], [9, 2]];
+  const junkAmounts = [36, 36, 19, 19, 19, 19, 19];
+  const spiceTrappedBoards = [[9, 17], [9, 18], [9, 19], [9, 20], [9, 21]];
+  const spiceTrappedJunks = [30, 27, 23, 18, 13];
 
-  if (contains(requires_generate_board, practice_num)) return generate_board(board, spawn_rates, furnace_height, difficulty, seed);
-  if (contains(requires_junk_board, practice_num)) {
-    const junk = junk_amounts[requires_junk_board.findIndex((p) => eq(p, practice_num))];
-    return create_junk_board(junk, spawn_rates, furnace_height, seed);
+  if (requiresGenerateBoard.some(p => p[0] === practiceNum[0] && p[1] === practiceNum[1])) return generateBoard(board, spawnRates, furnaceHeight, difficulty, seed);
+  if (requiresJunkBoard.some(p => p[0] === practiceNum[0] && p[1] === practiceNum[1])) {
+    const junk = junkAmounts[requiresJunkBoard.findIndex((p) => p[0] === practiceNum[0] && p[1] === practiceNum[1])];
+    return createJunkBoard(junk, spawnRates, furnaceHeight, seed);
   }
-  const seeds = setSeeds[practice_num.join(',')];
+  const seeds = setSeeds[practiceNum.join(',')];
   if (seeds) {
     seed[0] = random.choice(seeds);
-    return import_board(seed);
+    return importBoard(seed);
   }
-  if (contains(spice_trapped_boards, practice_num)) {
-    const junk = spice_trapped_junks[spice_trapped_boards.findIndex((p) => eq(p, practice_num))];
-    return create_trap_board(junk, spawn_rates, 9, seed);
+  if (spiceTrappedBoards.some(p => p[0] === practiceNum[0] && p[1] === practiceNum[1])) {
+    const junk = spiceTrappedJunks[spiceTrappedBoards.findIndex((p) => p[0] === practiceNum[0] && p[1] === practiceNum[1])];
+    return createTrapBoard(junk, spawnRates, 9, seed);
   }
-  // Every practice level is covered above; the Python version would return None here.
-  return generate_board(board, spawn_rates, furnace_height, difficulty, seed);
+  // Use a standard deal for unrecognized practice levels.
+  return generateBoard(board, spawnRates, furnaceHeight, difficulty, seed);
 }
 
 /** Simulator piece numbers (0 black, 1 brown, 2 burnt, 3 spice, 4 white) to the game's (logic.ts). */

@@ -1,5 +1,6 @@
-// Vampire Carp: the Vampire Lair's carpentry, rebuilt from the Puzzle Pirates game (duty/carpentry
-// in vampirate mode, build 20260909165753). The rules are in board.ts and game.ts; this file is
+// Carpentry: the Vampire Lair's carpentry and a ship's, recreated from the Puzzle Pirates game
+// (duty/carpentry, build 20260909165753; ship carpentry and its maneuver tokens checked against
+// test build 20261017062155). The rules are in board.ts and game.ts; this file is
 // CarpentryPanel and CarpentryBoardView with their sprites: the game's art, the wood deck that
 // scrolls, holes with splintered ends that blink and grow, pieces cut from the wood textures and
 // outlined by state, the putty bucket and its blood, rattling and flying pieces, the floating
@@ -8,22 +9,24 @@
 //
 // On top of the game are the Vampire Carp simulator's modes and features: two-minute
 // sessions scored +2 / +1 / -1, Ghost (placed pieces hidden), Speed (small holes, see game.ts),
-// Unlimited, seeds, cheat pieces, pause, Dismiss, best scores, and the end-of-session stats.
+// Unlimited, seeds, cheat pieces, pause, Dismiss, best scores, and the end-of-session stats. Ship
+// carpentry sessions are two minutes too, scored by the holes' own points, at a chosen difficulty
+// and token pool; tokens on planks are drawn from the game's bonus.png quarters.
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
 import { TimerWarning } from '../../core/timer-warning';
-import { copyText } from '../../core/clipboard';
+import { copyText, pasteText } from '../../core/clipboard';
 import { keyMatches } from '../../core/controls';
-import { loadFont } from '../../core/fonts';
+import { drawGameText, floatAt, gameTextBox, loadGameFont, TEXT_YELLOW } from '../../core/game-text';
 import { dutyDesk } from '../../core/duty/desk';
-import type { RatingScale } from '../../core/duty/ratings';
+import { LEARNING, type RatingScale } from '../../core/duty/ratings';
 import { historyGroup } from '../../core/history';
 import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
 import type { InputEvent } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { GameRecord } from '../../core/storage';
-import { PyRandom } from '../../core/pyrandom';
-import { BoardRandom, type Cell, Piece, PIECE_LETTERS } from './board';
+import { Random } from '../../core/random';
+import { BONUS_SETS, BoardRandom, type Cell, Piece, PIECE_LETTERS, TOKEN_NAMES } from './board';
 import {
   CELL,
   Game,
@@ -33,6 +36,7 @@ import {
   type SoundName,
   type Stats,
   TEXT_MS,
+  TOKEN_MS,
   TOOLBOX_AT,
   VIEW_H,
   VIEW_W,
@@ -41,12 +45,11 @@ import {
 } from './game';
 import { PIECES_NO_PUTTY } from './shapes';
 import { piecesDrawn } from './report';
-import delarobbUrl from './delarobb.ttf?url';
+import { boardCode, boardIssues, clearHoles, FIXED_GRAIN, load as loadBoard, paintHole, pieceLetter, readBoardCode, setTool, toolFor } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 
-const FONT = 'Delarobb';
 
 /** The deck's planks: 108x54 tiles, every other row half a plank over (CarpentryBoardView.g). */
 const PLANK_W = 6 * CELL;
@@ -66,6 +69,14 @@ const LOOKS: Record<Look, { suffix: string; outlines: string[]; putty: string }>
   vampire: { suffix: '_vampirate', outlines: ['#7c6200', '#ebd7aa', '#c273ff', '#ff0000', '#8750b2', '#030303'], putty: 'rgb(92, 11, 20)' },
   normal: { suffix: '', outlines: ['#7c6200', '#ffff00', '#00afef', '#ff0000', '#005574', '#030303'], putty: 'rgb(198, 145, 104)' },
 };
+/** Token quarters in bonus.png: tile type << 2 | quarter, 18px each (CarpentryBoardView.m). */
+const TOKEN_TILE = CELL;
+const TOKENS = [
+  { value: 0, label: 'Off' },
+  { value: 1, label: 'Normal shapes' },
+  { value: 2, label: 'Normal shapes + blades' },
+];
+const DIFFICULTIES = Array.from({ length: 10 }, (_, value) => ({ value, label: `${value} · ${value + 1} ${value ? 'stars' : 'star'}` }));
 /** The star meter  at (5, 185) in the view: 9 stars of 21px, 19px apart. */
 const STAR = 21;
 const STAR_STEP = 19;
@@ -103,6 +114,12 @@ interface Config {
   /** Index into PIECES_NO_PUTTY, or 12 for any piece. */
   speedLetter: number;
   look: Look;
+  /** Ship carpentry instead of the Vampire Lair's, at a difficulty with a token pool (BONUS_SETS). */
+  ship: boolean;
+  difficulty: number;
+  tokens: number;
+  /** Freeplay mode: paint the holes and choose the toolbox, with no clock or PB. */
+  create: boolean;
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -115,10 +132,23 @@ const DEFAULT_CONFIG: Config = {
   unlimited: false,
   speedLetter: 3,
   look: 'vampire',
+  ship: false,
+  difficulty: 5,
+  tokens: 0,
+  create: false,
 };
+/** What a replay recorded before ship carpentry existed played as. */
+const LAIR_ONLY = { ship: false, difficulty: 5, tokens: 0 };
 
 /** Keys from the simulator's keybinds.yaml: flip, rotate anticlockwise, clockwise, toolbox 1-3, place. */
 const KEYS = { flip: 'space', ccw: 'x', cw: 'c', slots: ['1', '2', '3'], place: 'z' };
+/** Freeplay mode: keys held over a hole's box cut squares open or close them with wood. */
+const PAINT_KEYS = [{ id: 'cut', label: 'Cut hole squares (Freeplay)', defaultKey: 'q', open: true }, { id: 'wood', label: 'Fill squares with wood (Freeplay)', defaultKey: 'w', open: false }];
+/** The toolbox choices in Freeplay: each plank with its grain across or along as dealt, and the putty. */
+const TOOL_OPTIONS = Array.from({ length: 13 }, (_, kind) => kind).flatMap((kind) =>
+  kind === 12 ? [{ value: toolFor(kind, true), label: 'Putty' }]
+    : FIXED_GRAIN.has(kind) ? [{ value: toolFor(kind, true), label: pieceLetter(kind).toUpperCase() }]
+      : [{ value: toolFor(kind, true), label: `${pieceLetter(kind).toUpperCase()}, grain across` }, { value: toolFor(kind, false), label: `${pieceLetter(kind).toUpperCase()}, grain along` }]);
 
 interface SessionTable {
   sessions: number;
@@ -203,7 +233,7 @@ function holeOutline(black: HTMLCanvasElement): HTMLCanvasElement {
 const hexRgb = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
 
 export default (async ({ screen, input, panel, store, ticks, setReplayTime }) => {
-  const [images] = await Promise.all([Images.load(imageUrls), loadFont(FONT, delarobbUrl)]);
+  const [images] = await Promise.all([Images.load(imageUrls), loadGameFont()]);
   const img = (name: string) => images.get(name);
   const sounds = new SoundBank(soundUrls, () => replays?.isSeeking ?? false);
   const warning = new TimerWarning('vampirate', () => replays?.isSeeking ?? false);
@@ -218,7 +248,9 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   ) as Record<Look, HTMLCanvasElement[]>;
 
   const config: Config = { ...DEFAULT_CONFIG, ...store.get<Partial<Config>>('config', {}) };
-  const look = () => LOOKS[config.look] ?? LOOKS.vampire;
+  /** Ship carpentry always has the normal art; the Vampire Lair's look can be chosen. */
+  const lookName = (): Look => (config.ship ? 'normal' : LOOKS[config.look] ? config.look : 'vampire');
+  const look = () => LOOKS[lookName()];
   /** The art for the chosen look, e.g. art('toolbox') is toolbox_vampirate.png in the vampire look. */
   const art = (name: string) => img(`${name}${look().suffix}`);
   const saveConfig = () => store.set('config', config);
@@ -234,9 +266,9 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let timePassed = 0;
   let boardIndex = 0;
   let seeded = store.get<boolean>('seeded', false);
-  let seed = Math.floor(Math.random() * MAX_SEED);
+  let seed = store.get<number>('sessionSeed', Math.floor(Math.random() * MAX_SEED));
   let seedAtStart = seed;
-  let speedRng = new PyRandom();
+  let speedRng = new Random();
   let replays!: ReplayRecorder;
   let replayBoardSeeds: number[] | null = null;
   let replaySpeedState: unknown = null;
@@ -256,8 +288,12 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let meterShown = 0;
   let meterAt = 0;
   let lastMouse: Cell = [-1, -1];
-  const sessionTime = () => (config.unlimited ? SESSION_LONG : SESSION_SHORT);
-  const score = () => -stats.grades[0] + stats.grades[1] + stats.grades[2] * 2;
+  const sessionTime = () => (config.unlimited || config.create ? SESSION_LONG : SESSION_SHORT);
+  /** Freeplay mode: the palette choice a left click paints (recorded, so replays click the same way), the key held, and pasted-text errors. */
+  let paletteOpen: boolean | null = null, paintWith: boolean | null = null, painting = false, pasteNote = '';
+  const creating = () => boardActive && config.create && !!game;
+  const score = () => (config.ship ? stats.points : -stats.grades[0] + stats.grades[1] + stats.grades[2] * 2);
+  const tokenTotal = () => stats.tokens.reduce((a, b) => a + b, 0);
 
   function play(name: SoundName | ExtraSound): void {
     if (replays?.isSeeking) return;
@@ -266,10 +302,10 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
 
   /** The board for this point in the session: seeded sessions deal seed, seed + 1,... */
   function newBoard(): void {
-    const boardSeed = replayBoardSeeds?.[boardIndex] ?? (seeded ? seedAtStart + boardIndex : Math.floor(Math.random() * MAX_SEED));
+    const boardSeed = replayBoardSeeds?.[boardIndex] ?? ((seedAtStart + boardIndex) % (MAX_SEED + 1));
     recordedBoardSeeds.push(boardSeed);
     replays?.updateSeed({ seed: seedAtStart, speedRng: recordedSpeedState, boardSeeds: [...recordedBoardSeeds] });
-    const speed = config.speed ? { holes: config.speedHoles, size: config.speedSize, letter: config.speedLetter } : null;
+    const speed = config.speed && !config.ship && !config.create ? { holes: config.speedHoles, size: config.speedSize, letter: config.speedLetter } : null;
     game = new Game(
       boardSeed,
       new BoardRandom(BigInt(boardSeed) ^ 0x2545f491n),
@@ -284,6 +320,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       speed,
       speedRng,
       timePassed,
+      { ship: config.ship, difficulty: config.difficulty, tokens: config.tokens, independentStreams: true },
     );
     meterShown = 0;
     meterAt = timePassed;
@@ -292,11 +329,14 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   function startSession(): void {
     stats = newStats();
     duty.clear();
-    cheatsUsed = seeded || config.unlimited;
+    if (!replays.isPlaying) store.setScoresEnabled(!seeded && !config.create);
+    // Freeplay is a sandbox: no PB and no history.
+    cheatsUsed = seeded || config.unlimited || config.create;
+    paletteOpen = paintWith = null; painting = false; pasteNote = '';
     sightUsed = false;
     if (!seeded) seed = Math.floor(Math.random() * MAX_SEED);
     seedAtStart = seed;
-    speedRng = seeded ? new PyRandom(seed) : new PyRandom();
+    speedRng = new Random(seed);
     if (replaySpeedState) {
       if (!speedRng.restore(replaySpeedState)) throw new Error('Invalid Vampire Carp random state');
       replaySpeedState = null;
@@ -317,11 +357,19 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   }
 
   function scoresKey(): string {
+    if (config.ship) return `ship${config.ghost ? 'a' : 'b'}d${config.difficulty}t${config.tokens}`;
     return (config.ghost ? 'a' : 'b') + (config.speed ? 'a' : 'b') + (config.speed ? `${config.speedHoles}${config.speedSize}${config.speedLetter}` : '000');
   }
 
-  /** The session's duty report: coffins boarded up by grade, rated by the score. */
+  /** The session's duty report: coffins boarded up by grade, rated by the score. Ship carpentry isn't rated yet. */
   function endReport() {
+    if (config.ship) {
+      return duty.end({
+        mode: `Difficulty ${config.difficulty}${config.tokens ? `, ${TOKENS[config.tokens].label.toLowerCase()} tokens` : ''}`,
+        performance: LEARNING,
+        score: { label: 'Points', value: String(score()) },
+      });
+    }
     return duty.end({
       performance: duty.rate('boardUps', score()),
       score: { label: 'Score', value: String(score()) },
@@ -339,7 +387,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     const finishedReplay = replays.finish(`Score ${score()}`, report);
     if (!endProcedureComplete) {
       // As the simulator's scores.yaml: every counted session's score, and the PB, per settings.
-      if (!replays.isPlaying && !cheatsUsed && scoreCounting && !(config.ghost && sightUsed)) {
+      if (store.scoresEnabled && !replays.isPlaying && !cheatsUsed && scoreCounting && !(config.ghost && sightUsed)) {
         store.addHistory(bestScoresKey, { score: score(), ...duty.fields(report), ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? ''} : {}) });
         if (score() > bestScore) {
           bestScore = score();
@@ -351,7 +399,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       endProcedureComplete = true;
       endProcedureKey = bestScoresKey;
     }
-    if (!replays.isPlaying && score() > 0 && !sessionScoresComputed) {
+    if (!replays.isPlaying && score() > 0 && !sessionScoresComputed && !config.create) {
       recordSession();
       sessionScoresComputed = true;
     }
@@ -403,9 +451,27 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     });
     if (!game || !boardActive) return;
     const [mx, my] = input.mouse;
-    if ((mx !== lastMouse[0] || my !== lastMouse[1]) && inView(mx, my)) game.pointerMove(mx, my);
+    if ((mx !== lastMouse[0] || my !== lastMouse[1]) && inView(mx, my)) {
+      game.pointerMove(mx, my);
+      const open = paintWith ?? (painting ? paletteOpen : null);
+      if (creating() && open !== null) paintAt(mx, my, open);
+    }
     lastMouse = [mx, my];
     for (const event of events) {
+      if (creating()) {
+        const paintKey = event.type === 'keydown' || event.type === 'keyup' ? PAINT_KEYS.find((k) => keyMatches(event.key, 'vampire-carp', k.id, k.defaultKey)) : undefined;
+        if (paintKey) {
+          if (event.type === 'keyup') { if (paintWith === paintKey.open) paintWith = null; }
+          else { paintWith = paintKey.open; paintAt(mx, my, paintKey.open); }
+          continue;
+        }
+        if (event.type === 'mousedown' && event.button === 1 && paletteOpen !== null && Game.boxAt(event.pos[0], event.pos[1])) {
+          painting = true;
+          paintAt(event.pos[0], event.pos[1], paletteOpen);
+          continue;
+        }
+        if (event.type === 'mouseup' && event.button === 1 && painting) { painting = false; continue; }
+      }
       if (event.type === 'mousedown') {
         if (inView(event.pos[0], event.pos[1])) {
           // Several clicks can arrive in one frame; each acts where it happened.
@@ -426,6 +492,27 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       }
     }
   }
+
+  /** Freeplay mode: cuts open or closes the square of a hole's box under the pointer. */
+  function paintAt(px: number, py: number, open: boolean): void {
+    const box = Game.boxAt(px, py);
+    if (box && game?.edit(() => paintHole(game!.board, box.index, box.at, open) !== null)) play('piece_place_overlap');
+  }
+
+  /** Freeplay mode: a recorded change, applied now and again at the same moment in a replay. */
+  function createCommand(command: string): void {
+    if (!creating()) return;
+    const [name, value = ''] = command.split(':', 2) as [string, string?];
+    if (name === 'palette') paletteOpen = value === 'cut' ? true : value === 'wood' ? false : null;
+    else if (name === 'tool') { const [slot, tool] = value.split(',').map(Number); game!.edit(() => setTool(game!.board, slot, tool)); }
+    else if (name === 'clear') game!.edit(() => { clearHoles(game!.board); return true; });
+    else if (name === 'load') { const read = readBoardCode(command.slice(5)); if (read) game!.edit(() => { loadBoard(game!.board, read); return true; }); }
+  }
+  const record = (command: string) => {
+    if (!creating() || replays.isPlaying) return;
+    replays.command(command);
+    createCommand(command);
+  };
 
   // ---- Drawing the board view ----
 
@@ -490,7 +577,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         return;
       }
       const at: Cell = sprite.held ? [x, y - PUTTY_SPOUT] : [x - PUTTY_W / 2, y - PUTTY_H / 2];
-      screen.blit(puttyImages[config.look][Math.min(3, sprite.state)], at[0], at[1], sprite.held ? { alpha: 204 } : {});
+      screen.blit(puttyImages[lookName()][Math.min(3, sprite.state)], at[0], at[1], sprite.held ? { alpha: 204 } : {});
       return;
     }
     const cells = piece.cells();
@@ -508,6 +595,12 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       const ty = sprite.look.crop[1] + (base[k][1] - minBy) * CELL;
       ctx.setTransform(t[0], t[1], t[2], t[3], Math.trunc(x) + cx * CELL + CELL / 2, Math.trunc(y) + cy * CELL + CELL / 2);
       ctx.drawImage(texture, tx, ty, CELL, CELL, -CELL / 2, -CELL / 2, CELL, CELL);
+    });
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Token quarters go over the wood, under the outline, faded with it when held (carpentry/r.f).
+    cells.forEach(([cx, cy], k) => {
+      const token = piece.token(k);
+      if (token) ctx.drawImage(img('bonus'), token * TOKEN_TILE, 0, TOKEN_TILE, TOKEN_TILE, Math.trunc(x) + cx * CELL, Math.trunc(y) + cy * CELL, CELL, CELL);
     });
     ctx.restore();
     outline(cells, x, y, look().outlines[sprite.state]);
@@ -549,21 +642,17 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     outline(sprite.piece.cells(), x, y, look().outlines[5]);
   }
 
-  function floatText(text: string, cx: number, cy: number, size: number, fill: string, stroke: string, alpha: number): void {
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.translate(cx, cy);
-    ctx.scale(1.1, 1);
-    ctx.font = `${size}px "${FONT}"`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 4;
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = stroke;
-    ctx.strokeText(text, 0, 0);
-    ctx.fillStyle = fill;
-    ctx.fillText(text, 0, 0);
-    ctx.restore();
+  /** A whole token, its four quarters around a centre (the game's own token animations are blank). */
+  function drawToken(type: number, cx: number, cy: number): void {
+    for (let q = 0; q < 4; q++) {
+      ctx.drawImage(img('bonus'), ((type << 2) | q) * TOKEN_TILE, 0, TOKEN_TILE, TOKEN_TILE, Math.trunc(cx) - CELL + (q & 1) * CELL, Math.trunc(cy) - CELL + (q >> 1) * CELL, CELL, CELL);
+    }
+  }
+
+  /** A label centred on (cx, cy), outlined (carpentry popups); returns its box. */
+  function floatText(text: string, cx: number, cy: number, px: number, fill: string, outline: string, alpha: number) {
+    const { h } = gameTextBox(ctx, text, { px });
+    return drawGameText(ctx, text, cx, cy - h / 2, { px, fill, outline, align: 'center', alpha });
   }
 
   function drawBoard(): void {
@@ -594,11 +683,20 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       drawPiece(f.sprite, sx(fx), sy(fy));
     }
     for (const t of g.texts) {
-      const age = timePassed - t.start;
-      const alpha = age < TEXT_MS / 2 ? 1 : Math.max(0, 1 - (age - TEXT_MS / 2) / (TEXT_MS / 2));
-      floatText(t.text, sx(t.at[0]), sy(t.at[1]) - (30 * age) / TEXT_MS, t.size, t.colour, '#000000', alpha);
+      const { dy, alpha } = floatAt(timePassed - t.start, TEXT_MS);
+      const main = floatText(t.text, sx(t.at[0]), sy(t.at[1]) + dy, t.size, t.colour, '#000000', alpha);
+      // The bonus number sits right of the rank, 6px up; the grain/homogenous lines stack under it, 24px yellow.
+      if (t.streak) drawGameText(ctx, `x${t.streak + 1}`, main.x + main.w, main.y - 6, { px: 24, alpha });
+      if (t.sub) drawGameText(ctx, t.sub, main.x + main.w / 2, main.y + main.h, { px: 24, fill: TEXT_YELLOW, align: 'center', alpha });
     }
-    if (g.levelText) floatText(LEVEL_TEXT, sx(g.levelText.at[0]), sy(g.levelText.at[1]), 36, 'rgb(255, 243, 32)', 'rgb(48, 98, 123)', 1);
+    for (const f of g.tokenFlyers) {
+      const [fx, fy] = g.tokenAt(f);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - (timePassed - f.start) / TOKEN_MS);
+      drawToken(f.type, sx(fx), sy(fy));
+      ctx.restore();
+    }
+    if (g.levelText) floatText(LEVEL_TEXT, sx(g.levelText.at[0]), sy(g.levelText.at[1]), 36, '#fff320', '#30627b', 1);
     ctx.restore();
   }
 
@@ -622,8 +720,6 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     }
   }
 
-  /** str(round(x, n)) in Python. */
-
   /** The simulator's end-of-session table. */
   const duty = dutyDesk(panel, store, 'vampire-carp', 'Carpentry', RATING_SCALES);
   panel.results(() => endProcedureComplete && !boardActive && endProcedureKey === bestScoresKey ? {
@@ -632,7 +728,14 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     rows: [
       ['Score', String(score())],
       ['Time', `${(timePassed / 1000).toFixed(1)}s`],
-      ['SS, CC, VP', stats.grades.join(', ')],
+      ...(config.ship
+        ? [
+            ['Points', String(stats.points)],
+            ['MP, CR, FJ, SW, PB', stats.ranks.join(', ')],
+            ['Best masterpiece streak', String(stats.bestStreak)],
+            ...(config.tokens ? [['Tokens', String(tokenTotal())]] : []),
+          ]
+        : [['SS, CC, VP', stats.grades.join(', ')]]),
       ['Holes filled', String(stats.holesFilled)],
       ['Score per hole', stats.holesFilled ? (score() / stats.holesFilled).toFixed(2) : '0'],
       ['Placed, replaced', `${stats.placed}, ${stats.replaced}`],
@@ -655,7 +758,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
           ['Average score, holes', `${totals.average_score.toFixed(2)}, ${totals.average_holes.toFixed(2)}`],
           ['Overall score per hole', totals.score_per_hole.toFixed(2)],
           ['Average pieces', totals.average_pieces.toFixed(1)],
-          ['Best score, most VP', `${totals.max_score}, ${totals.most_vp}`],
+          config.ship ? ['Best score', String(totals.max_score)] : ['Best score, most VP', `${totals.max_score}, ${totals.most_vp}`],
           ['Most holes, pieces', `${totals.most_holes}, ${totals.most_pieces}`],
         ];
       })() : []),
@@ -676,11 +779,13 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       change();
     });
 
-  type Mode = 'normal' | 'ghost' | 'speed';
-  const mode = (): Mode => (config.ghost ? 'ghost' : config.speed ? 'speed' : 'normal');
+  type Mode = 'normal' | 'ghost' | 'speed' | 'create';
+  const mode = (): Mode => (config.create ? 'create' : config.ghost ? 'ghost' : config.speed && !config.ship ? 'speed' : 'normal');
   const setMode = (next: Mode) => {
     if (next === mode()) return;
     loadBestScore = true;
+    if (config.create !== (next === 'create')) boardActive = false;
+    config.create = next === 'create';
     // Ghost hides placed pieces, so a session that used it can't set a PB.
     if (config.ghost !== (next === 'ghost')) sightUsed = true;
     if (config.speed !== (next === 'speed')) boardActive = false;
@@ -690,7 +795,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   };
 
   panel.clock(() =>
-    config.unlimited
+    config.unlimited || config.create
       ? { label: 'Time', ms: timePassed }
       : { label: 'Time left', ms: sessionTime() - timePassed, countdown: true, warn: boardActive && sessionTime() - timePassed < 10000 },
   );
@@ -703,32 +808,38 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     { id: 'rotateRight', label: 'Rotate clockwise', defaultKey: 'C' },
     ...[1,2,3].map((n) => ({ id: `piece${n}`, label: `Select piece ${n}`, defaultKey: String(n) })),
     { id: 'place', label: 'Place piece', defaultKey: 'Z' },
+    ...PAINT_KEYS.map(({ id, label, defaultKey }) => ({ id, label, defaultKey })),
   ]);
   session.select(
-    'Mode',
+    'Carpentry',
     [
-      { value: 'normal', label: 'Normal' },
-      { value: 'ghost', label: 'Ghost' },
-      { value: 'speed', label: 'Speed' },
+      { value: 'lair', label: 'Vampire Lair' },
+      { value: 'ship', label: 'Ship' },
     ],
+    () => (config.ship ? 'ship' : 'lair'),
+    (v) =>
+      restartOption(() => {
+        config.ship = v === 'ship';
+        // Speed is the Vampire Lair's practice mode.
+        if (config.ship) config.speed = false;
+      })(),
+    { title: 'The Vampire Lair’s coffins, or a ship’s hull at a duty difficulty with maneuver tokens' },
+  );
+  const LAIR_MODES = [
+    { value: 'normal' as Mode, label: 'Normal' },
+    { value: 'ghost' as Mode, label: 'Ghost' },
+    { value: 'speed' as Mode, label: 'Speed' },
+    { value: 'create' as Mode, label: 'Freeplay' },
+  ];
+  const SHIP_MODES = LAIR_MODES.filter((m) => m.value !== 'speed');
+  session.select(
+    'Mode',
+    () => (config.ship ? SHIP_MODES : LAIR_MODES),
     mode,
     setMode,
-    { title: 'Ghost hides placed pieces; Speed deals small holes with the pieces to fill them' },
+    { title: 'Ghost hides placed pieces; Speed deals small holes with the pieces to fill them; Freeplay lets you paint the board' },
   );
   const actions = panel.group();
-  actions.note(() => {
-    const parts: string[] = [];
-    if (config.speed) {
-      const holes = `${config.speedHoles} hole${config.speedHoles > 1 ? 's' : ''}`;
-      const pieces = `${config.speedSize} piece${config.speedSize > 1 ? 's' : ''} each`;
-      const always = config.speedSize > 1 && config.speedLetter !== 12 ? `, always a ${PIECES_NO_PUTTY[config.speedLetter].toUpperCase()}` : '';
-      parts.push(`${holes} of ${pieces}${always}`);
-    }
-    if (seeded) parts.push('Seeded');
-    if (config.cheats) parts.push('Cheats');
-    if (!scoreCounting || config.unlimited || config.cheats) parts.push('No PB');
-    return parts.join(' · ');
-  });
 
   const pauseAvailable = () => timePassed > 0 && timePassed < sessionTime() && pauseTime > 0;
   function toggleSessionPause(): void {
@@ -767,7 +878,57 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       { disabled: () => !boardActive || !!replays?.isPlaying, title: 'Deal a new board without restarting the clock' },
     );
 
+  // Freeplay mode's board panel: the board's text, the paint palette and the toolbox.
+  const createOnly = () => !config.create;
+  const editing = () => !creating() || !game!.editable || replays.isPlaying;
+  const boardGroup = panel.group('Board', { hidden: createOnly });
+  boardGroup.button('Copy', () => { if (game) copyText(boardCode(game.board), 'Copy this board:'); }, { disabled: () => !game, title: 'Copy the holes and toolbox as text' });
+  boardGroup.button('Paste', () => void pasteText('Paste a board:').then((text) => {
+    if (text === null) return;
+    if (readBoardCode(text)) { pasteNote = ''; record(`load:${text.trim()}`); }
+    else pasteNote = 'That isn’t a carpentry board. Boards copied here start with C.';
+  }), { disabled: editing, title: 'Play a board from a pasted copy' });
+  boardGroup.button('Generate', () => {
+    if (!creating()) return;
+    replays.command('dismiss');
+    boardIndex++;
+    newBoard();
+    copyText(boardCode(game!.board), 'Copy this board:');
+  }, { disabled: editing, title: 'Deal a new board and copy it' });
+  const palette = document.createElement('div');
+  palette.className = 'piece-palette';
+  for (const [label, value, open] of [['Q · Cut', 'cut', true], ['W · Wood', 'wood', false]] as const) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'panel-button';
+    button.textContent = label;
+    button.addEventListener('click', () => { record(`palette:${paletteOpen === open ? '-' : value}`); panel.used(); });
+    panel.addSync(() => {
+      button.disabled = !creating() || replays.isPlaying;
+      button.setAttribute('aria-pressed', String(paletteOpen === open));
+    });
+    palette.append(button);
+  }
+  boardGroup.append(palette);
+  boardGroup.button('Clear holes', () => record('clear'), { disabled: editing, title: 'Fill every hole with wood' });
+  for (let slot = 0; slot < 3; slot++) {
+    boardGroup.select(`Toolbox ${slot + 1}`, TOOL_OPTIONS, () => game?.board.toolbox[slot] ?? TOOL_OPTIONS[0].value, (tool) => record(`tool:${slot},${tool}`), { disabled: editing });
+  }
+  boardGroup.note(() => pasteNote || 'Hold Q over a hole’s box to cut squares open, or W to fill them with wood, or select Cut or Wood and drag. Select it again to deselect and place planks. Put down the plank in hand first. A painted hole counts as freshly dealt: its size is its squares ÷ 5, planks already in it become wood. Toolbox planks are set without tokens. Freeplay has no clock and keeps no PB or history.');
+  boardGroup.note(() => {
+    const issues = game ? boardIssues(game.board, config.ship) : [];
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+  }, { hidden: () => !creating() });
+
   const settings = panel.settings.group('Game');
+  settings.select('Difficulty', DIFFICULTIES, () => config.difficulty, (n) => restartOption(() => (config.difficulty = n))(), {
+    hidden: () => !config.ship,
+    title: 'The duty’s difficulty: hole sizes, and holes for a full star meter',
+  });
+  settings.select('Tokens', TOKENS, () => config.tokens, (n) => restartOption(() => (config.tokens = n))(), {
+    hidden: () => !config.ship,
+    title: 'Maneuver tokens on every plank, from the game’s normal pool or the one with blades',
+  });
   const speedHidden = () => !config.speed;
   settings.select(
     'Holes',
@@ -805,16 +966,6 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     { title: 'No time limit (no PB)' },
   );
   settings.toggle(
-    'Seeded',
-    () => seeded,
-    (on) => {
-      boardActive = false;
-      seeded = on;
-      store.set('seeded', on);
-    },
-    { title: 'Start sessions from the seed below' },
-  );
-  settings.toggle(
     'Score counts',
     () => scoreCounting,
     (on) => {
@@ -836,8 +987,16 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   );
 
   panel.score().stats(['', 'Now', 'PB'], () => [
-    ['Score', String(score()), String(bestScore)],
+    [config.ship ? 'Points' : 'Score', String(score()), String(bestScore)],
   ]);
+
+  // Tokens handed over this session, by type, as Bilging shows them.
+  const tokenStats = panel.group('Maneuver practice', { hidden: () => !config.ship || !config.tokens });
+  tokenStats.stats(['Shape', 'Handed over'], () => (BONUS_SETS[config.tokens] ?? []).map((type) => [TOKEN_NAMES[type], String(stats.tokens[type])]));
+  tokenStats.hint(
+    () =>
+      'Every plank carries a quarter or more of a token. A finished hole hands over one whole token from its cells, two for a masterpiece, none if it took more than two planks over its size. A ship maneuver also needs the other duty stations.',
+  );
 
   const replayAction = {
     available: (game: GameRecord) => typeof game.replayAt === 'number' && (replays?.hasPlayableAt(game.replayAt, typeof game.replayId === 'string' ? game.replayId : undefined) ?? false),
@@ -846,7 +1005,9 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   historyGroup(panel, () => store.history(scoresKey()), [{ label: 'Score', value: (g) => String(g.score) }], 'Past games', replayAction);
 
   // Seeded: the board's own seed, so it deals what the game would.
-  const seedGroup = panel.group('Seed', { hidden: () => !seeded });
+  const seedGroup = panel.seedSettings.group('Seed');
+  seedGroup.toggle('Fixed seed', () => seeded, on => { seeded = on; store.set('seeded', on); if (on) store.set('sessionSeed', seed); },
+    { disabled: () => boardActive || pauseAvailable() || !!replays?.isPlaying, title: 'On: repeat this seed without setting PBs. Off: a fresh seed for every run.' });
   seedGroup.text(
     'Seed',
     () => String(seed),
@@ -854,15 +1015,16 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       boardActive = false;
       play('audio_options_change');
       text = text.trim();
-      if (/^\d{1,15}$/.test(text) && Number(text) <= MAX_SEED) seed = Number(text);
+      if (/^\d{1,15}$/.test(text) && Number(text) <= MAX_SEED) {
+        seed = Number(text); seeded = true; store.set('seeded', true); store.set('sessionSeed', seed);
+      }
     },
-    { placeholder: 'up to 15 digits', inputMode: 'numeric' },
+    { placeholder: 'up to 15 digits', inputMode: 'numeric', disabled: () => boardActive || pauseAvailable() || !!replays?.isPlaying },
   );
   seedGroup
     .button(
       'Copy',
       () => {
-        boardActive = false;
         copyText(String(seed), 'Copy this seed:');
         play('audio_options_change');
       },
@@ -872,15 +1034,16 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       'New',
       () => {
         boardActive = false;
-        seed = Math.floor(Math.random() * MAX_SEED);
+        seed = Math.floor(Math.random() * MAX_SEED); seeded = true;
+        store.set('seeded', true); store.set('sessionSeed', seed);
         copyText(String(seed), 'Copy this seed:');
         play('audio_options_change');
       },
-      { title: 'Make a new seed and copy it' },
+      { disabled: () => boardActive || pauseAvailable() || !!replays?.isPlaying, title: 'Make a new fixed seed and copy it' },
     );
 
   // Cheats: click a piece to hold it.
-  const cheats = panel.group('Cheat pieces', { hidden: () => !config.cheats });
+  const cheats = panel.controlSettings.group('Cheat pieces', { hidden: () => !config.cheats });
   for (const row of CHEAT_ROWS) {
     const line = document.createElement('div');
     line.className = 'panel-buttons';
@@ -904,14 +1067,14 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   }
 
   panel.settings.group('Look').select(
-    'Graphics',
+    'Vampire Lair graphics',
     [
       { value: 'vampire', label: 'Vampire Lair' },
       { value: 'normal', label: 'Normal carpentry' },
     ],
     () => config.look,
     (v) => changed(() => (config.look = v))(),
-    { title: 'The Vampire Lair’s dark art, or normal carpentry’s' },
+    { title: 'The Vampire Lair’s dark art, or normal carpentry’s; ship carpentry always has its own' },
   );
   panel.settings.group('Reset').button('Reset to defaults', () => {
     Object.assign(config, DEFAULT_CONFIG);
@@ -923,27 +1086,31 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     loadBestScore = true;
   });
 
+  // Version 2 added ship carpentry; version 1 replays are all the Vampire Lair's.
   const replaySettingsCodec: ReplaySettingsCodec = {
-    currentVersion: 1,
-    simulatorVersion: 1,
+    currentVersion: 2,
+    simulatorVersion: 2,
     migrate: (version, value) => {
-      if (version !== 1 || !value || typeof value !== 'object') return null;
+      if ((version !== 1 && version !== 2) || !value || typeof value !== 'object') return null;
       const wrapper = value as Record<string, unknown>;
       if (typeof wrapper.seeded !== 'boolean' || !wrapper.config || typeof wrapper.config !== 'object') return null;
+      if (version === 1) wrapper.config = { ...(wrapper.config as object), ...LAIR_ONLY };
       const c = wrapper.config as Record<string, unknown>;
       return Number.isFinite(c.volume) && typeof c.cheats === 'boolean' && typeof c.ghost === 'boolean' &&
         typeof c.speed === 'boolean' && Number.isFinite(c.speedHoles) && Number.isFinite(c.speedSize) &&
         typeof c.unlimited === 'boolean' && Number.isInteger(c.speedLetter) &&
-        (c.look === 'vampire' || c.look === 'normal') ? value : null;
+        (c.look === 'vampire' || c.look === 'normal') && typeof c.ship === 'boolean' &&
+        Number.isInteger(c.difficulty) && (c.difficulty as number) >= 0 && (c.difficulty as number) <= 9 &&
+        [0, 1, 2].includes(c.tokens as number) && (c.create === undefined || typeof c.create === 'boolean') ? value : null;
     },
   };
   const isVampireReplaySeed = (value: unknown): boolean => {
     if (!value || typeof value !== 'object') return false;
     const state = value as { seed: number; speedRng: unknown; boardSeeds: number[] };
-    return Number.isSafeInteger(state.seed) && state.seed >= 0 && state.seed < MAX_SEED &&
+    return Number.isSafeInteger(state.seed) && state.seed >= 0 && state.seed <= MAX_SEED &&
       Array.isArray(state.boardSeeds) && state.boardSeeds.length > 0 &&
-      state.boardSeeds.every((seed) => Number.isSafeInteger(seed) && seed >= 0 && seed < MAX_SEED) &&
-      new PyRandom(0).restore(state.speedRng);
+      state.boardSeeds.every((seed) => Number.isSafeInteger(seed) && seed >= 0 && seed <= MAX_SEED) &&
+      new Random(0).restore(state.speedRng);
   };
   let savedReplaySettings: { config: Config; seeded: boolean; seed: number; scoreCounting: boolean } | null = null;
   replays = new ReplayRecorder('vampire-carp', store, panel, ticks, (tape: PuzzleReplay) => {
@@ -954,7 +1121,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         !Array.isArray(seedData.boardSeeds) || !seedData.boardSeeds.every((s) => Number.isSafeInteger(s) && s >= 0)) {
       throw new Error('Invalid Vampire Carp seed');
     }
-    Object.assign(config, settings.config);
+    // Replays saved before Freeplay mode existed aren't Freeplay.
+    Object.assign(config, LAIR_ONLY, { create: false }, settings.config);
     seeded = true;
     seed = seedData.seed;
     seedAtStart = seedData.seed;
@@ -994,6 +1162,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       for (const command of routed.commands) {
         if (command === 'pause') toggleSessionPause();
         else if (command === 'dismiss' && boardActive) { boardIndex++; newBoard(); }
+        else createCommand(command);
       }
       if (loadBestScore) {
         bestScoresKey = scoresKey();
@@ -1008,7 +1177,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         pendingSounds = pendingSounds.filter((s) => s.at > timePassed);
         for (const s of due) play(s.name);
       }
-      if (boardActive) warning.update(config.unlimited ? null : sessionTime() - timePassed);
+      if (boardActive) warning.update(config.unlimited || config.create ? null : sessionTime() - timePassed);
       if (boardActive && timePassed > sessionTime()) endSession();
 
     }

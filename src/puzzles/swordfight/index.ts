@@ -1,4 +1,5 @@
-// Swordfight, rebuilt from Puzzle Pirates (build 20260909165753): the board
+import { seedControls, seedFor } from '../../core/seeds';
+// Swordfight, recreated from Puzzle Pirates (build 20260909165753): the board
 // rules are in board.ts and strikes.ts, a player's board in play is fighter.ts, and this file is
 // SwordPanel and SwordBoardView on top: the 450x600 panel with the board at (143, 62), the next pair,
 // each pirate's status with a small copy of their board, the falling pair with its outline, pieces
@@ -7,8 +8,9 @@
 import { SessionPause } from '../../core/pause';
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
+import { copyText, pasteText } from '../../core/clipboard';
 import { keyMatches } from '../../core/controls';
-import { loadFont } from '../../core/fonts';
+import { drawGameText, drawPauseLabel, floatAt, gameTextBox, loadGameFont, wrapGameText, BOARD_FONT_SMALL } from '../../core/game-text';
 import { sessionAverages } from '../../core/duty/desk';
 import { currentPirate } from '../../core/duty/profile';
 import { faceCanvas } from '../../core/duty/view';
@@ -16,18 +18,21 @@ import { historyGroup } from '../../core/history';
 import type { InputEvent } from '../../core/input';
 import type { Option } from '../../core/panel';
 import type { PuzzleFactory } from '../../core/puzzle';
-import { PyRandom } from '../../core/pyrandom';
+import { Random } from '../../core/random';
 import { ReplayRecorder, stateText, type PuzzleReplay, type ReplaySettingsCodec } from '../../core/replay';
 import type { GameRecord } from '../../core/storage';
 import {
   blockPiece, blockTile, colour, DAMAGE, DAMAGE_HINT, EMPTY, H, isBlock, isBreaker, kind, METAL, RUM, SWORD, swordTile, W,
 } from './board';
-import { COL_PX, type Fighter, FAST_SPEED, ROW_PX, secondOf, startSpeed } from './fighter';
+import { COL_PX, type Fighter, FAST_SPEED, type Pair, ROW_PX, secondOf, startSpeed } from './fighter';
+import {
+  boardCode, boardIssues, clearBoard, deal, load as loadBoard, PAINTS, PAIR_PIECES, paint as paintSquare, pairPiece, readBoardCode,
+  type Stage, staged,
+} from './create';
 import { type GameStyle, gameSkillStyle, type NpcStyle, skillStyle } from './npc';
 import { drawFace, FACE } from './faces';
 import { Match, type MatchSettings, type NpcSettings } from './match';
 import { PLAIN_SWORDS, SWORD_COLOURS, SWORD_NAMES, isHorizontal } from './strikes';
-import delarobbUrl from './delarobb.ttf?url';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const swordIconUrls = import.meta.glob<string>('./media/swords/*.png', { eager: true, query: '?url', import: 'default' });
@@ -53,7 +58,6 @@ const VISIBLE_ROWS = 6;
 const LIST_WIDTH = 136;
 const LIST_ARROWS_Y = ROWS_Y + VISIBLE_ROWS * ROW_H + 8;
 const MINI = 4;
-const FONT = 'Delarobb';
 /** Piece colours' art, by colour number (sword/a/h.p). */
 const COLOUR_NAMES = ['red', 'green', 'blue', 'yellow'];
 
@@ -84,7 +88,10 @@ const SOUND_FILES: Record<string, string[]> = {
   win: ['win'], lose: ['lose'], fanfare: ['fanfare'],
 };
 
-interface Settings extends MatchSettings {}
+interface Settings extends MatchSettings {
+  /** Fight is the game; Freeplay, as in Rumble, paints a board of your own and never ends. Older settings are Fight. */
+  mode?: 'fight' | 'create';
+}
 
 /** Initial fight and equipment choices. */
 const DEFAULTS: Settings = {
@@ -133,6 +140,8 @@ const KEYS = [
   { id: 'drop', label: 'Drop faster', defaultKey: 'Space' },
   { id: 'next', label: 'Next target', defaultKey: 'S' },
   { id: 'prev', label: 'Previous target', defaultKey: 'A' },
+  // Freeplay mode paints with keys 1-8 held over the board: the four colours, then their breakers; 0 clears.
+  ...PAINTS.map((paint, i) => ({ id: `paint${i}`, label: `Freeplay: paint ${paint.name.toLowerCase()}`, defaultKey: String((i + 1) % 10) })),
 ];
 const key = (event: string, id: string) => {
   const binding = KEYS.find((k) => k.id === id)!;
@@ -209,6 +218,7 @@ function validSettings(value: unknown): value is Settings {
     int(s.opponents, 0, MAX_ENEMIES) && int(s.thralls, 0, MAX_ALLIES) && int(s.swabbies, 0, MAX_ALLIES) &&
     (s.thralls as number) + (s.swabbies as number) <= MAX_ALLIES && SKILLS.every((k) => int(s[k], 0, 100)) && validStyle(s.ai) && validGameStyle(s.gameAi) &&
     (s.opponentType === 'tally' || s.opponentType === 'game') && int(s.difficulty, 0, 9) &&
+    (s.mode === undefined || s.mode === 'fight' || s.mode === 'create') &&
     typeof s.breakers === 'number' && s.breakers >= 0 && s.breakers <= 100 && validSword(s.sword);
 }
 
@@ -230,22 +240,19 @@ function chunkVelocity(seed: number, i: number): [number, number] {
 export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplayTime: rawReplayTime }) => {
   const pause = new SessionPause(rawTicks, rawReplayTime);
   const { ticks, setReplayTime } = pause;
-  const [images, icons, faceImages] = await Promise.all([Images.load(imageUrls), Images.load(swordIconUrls), Images.load(faceUrls), loadFont(FONT, delarobbUrl)]);
+  const [images, icons, faceImages] = await Promise.all([Images.load(imageUrls), Images.load(swordIconUrls), Images.load(faceUrls), loadGameFont()]);
   const img = (name: string) => images.get(name);
   let replays!: ReplayRecorder;
   const sounds = new SoundBank(soundUrls, () => replays?.isSeeking ?? false);
-  const soundPick = new PyRandom();
-  soundPick.seedFromCrypto();
+  const soundPick = new Random();
   const ctx = screen.ctx;
   const play = (name: string) => {
     const files = SOUND_FILES[name];
-    if (files) sounds.play(files[soundPick.randintN(0, files.length - 1)]);
+    if (files) sounds.play(files[soundPick.integer(0, files.length - 1)]);
   };
 
   const saved = upgrade(store.get<unknown>('settings', DEFAULTS), true);
   let settings: Settings = structuredClone(validSettings(saved) ? saved : DEFAULTS);
-  const seeds = new PyRandom();
-  seeds.seedFromCrypto();
 
   let match: Match | null = null;
   let running = false;
@@ -271,20 +278,34 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     : `${settings.cultists}c${settings.homunculi}h${settings.thralls}t${settings.swabbies}s:${opponentKey()}:${settings.difficulty}:${settings.breakers}`;
   const record = store.get<Record<string, { wins: number; losses: number; best: number }>>('record', {});
 
+  const seedMode = seedControls(panel, store, () => running || !!replays?.isPlaying);
+
   function start(seed?: number): void {
     pause.resume();
-    const s = seed ?? seeds.randintN(1, 2 ** 31 - 1);
+    const s = seed ?? seedMode.next(); seedMode.remember(s);
     if (seed === undefined) replays.begin(structuredClone(settings), { seed: s });
     const now = ticks();
     messages = [];
     listOffsets[0] = listOffsets[1] = 0;
     shownTarget = -1;
     held.left = held.right = 0;
-    match = new Match(structuredClone(settings), s, now, {
+    creating = settings.mode === 'create';
+    // Freeplay is practice on your own: no opponents or teammates.
+    const fight: Settings = creating
+      ? { ...structuredClone(settings), opponents: 0, cultists: 0, homunculi: 0, thralls: 0, swabbies: 0, enemyRoster: [], allyRoster: [] }
+      : structuredClone(settings);
+    match = new Match(fight, s, now, {
       sound: (name, fighter) => { if (fighter === 0) play(name); },
       message: (text, fighter) => { if (fighter === 0) messages.push({ text, start: ticks(), ms: text.includes('knocked') ? 3000 : text.startsWith('Ye be') && !text.includes('knocked') ? Infinity : MESSAGE_MS }); },
     });
     shownTarget = match.target;
+    if (creating) {
+      match.endless = true;
+      match.player.hover = true;
+      createRng = new Random(seedFor(s, 'create'));
+      paletteIndex = null; stage = 'piece'; paintWith = null; painting = false; pasteNote = '';
+      undo = []; spawnState = null; seenPair = null; dirty = false;
+    }
     running = true;
     finished = false;
     showResults = false;
@@ -306,7 +327,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const completed = !!match.result;
     const f = match.player;
     const finishedReplay = replays.finish(outcome());
-    if (completed && !replays.isPlaying) {
+    if (store.scoresEnabled && completed && !replays.isPlaying) {
       store.addHistory(settingsKey(), {
         score: f.stats.sent,
         result: outcome(),
@@ -362,6 +383,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const f = match.player;
     for (const event of events) {
       if (scrollList(event) || !running || match.result) continue;
+      if (creating && createInput(event, now)) continue;
       if (event.type === 'keydown') {
         if (key(event.key, 'left')) { f.move(-1, now); held.left = now; held.leftNext = now + 300; }
         else if (key(event.key, 'right')) { f.move(1, now); held.right = now; held.rightNext = now + 300; }
@@ -393,6 +415,148 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         held[next] += 1000 / 7;
       }
     }
+  }
+
+  // ---- Freeplay mode ----
+
+  let creating = false;
+  let createRng = new Random(1);
+  /** The palette entry a left click paints (recorded, so replays click the same way), the key held, and pasted-text errors. */
+  let paletteIndex: number | null = null;
+  let stage: Stage = 'piece';
+  let paintWith: number | null = null;
+  let painting = false;
+  /** The square last painted by holding or dragging: painted pieces fall away, so each square is painted once a stroke. */
+  let stroke = -1;
+  let pasteNote = '';
+  /** Undo goes back a pair: the board and pairs as each pair was dealt, edits included. */
+  interface Snapshot { cells: Int32Array; pair: [number, number]; next: [number, number] }
+  let undo: Snapshot[] = [];
+  let spawnState: Snapshot | null = null;
+  let seenPair: Pair | null = null;
+  let dirty = false;
+  const editable = (now = ticks()) => creating && running && !!match && match.player.idle(now) && !pause.paused;
+  const snapshot = (f: Fighter): Snapshot => ({ cells: f.board.cells.slice(), pair: [...f.pair!.pieces], next: [...(f.next ?? f.pair!.pieces)] });
+
+  /** Notes each new pair, and the board as it was dealt, once the board is still. */
+  function trackPairs(now: number): void {
+    const f = match!.player;
+    if (!f.pair || !f.idle(now)) return;
+    if (f.pair !== seenPair) {
+      if (spawnState && seenPair) undo = [...undo.slice(-99), spawnState];
+      seenPair = f.pair;
+      spawnState = snapshot(f);
+      dirty = false;
+    } else if (dirty) {
+      spawnState = snapshot(f);
+      dirty = false;
+    }
+  }
+
+  /** A recorded change, applied now and again at the same moment in a replay. */
+  function createCommand(command: string, now: number): void {
+    if (!creating || !running || !match) return;
+    const f = match.player;
+    if (command.startsWith('palette:')) {
+      const i = Number(command.slice(8));
+      paletteIndex = Number.isInteger(i) && i >= 0 && i < PAINTS.length ? i : null;
+      return;
+    }
+    if (command.startsWith('stage:')) { stage = command.slice(6) === 'damage' ? 'damage' : command.slice(6) === 'hint' ? 'hint' : 'piece'; return; }
+    if (command.startsWith('hover:')) {
+      f.hover = command === 'hover:1';
+      const p = f.pair;
+      if (f.hover) f.setFast(f.fast, now);
+      else if (p && p.held !== undefined) {
+        // Falling on from where it was held.
+        p.speed = f.fast ? FAST_SPEED : f.speed;
+        p.start = now - p.held / p.speed;
+        delete p.held;
+      }
+      return;
+    }
+    if (!editable(now)) return;
+    if (command.startsWith('pair:')) {
+      const [which, a, b] = command.slice(5).split(',');
+      const pieces: [number, number] = [Number(a), Number(b)];
+      if (!pieces.every(pairPiece)) return;
+      if (which === 'next') match.setNext(pieces);
+      else if (f.pair) f.pair.pieces = pieces;
+      dirty = true;
+      return;
+    }
+    if (command === 'undo') {
+      const last = undo.pop();
+      if (!last) return;
+      f.board.cells.set(last.cells);
+      match.setNext(last.next);
+      f.redeal(last.pair, now);
+      match.edited(now);
+      seenPair = f.pair;
+      spawnState = last;
+      return;
+    }
+    if (command === 'clear') clearBoard(f.board);
+    else if (command === 'generate') deal(f.board, createRng, settings.breakers);
+    else if (command.startsWith('load:')) {
+      const read = readBoardCode(command.slice(5));
+      if (!read) return;
+      loadBoard(f.board, read);
+      if (read.next) match.setNext(read.next);
+      if (read.pair) {
+        if (f.pair) f.pair.pieces = read.pair;
+        else f.redeal(read.pair, now);
+      }
+    } else return;
+    match.edited(now);
+    dirty = true;
+  }
+
+  const recordCreate = (command: string) => {
+    if (!creating || !running || replays.isPlaying || pause.paused) return;
+    replays.command(command);
+    createCommand(command, ticks());
+  };
+
+  /** The board square under a point. */
+  const squareAt = ([x, y]: readonly number[]): [number, number] | null => {
+    const col = Math.floor((x - BOARD_X) / COL_PX), row = Math.floor((y - BOARD_Y) / ROW_PX);
+    return col >= 0 && col < W && row >= 0 && row < H ? [col, row] : null;
+  };
+
+  /** Paints the square under the pointer with a palette entry; recorded input repeats it in a replay. */
+  function paintAt(pos: readonly number[], index: number, now: number, drag = false): void {
+    const at = squareAt(pos);
+    if (!at || !match || !editable(now) || (drag && stroke === at[1] * W + at[0])) return;
+    stroke = at[1] * W + at[0];
+    const f = match.player;
+    // The falling pair's squares are left alone.
+    if (f.pair && [[f.pair.col, f.pair.row], secondOf(f.pair)].some(([c, r]) => c === at[0] && (r === at[1] || (r + 1 === at[1] && f.progress(now) > 0)))) return;
+    if (paintSquare(f.board, at[0], at[1], staged(PAINTS[index].piece, stage))) {
+      match.edited(now);
+      dirty = true;
+    }
+  }
+
+  /** Freeplay mode's keys and painting: true if it used the event. */
+  function createInput(event: InputEvent, now: number): boolean {
+    if (event.type === 'keydown' || event.type === 'keyup') {
+      const index = PAINTS.findIndex((_, i) => key(event.key, `paint${i}`));
+      if (index < 0) return false;
+      if (event.type === 'keydown') { paintWith = index; paintAt(input.mouse, index, now); }
+      else if (paintWith === index) paintWith = null;
+      return true;
+    }
+    if (event.type === 'mousedown' && event.button === 1 && paletteIndex !== null && squareAt(event.pos)) {
+      paintAt(event.pos, paletteIndex, now);
+      painting = true;
+      return true;
+    }
+    if (event.type === 'mouseup' && event.button === 1 && painting) {
+      painting = false;
+      return true;
+    }
+    return false;
   }
 
   // ---- Drawing ----
@@ -553,33 +717,18 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     ctx.globalAlpha = 1;
   }
 
+  /** Popups in the 30px game font, wrapped to the board, centred on it and pushed clear of each other. */
   function drawMessages(now: number): void {
     messages = messages.filter((m) => now < m.start + m.ms);
-    let y = BOARD_H / 2;
+    const style = { px: 30, align: 'center' as const };
+    let y: number | null = null;
     for (const m of messages) {
-      const p = (now - m.start) / m.ms;
-      ctx.save();
-      ctx.globalAlpha = p < 0.7 ? 1 : Math.max(0, 1 - (p - 0.7) / 0.3);
-      ctx.font = `28px "${FONT}"`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = '#000';
-      const lines: string[] = [];
-      for (const word of m.text.split(/\s+/)) {
-        const last = lines.length - 1;
-        if (last >= 0 && ctx.measureText(`${lines[last]} ${word}`).width <= BOARD_W - 8) lines[last] += ` ${word}`;
-        else lines.push(word);
-      }
-      const ty = y - 30 * Math.min(p, 0.7);
-      ctx.fillStyle = '#fff';
-      for (let i = 0; i < lines.length; i++) {
-        ctx.strokeText(lines[i], BOARD_W / 2, ty + i * 36);
-        ctx.fillText(lines[i], BOARD_W / 2, ty + i * 36);
-      }
-      ctx.restore();
-      y += lines.length * 36;
+      const text = wrapGameText(ctx, m.text, style, BOARD_W);
+      const { h } = gameTextBox(ctx, text, style);
+      const { dy, alpha } = floatAt(now - m.start, m.ms);
+      if (y === null) y = (BOARD_H - h) / 2;
+      drawGameText(ctx, text, BOARD_W / 2, y + dy, { ...style, alpha });
+      y += h;
     }
   }
 
@@ -608,12 +757,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return face;
   }
 
-  /** Text in the game's outline style: black one pixel all round, then the colour (samskivert Label OUTLINE). */
+  /** A centred 10pt Dialog label in the game's outline style (YoFaceLabel). */
   function outlined(text: string, x: number, y: number, colour: string): void {
-    ctx.fillStyle = '#000';
-    for (const [dx, dy] of [[0, 0], [0, 1], [0, 2], [1, 0], [1, 2], [2, 0], [2, 1], [2, 2]]) ctx.fillText(text, x + dx - 1, y + dy - 1);
-    ctx.fillStyle = colour;
-    ctx.fillText(text, x, y);
+    drawGameText(ctx, text, x, y - 1, { px: 10, family: 'dialog', fill: colour, align: 'center' });
   }
 
   function drawStatus(m: Match, index: number, x: number, y: number, right: boolean): void {
@@ -723,7 +869,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const [p, s] = [SWORD_COLOURS[sword.primary], SWORD_COLOURS[sword.secondary].toLowerCase()];
     const text = `${sword.name}: ${sword.primary === sword.secondary ? p : `${p} and ${s}`}`;
     ctx.save();
-    ctx.font = '11px Arial, sans-serif';
+    ctx.font = '12px Arial, sans-serif';
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
     const w = Math.ceil(ctx.measureText(text).width) + 8;
@@ -741,16 +887,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
 
   function banner(text: string, y: number): void {
-    ctx.save();
-    ctx.font = `24px "${FONT}"`;
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 4;
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#000';
-    ctx.fillStyle = '#fff';
-    ctx.strokeText(text, WIDTH / 2, y);
-    ctx.fillText(text, WIDTH / 2, y);
-    ctx.restore();
+    drawPauseLabel(ctx, text, WIDTH / 2, y, WIDTH, BOARD_FONT_SMALL);
   }
 
   // ---- The frame ----
@@ -806,10 +943,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       for (const command of routed.commands) {
         const parts = /^list-scroll:([01]):(\d+)$/.exec(command);
         if (parts) listOffsets[Number(parts[1]) as 0 | 1] = Number(parts[2]);
+        else createCommand(command, now);
       }
       handle(events, now);
+      if (creating && running && (paintWith !== null || (painting && paletteIndex !== null))) paintAt(input.mouse, paintWith ?? paletteIndex!, now, true);
       if (match && running) {
         match.update(now);
+        if (creating) trackPairs(now);
         if (match.settledAt) stop();
       }
       revealTarget();
@@ -846,6 +986,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   panel.controls(PUZZLE, KEYS);
 
   const session = panel.session();
+  session.select('Mode', [{ value: 'fight', label: 'Fight' }, { value: 'create', label: 'Freeplay' }] as Option<'fight' | 'create'>[],
+    () => settings.mode ?? 'fight', (mode) => { settings.mode = mode; save(); }, {
+      disabled: () => running || !!replays?.isPlaying,
+      title: 'Fight is the game. Freeplay is a sandbox on your own board: paint it, choose the pairs and play on. It never ends and keeps no history.',
+    });
   // Starting while a replay is open closes it and starts a fight of your own.
   session.button('Start', () => {
     if (replays.isPlaying) {
@@ -859,11 +1004,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   session.button('View stats', () => { showResults = !showResults; }, {
     hidden: () => !finished || !match?.result, label: () => (showResults ? 'View board' : 'View stats'),
   });
-  const targeting = () => running && !!match && settings.opponents > 1;
+  const targeting = () => running && !!match && match.settings.opponents > 1;
   panel.group(undefined, { hidden: () => !targeting() }).note(() => targeting() ? `Attacking ${match!.names[match!.target]}: press A / S or click a pirate on the right to change.` : '');
 
   const recordNow = () => record[settingsKey()] ?? { wins: 0, losses: 0, best: 0 };
-  panel.score('Fight').stats(['', 'Now', 'Best'], () => [
+  panel.score('Fight', { hidden: () => settings.mode === 'create' }).stats(['', 'Now', 'Best'], () => [
     ['Damage sent', match ? String(match.player.stats.sent) : '0', String(recordNow().best || '—')],
     ...(settings.opponents ? [['Wins', String(recordNow().wins), `of ${recordNow().wins + recordNow().losses}`]] : []),
   ]);
@@ -902,6 +1047,76 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ['Biggest sword', match.player.stats.biggestSword ? `${match.player.stats.biggestSword} squares` : '—'],
     ],
   } : null);
+
+  // Freeplay mode's board and pairs, laid out like Rumble's Board group.
+  const createHidden = () => settings.mode !== 'create';
+  const editOff = () => !editable() || !!replays?.isPlaying;
+  const boardGroup = panel.group('Board', { hidden: createHidden });
+  const pairsNow = (): Array<readonly number[]> => match ? [match.player.pair?.pieces ?? [], match.player.next ?? []] : [];
+  boardGroup.button('Copy', () => {
+    if (match) copyText(boardCode(match.player.board, match.player.pair?.pieces ?? null, match.player.next), 'Copy this board:');
+  }, { disabled: () => !creating || !match, title: 'Copy the board, the falling pair and the next pair' });
+  boardGroup.button('Paste', () => void pasteText('Paste a board:').then((text) => {
+    if (text === null) return;
+    if (readBoardCode(text)) { pasteNote = ''; recordCreate(`load:${text.trim()}`); }
+    else pasteNote = 'That isn’t a swordfight board. Boards copied here start with S.';
+  }), { disabled: editOff, title: 'Play on a board from a pasted copy' });
+  boardGroup.button('Generate', () => {
+    recordCreate('generate');
+    if (match) copyText(boardCode(match.player.board, match.player.pair?.pieces ?? null, match.player.next), 'Copy this board:');
+  }, { disabled: editOff, title: 'Deal random pieces into the bottom rows, let them settle, and copy the board' });
+  const palette = document.createElement('div');
+  palette.className = 'piece-palette';
+  PAINTS.forEach((paint, i) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'panel-button';
+    const icon = document.createElement('canvas');
+    icon.width = COL_PX;
+    icon.height = ROW_PX;
+    icon.setAttribute('aria-hidden', 'true');
+    const tile = paint.piece === EMPTY ? null : tileOf(paint.piece);
+    if (tile) icon.getContext('2d')!.drawImage(img(tile[0]), tile[1] * COL_PX, 0, COL_PX, ROW_PX, 0, 0, COL_PX, ROW_PX);
+    button.append(icon, document.createTextNode(`${(i + 1) % 10} · ${paint.name}`));
+    button.addEventListener('click', () => { recordCreate(`palette:${paletteIndex === i ? 'none' : i}`); panel.used(); });
+    panel.addSync(() => {
+      button.disabled = !creating || !running || !!replays?.isPlaying;
+      button.setAttribute('aria-pressed', String(paletteIndex === i));
+    });
+    palette.append(button);
+  });
+  boardGroup.append(palette);
+  boardGroup.select('Paint as', [
+    { value: 'piece', label: 'Pieces' },
+    { value: 'damage', label: 'Strike damage, 2 pairs to go' },
+    { value: 'hint', label: 'Strike damage, 1 pair to go' },
+  ] as Option<Stage>[], () => stage, (value) => recordCreate(`stage:${value}`), {
+    disabled: () => !creating || !running || !!replays?.isPlaying,
+    title: 'Colours can be painted as a strike’s grey damage, which turns back into pieces as pairs land. Breakers are always pieces.',
+  });
+  boardGroup.button('Clear board', () => recordCreate('clear'), { disabled: editOff });
+  const pairOptions: Option<number>[] = PAIR_PIECES.map((paint) => ({ value: paint.piece, label: paint.name }));
+  for (const [which, label] of [['now', 'Falling pair'], ['next', 'Next pair']] as const) {
+    const pieces = (): readonly number[] | null => (which === 'now' ? match?.player.pair?.pieces : match?.player.next) ?? null;
+    for (const [slot, part] of [[1, 'top'], [0, 'bottom']] as const) {
+      boardGroup.select(`${label}, ${part}`, pairOptions, () => pieces()?.[slot] ?? 0, (value) => {
+        const current = pieces();
+        if (!current) return;
+        const next = [...current];
+        next[slot] = value;
+        recordCreate(`pair:${which},${next[0]},${next[1]}`);
+      }, { disabled: () => editOff() || !pieces() });
+    }
+  }
+  boardGroup.select('Pair falls', [{ value: 1, label: 'Only while drop is held' }, { value: 0, label: 'At the fight’s speed' }] as Option<number>[],
+    () => (match?.player.hover ?? true) ? 1 : 0, (value) => recordCreate(`hover:${value}`), { disabled: () => !creating || !running || !!replays?.isPlaying });
+  boardGroup.button('Undo pair', () => recordCreate('undo'), { disabled: () => editOff() || !undo.length, title: 'Put the board and pairs back as they were before the last pair landed' });
+  boardGroup.note(() => pasteNote || 'Hold 1–4 over the board to paint red, green, blue or yellow, 5–8 for their breakers, or 0 to clear, or select a piece above and click or drag. The board settles as the game’s does: pieces fall, blocks fuse and breakers shatter what they touch. Freeplay has no opponents, a knock-out doesn’t end it, and it keeps no history.');
+  boardGroup.note(() => {
+    if (!match || !creating) return 'Start to paint a board.';
+    const issues = boardIssues(match.player.board, pairsNow(), settings.breakers);
+    return issues.length ? `Not something a fight could show: ${issues.join(' ')}` : 'This board could come up in a fight.';
+  });
 
   const replayAction = {
     available: (game: GameRecord) => typeof game.replayAt === 'number' && (replays?.hasPlayableAt(game.replayAt, typeof game.replayId === 'string' ? game.replayId : undefined) ?? false),
@@ -1010,7 +1225,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   game.select('Starting speed', Array.from({ length: 10 }, (_, d) => ({ value: d, label: `${d}: ${Math.round(ROW_PX / startSpeed(d))}ms a row` })),
     () => settings.difficulty, (d) => { settings.difficulty = d; save(); }, off);
   game.number('Breaker chance (%)', () => settings.breakers, (v) => { settings.breakers = v; save(); }, { ...off, min: 0, max: 100, step: 0.5 });
-  game.note(() => `The pair speeds up as it's dealt, to ${Math.round(ROW_PX / 0.25)}ms a row at most; holding drop is ${Math.round(ROW_PX / FAST_SPEED)}ms a row.`);
+  game.hint(() => `The pair speeds up as it's dealt, to ${Math.round(ROW_PX / 0.25)}ms a row at most; holding drop is ${Math.round(ROW_PX / FAST_SPEED)}ms a row.`);
 
   const swordOptions: Option<number>[] = PLAIN_SWORDS.map((t) => ({ value: t, label: SWORD_NAMES[t] }));
   const colourOptions: Option<number>[] = SWORD_COLOURS.map((name, i) => ({ value: i, label: name }));
@@ -1024,7 +1239,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 8,
-    simulatorVersion: 2,
+    simulatorVersion: 3,
     // Earlier recordings had an opponent that played the board, so they can't be replayed.
     migrate: (version, value) => {
       const upgraded = version < 6 ? upgrade(value) : value;

@@ -1,6 +1,6 @@
 // Crate scheduling for normal and Gauntlet modes. Normal mode requests crates while
 // space and banana allowances remain. Gauntlet mode uses its own size and pacing rules.
-import type { PyRandom } from '../../core/pyrandom';
+import type { Random } from '../../core/random';
 import { COLOURS, CRATE_SIZES, isAnts, isCrate, isCrateAnchor, isTool, MAX_CRATE_AREA, MAX_CRATES, crateSize, WIDTH } from './board';
 import type { CrateSource, Forage } from './engine';
 
@@ -13,6 +13,8 @@ export const ROUND_TRIP_MS = 120;
 const FRUIT_TILES = COLOURS;
 /** The cursed isle's bone box, fetish jar and cursed chest. */
 export const CURSED_TILES = [6, 6, 3];
+/** Werewolf Isle's three treasure crates, added in the test build. */
+export const WEREWOLF_TILES = [8, 8, 5];
 
 /** Normal foraging: requests crates while board space remains. */
 export class CrateRequests implements CrateSource {
@@ -24,7 +26,7 @@ export class CrateRequests implements CrateSource {
   private readyAt: number | null = null;
 
   constructor(
-    private readonly rng: PyRandom,
+    private readonly rng: Random,
     /** Relative chances of a 1x1, 2x2 and 3x2. */
     private readonly weights: readonly [number, number, number],
     /** How many crates the board brings in all. */
@@ -73,7 +75,8 @@ export class CrateRequests implements CrateSource {
     let key = this.nextKey;
     for (let i = 0; i < 3 && used.has(key); i++) key = (key + 1) % 3;
     this.nextKey = (key + 1) % 3;
-    game.crateArt[key] = size === 2 ? this.rng.randintN(0, 1) : this.rng.randintN(0, FRUIT_TILES - 1);
+    game.crateArt[key] = size === 2 ? this.rng.integer(0, 1) : this.rng.integer(0, FRUIT_TILES - 1);
+    if (game.werewolf) game.crateArt[key] = WEREWOLF_TILES[size];
     b.bonusMode = 64 | size | (key << 2);
     this.requested++;
   }
@@ -94,7 +97,7 @@ export class GauntletChests implements CrateSource {
   budget: number;
 
   constructor(
-    private readonly rng: PyRandom,
+    private readonly rng: Random,
     /** Relative chances of a bone box, fetish jar and cursed chest (0 for those turned off). */
     private readonly weights: readonly [number, number, number],
     budget: number,
@@ -123,7 +126,7 @@ export class GauntletChests implements CrateSource {
 
   beforeMove(game: Forage): void {
     if (!this.paced || this.waiting < 0 || game.board.bonusMode !== 0 || this.now() < this.readyAt) return;
-    game.crateArt[this.waiting] = CURSED_TILES[this.waiting];
+    game.crateArt[this.waiting] = (game.werewolf ? WEREWOLF_TILES : CURSED_TILES)[this.waiting];
     game.board.bonusMode = 64 | this.waiting | (this.waiting << 2);
     this.waiting = -1;
   }
@@ -132,7 +135,7 @@ export class GauntletChests implements CrateSource {
     return this.weights.some((w) => w > 0);
   }
 
-  /** Python's random.choices over the enabled chests, then a column for it. */
+  /** Pick a weighted enabled chest, then its column. */
   private pick(): void {
     const kinds = [1, 2, 3].filter((k) => this.weights[k - 1] > 0);
     if (!kinds.length) return;
@@ -175,7 +178,7 @@ export class GauntletChests implements CrateSource {
         (this.next === 3 && onBoard[1] === 0 && onBoard[2] < 1) || (this.next === 2 && onBoard[2] === 0 && onBoard[1] < 2) || this.next === 1;
       if (this.chaos || fits) placed = this.trySpawn(game);
     }
-    // Python checks the count from before the spawn.
+    // Check the count from before the spawn.
     if (!this.chaos && total === 3) this.movesSinceLast = -1;
     return placed;
   }
@@ -206,7 +209,7 @@ export class GauntletChests implements CrateSource {
     }
     if (blocked) return false;
     // Each size keeps its own contents slot, so the three kinds of chest show their own art.
-    game.crateArt[this.next - 1] = CURSED_TILES[this.next - 1];
+    game.crateArt[this.next - 1] = (game.werewolf ? WEREWOLF_TILES : CURSED_TILES)[this.next - 1];
     game.dropCrate(this.next - 1, this.column, this.next - 1);
     this.budget--;
     this.pick();
