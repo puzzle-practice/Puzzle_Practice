@@ -17,6 +17,7 @@ import { setWarningTimer } from '../core/audio';
 import { SailingGame } from './sailing/game';
 import { PatchingBoard, movable as patchingMovable } from './patching/logic';
 import { AIM_HISTORY, AIM_LANDING_MS, AIM_MS, AimTrainer } from './rumble/aim';
+import { Match as RumbleMatch } from './rumble/match';
 import type { Board, Point } from './rumble/board';
 import { GunningGame } from './gunning/game';
 import { LOOP, LOOP_SIDES, POWDER, SHOT, WAD } from './gunning/board';
@@ -136,6 +137,52 @@ function misses(b: Board, fist: number, dir: number, cells: Point[]): boolean {
   const shot = b.shoot(b.path(fist, dir));
   return !!shot && !cells.some(p => b.adjacent(shot.rest, p));
 }
+
+describe('Rumble fire inputs', () => {
+  async function setup() {
+    const updates = vi.spyOn(RumbleMatch.prototype, 'update');
+    const store = new Store('rumble'); store.set('mode', 'Create');
+    const harness = panelHarness();
+    let now = 100;
+    const factory = (await import('./rumble/index')).default;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const instance = await factory({ screen, input: { mouse: [-1, -1] },
+      panel: harness.panel, store, ticks: () => now,
+    } as unknown as PuzzleContext);
+    harness.buttons.get('Play::Start')!();
+    instance.frame([]);
+    const f = (updates.mock.contexts.at(-1)! as RumbleMatch).player;
+    const frame = (at: number, events: InputEvent[] = []) => { now = at; instance.frame(events); };
+    return { instance, f, frame };
+  }
+
+  it.each(['mouse', 'keyboard'])('keeps a held %s press across flight and accepts release at the turn boundary', async device => {
+    const h = await setup(), pos: [number, number] = [220, 120];
+    const down: InputEvent = device === 'mouse' ? { type: 'mousedown', button: 1, pos } : { type: 'keydown', key: 'z' };
+    const up: InputEvent = device === 'mouse' ? { type: 'mouseup', button: 1, pos } : { type: 'keyup', key: 'z' };
+    h.frame(110, [down, up]);
+    const landed = h.f.flight!.end;
+    h.frame(120, [down]);
+    expect(h.f.charging).toBe(-1);
+    h.frame(landed, [up]);
+    expect(h.f.stats.shots).toBe(2);
+    expect(h.f.flight!.start).toBe(landed);
+    h.instance.dispose();
+  });
+
+  it.each(['mouse', 'keyboard'])('does not queue a quick %s click during flight', async device => {
+    const h = await setup(), pos: [number, number] = [220, 120];
+    const down: InputEvent = device === 'mouse' ? { type: 'mousedown', button: 1, pos } : { type: 'keydown', key: 'z' };
+    const up: InputEvent = device === 'mouse' ? { type: 'mouseup', button: 1, pos } : { type: 'keyup', key: 'z' };
+    h.frame(110, [down, up]);
+    const landed = h.f.flight!.end;
+    h.frame(120, [down, up]);
+    h.frame(landed);
+    expect(h.f.stats.shots).toBe(1);
+    expect(h.f.charging).toBe(-1);
+    h.instance.dispose();
+  });
+});
 
 describe('Rumble aim trainer sessions', () => {
   async function setup(difficulty?: string) {

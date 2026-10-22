@@ -154,7 +154,8 @@ export class Fighter {
   private comboSound = 0;
   /** Shake sounds played since the last shot was counted. */
   private shakeSounds = 0;
-  private lastNow = 0;
+  /** A held press can span turns. -2 waits for release after an automatic shot. */
+  private heldFist = -1;
   private readonly wobble: Random | null;
 
   constructor(
@@ -207,16 +208,24 @@ export class Fighter {
 
   /** A fire button pressed: start charging that fist's ball. */
   press(fist: number, now: number): void {
-    if (!this.canFire || fist >= this.fists || this.charging >= 0) return;
+    if (this.out || this.halted || fist < 0 || fist >= this.fists || this.heldFist !== -1) return;
+    this.heldFist = fist;
+    if (this.canFire) this.startCharge(fist, now);
+  }
+
+  private startCharge(fist: number, now: number): void {
     this.charging = fist;
     this.chargeStart = now;
     this.chargedHand = false;
-    this.play('charging', now);
   }
 
   /** A fire button released: fire that fist, charged if it was held long enough. */
   release(fist: number, now: number): void {
-    if (!this.canFire || fist >= this.fists) return;
+    if (fist < 0 || fist >= this.fists) return;
+    if (this.heldFist === -2) { this.heldFist = -1; return; }
+    if (this.heldFist >= 0 && this.heldFist !== fist) return;
+    this.heldFist = -1;
+    if (!this.canFire) return;
     this.fire(fist, now);
   }
 
@@ -256,10 +265,9 @@ export class Fighter {
   // ---- Strikes ----
 
   /** A strike sent at this board: it waits until a turn picks it. */
-  receive(shaft: Shaft, at = this.lastNow): void {
+  receive(shaft: Shaft, _at?: number): void {
     if (this.out) return;
     this.incoming.push(shaft);
-    if (this.phase === 'control' && !this.picked.length) this.pick(Math.max(at, this.controlAt));
   }
 
   /**
@@ -286,7 +294,6 @@ export class Fighter {
         length += s.height;
         this.warnings |= s.side === 1 ? 2 : 4;
       } else if (s.count > 0) {
-        length += Math.min(2, Math.ceil(s.count / 9));
         this.warnings |= 8;
       }
     }
@@ -297,7 +304,6 @@ export class Fighter {
   // ---- The turn ----
 
   update(now: number): void {
-    this.lastNow = now;
     for (let guard = 0; guard < 50; guard++) {
       if (!this.step(now)) break;
     }
@@ -315,17 +321,17 @@ export class Fighter {
     switch (this.phase) {
       case 'control': {
         if (this.halted) return false;
-        if (this.charging >= 0 && !this.chargedHand && now - this.chargeStart >= CHARGE_MS) {
+        const controlNow = this.sandbox.shotTimer ? Math.min(now, this.controlAt + AUTO_FIRE_MS) : now;
+        if (this.charging >= 0 && !this.chargedHand && controlNow - this.chargeStart >= CHARGE_MS) {
           this.chargedHand = true;
-          this.play('charged', this.chargeStart + CHARGE_MS);
         }
         if (!this.sandbox.shotTimer) return false;
         if (!this.warned && now - this.controlAt >= WARN_MS) {
           this.warned = true;
-          this.play('ball_soon_fire', this.controlAt + WARN_MS);
         }
         if (now - this.controlAt >= AUTO_FIRE_MS) {
           const fist = this.charging >= 0 ? this.charging : this.lastFist;
+          if (this.heldFist >= 0) this.heldFist = -2;
           this.fire(fist, this.controlAt + AUTO_FIRE_MS);
           return this.phase !== 'control';
         }
@@ -483,6 +489,7 @@ export class Fighter {
     this.warned = false;
     this.charging = -1;
     this.pick(t);
+    if (this.heldFist >= 0) this.startCharge(this.heldFist, t);
   }
 
   /**
@@ -519,6 +526,7 @@ export class Fighter {
     this.phase = 'out';
     this.flight = null;
     this.charging = -1;
+    this.heldFist = -1;
     this.warnings = 0;
     this.incoming.length = 0;
     this.picked = [];
@@ -544,13 +552,12 @@ export class Fighter {
 
   private shakeSound(now: number): void {
     const level = this.board.shots;
-    if (this.out || this.halted || level < 6) return;
-    const last = level === 7;
-    // shake_2 runs for one pass of the shake and repeats with it; shake_1 starts each shake.
-    const period = SHAKE_FRAMES * SHAKE_FRAME_MS * (last ? 1 : 2);
-    const offset = last ? 0 : SHAKE_FRAME_MS;
+    if (this.out || this.halted || level !== 6) return;
+    // The final warning is a continuous loop; only the intermittent rattle is scheduled here.
+    const period = SHAKE_FRAMES * SHAKE_FRAME_MS * 2;
+    const offset = SHAKE_FRAME_MS;
     for (let at = this.shotAt + offset + this.shakeSounds * period; at <= now; at += period) {
-      this.play(last ? 'shake_2' : 'shake_1', at);
+      this.play('shake_1', at);
       this.shakeSounds++;
     }
   }

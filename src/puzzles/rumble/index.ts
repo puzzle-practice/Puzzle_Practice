@@ -10,6 +10,7 @@ import { seedControls } from '../../core/seeds';
 import { SessionPause } from '../../core/pause';
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
+import { RumbleAudio } from './audio';
 import { keyMatches } from '../../core/controls';
 import { drawGameText, drawPauseLabel, floatAt, gameTextBox, loadGameFont, wrapGameText, BOARD_FONT_SMALL } from '../../core/game-text';
 import { sessionAverages } from '../../core/duty/desk';
@@ -250,6 +251,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const img = (name: string) => images.get(name);
   let replays!: ReplayRecorder;
   const sounds = new SoundBank(soundUrls, () => replays?.isSeeking ?? false);
+  const rumbleAudio = new RumbleAudio(sounds);
   const soundPick = new Random();
   const ctx = screen.ctx;
   const play = (name: string) => {
@@ -295,7 +297,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const listOffsets: [number, number] = [0, 0];
   /** Aim keys held, repeating 20 times a second after 300ms. */
   const held = { left: 0, right: 0, leftNext: 0, rightNext: 0, fine: false };
-  /** Fists whose press started a shot: only their release fires. A button already down when a ball comes to hand does nothing until it's pressed again. */
+  /** Presses originating on the board. In fights a held press carries into the next turn. */
   const firing = new Map<number, number>();
   /** Fire keys held, so a key's repeat doesn't press again. */
   const keysDown = new Set<number>();
@@ -308,6 +310,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const seedMode = seedControls(panel, store, () => running || !!replays?.isPlaying);
 
   function start(seed?: number, as: Mode = mode): void {
+    rumbleAudio.sync(null);
     pause.resume();
     const s = seed ?? seedMode.next(); seedMode.remember(s);
     startedMode = as;
@@ -357,6 +360,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   function stop(): void {
     if (!match || !running) return;
+    rumbleAudio.sync(null);
     const now = ticks();
     if (aiming() && aim) {
       aim.finish('Stopped', now);
@@ -784,7 +788,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** With one fist, either button fires it. */
   const fistFor = (f: Fighter, which: number) => (f.fists === 1 ? 0 : which);
 
-  const canPress = (f: Fighter, fist: number) => aiming() ? !!aim?.canFire(fist) : f.canFire;
+  const canPress = (f: Fighter, fist: number) => aiming() ? !!aim?.canFire(fist) : !f.out && !f.halted;
   function press(f: Fighter, fist: number, now: number): void {
     firing.set(fist, f.controlAt);
     if (!aiming()) f.press(fist, now);
@@ -815,7 +819,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         else if (key(event.key, 'fireL') || key(event.key, 'fireR')) {
           const fist = fistFor(f, key(event.key, 'fireL') ? 0 : 1);
           keysDown.delete(fist);
-          if (firing.get(fist) === f.controlAt) release(f, fist, now);
+          if (firing.has(fist) && (!aiming() || firing.get(fist) === f.controlAt)) release(f, fist, now);
           firing.delete(fist);
         }
       } else if (event.type === 'mousedown' && (event.button === 1 || event.button === 3)) {
@@ -837,7 +841,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         const fist = fistFor(f, event.button === 1 ? 0 : 1);
         const turn = firing.get(fist);
         firing.delete(fist);
-        if (turn === f.controlAt) {
+        if (turn !== undefined && (!aiming() || turn === f.controlAt)) {
           const [mx, my] = event.pos;
           if (onBoard(mx, my)) f.aimAt(mx - BOARD_X, my - BOARD_Y);
           release(f, fist, now);
@@ -1464,6 +1468,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function frame(events: InputEvent[]): void {
     const liveEvents = pause.input(events, PUZZLE, running);
     if (liveEvents === null) {
+      rumbleAudio.sync(null);
       events.forEach(scrollList);
       draw(ticks());
       return;
@@ -1481,12 +1486,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       // Resolve due shots and the deadline before accepting further input. A late frame still
       // credits a ball that actually landed before 2:00, but cannot start a shot after time is up.
       if (aiming() && aim && running) { aim.update(now); if (aim.result) stop(); }
+      else if (match && running) { match.update(now); if (match.settledAt) stop(); }
       handle(events, now);
       if (match && running) {
         if (aiming()) { aim!.update(now); if (aim!.result) stop(); }
         else { match.update(now); if (match.settledAt) stop(); }
       }
     }
+    rumbleAudio.sync(running && !aiming() && !replays.isSeeking && !replays.isAdvancing ? match?.player ?? null : null);
     if (replays.isSeeking || replays.isAdvancing) return;
     draw(now);
   }
@@ -1979,10 +1986,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   panel.settings.group('Reset').button('Reset to defaults', () => { settings = structuredClone(DEFAULTS); save(); }, off);
 
   const replaySettingsCodec: ReplaySettingsCodec = {
-    currentVersion: 3,
-    simulatorVersion: 4,
-    // Earlier versions dealt NPC boards and shots differently, so they can't be replayed now.
-    migrate: (version, value) => (version === 3 && validSettings(value) ? value : null),
+    currentVersion: 4,
+    simulatorVersion: 5,
+    // Old fights selected attacks and handled held buttons differently. Aim drills are unchanged.
+    migrate: (version, value) => (validSettings(value) && (version === 4 || (version === 3 && !!value.aimTrainer)) ? value : null),
   };
   let savedSettings: Settings | null = null;
   let savedMode: Mode | null = null;
@@ -2030,5 +2037,5 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (running) stop(); });
-  return { frame, dispose: () => { quietGrowl(); replays.dispose(); sounds.dispose(); } };
+  return { frame, dispose: () => { rumbleAudio.sync(null); quietGrowl(); replays.dispose(); sounds.dispose(); } };
 }) satisfies PuzzleFactory;
