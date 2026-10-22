@@ -10,6 +10,7 @@ import {
 } from './board';
 import type { Glove } from './gloves';
 import { charged, colourOf, EMPTY, FURBALL, isCharged } from './pieces';
+import { punchSteps } from './punch';
 
 /** Ball flight, px per ms. */
 export const FLIGHT_SPEED = 0.8;
@@ -65,7 +66,7 @@ export interface PunchAnim {
   result: PunchResult;
   side: number;
   start: number;
-  /** Steps each column takes, the longest move in it. */
+  /** Steps each column takes, including each ball's wait at the entry. */
   steps: number[];
   end: number;
 }
@@ -129,6 +130,8 @@ export class Fighter {
   grapes: Grape[] = [];
   shouts: Shout[] = [];
   punch: PunchAnim | null = null;
+  /** Impact flashes can outlast the moving balls and overlap the next turn. */
+  punchHits: Array<{ side: number; row: number; at: number }> = [];
   sprinkle: SprinkleAnim | null = null;
   /** The board slides down a row from here after a drop. */
   dropAt = -Infinity;
@@ -298,7 +301,8 @@ export class Fighter {
       }
     }
     this.warnAt = now;
-    this.play(length > 10 ? 'shaft_warning_large' : length > 5 ? 'shaft_warning_medium' : 'shaft_warning_small', now);
+    // The recording names run in the opposite order to the attack-height bands.
+    this.play(length > 10 ? 'shaft_warning_small' : length > 5 ? 'shaft_warning_medium' : 'shaft_warning_large', now);
   }
 
   // ---- The turn ----
@@ -313,6 +317,7 @@ export class Fighter {
     this.grapes = this.grapes.filter((g) => now < g.start + g.ms);
     this.shouts = this.shouts.filter((s) => now < s.start + s.ms);
     if (this.punch && now >= this.punch.end) this.punch = null;
+    this.punchHits = this.punchHits.filter(hit => now < hit.at + 300);
     if (this.sprinkle && now >= this.sprinkle.end) this.sprinkle = null;
   }
 
@@ -449,12 +454,12 @@ export class Fighter {
     if (s.height > 0 && s.width > 0) {
       this.board.punched();
       const result = this.board.punch(s, glove);
-      const steps = result.columns.map((c) => c.moves.reduce((m, move) => Math.max(m, move.to - move.from), 0));
+      const steps = result.columns.map(punchSteps);
       const longest = Math.max(0, ...steps);
       end = t + longest * PUNCH_STEP_MS;
       this.punch = { result, side: s.side, start: t, steps, end };
       // A fist hits at each bounce, alternating sides, with a kung fu sound.
-      result.bounces.forEach((row, i) => this.later(t + (row <= 1 ? 1 : PUNCH_STEP_MS * (row - 1)), KUNG_FU[i % 3]));
+      this.punchImpacts(result, s.side, t);
       landed += Math.min(s.width, 9) * Math.min(s.height, H - 1 - this.board.damage);
     }
     const balls = this.board.sprinkle(s, glove);
@@ -500,17 +505,28 @@ export class Fighter {
     if (!this.canFire || this.punch || this.sprinkle || this.flight) return null;
     this.board.punched();
     const result = this.board.punch(s, glove);
-    const steps = result.columns.map((c) => c.moves.reduce((m, move) => Math.max(m, move.to - move.from), 0));
+    const steps = result.columns.map(punchSteps);
     const end = now + Math.max(0, ...steps) * PUNCH_STEP_MS;
     this.punch = { result, side: s.side, start: now, steps, end };
-    result.bounces.forEach((row, i) => this.later(now + (row <= 1 ? 1 : PUNCH_STEP_MS * (row - 1)), KUNG_FU[i % 3]));
+    this.punchImpacts(result, s.side, now);
     const landed = Math.min(s.width, 9) * Math.min(s.height, H - 1 - this.board.damage);
     this.stats.received += landed;
     this.stats.largestReceived = Math.max(this.stats.largestReceived, landed);
     this.controlAt = end;
     this.warned = false;
+    this.charging = -1;
+    this.phase = 'strike';
+    this.busyUntil = end;
     if (this.board.isDead() && !this.sandbox.endless) this.knockOut(end);
     return this.punch;
+  }
+
+  private punchImpacts(result: PunchResult, side: number, start: number): void {
+    result.bounces.forEach((row, i) => {
+      const at = start + (row <= 1 ? 1 : PUNCH_STEP_MS * (row - 1));
+      this.punchHits.push({ side: i % 2 ? 1 - side : side, row, at });
+      this.later(at, KUNG_FU[i % 3]);
+    });
   }
 
   /** Freeplay mode: the board was edited, so the turn's clock starts over. */

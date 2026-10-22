@@ -11,6 +11,8 @@ import { SessionPause } from '../../core/pause';
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
 import { RumbleAudio } from './audio';
+import { punchPosition } from './punch';
+import { paintGlove } from './portrait';
 import { keyMatches } from '../../core/controls';
 import { drawGameText, drawPauseLabel, floatAt, gameTextBox, loadGameFont, wrapGameText, BOARD_FONT_SMALL } from '../../core/game-text';
 import { sessionAverages } from '../../core/duty/desk';
@@ -311,6 +313,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   function start(seed?: number, as: Mode = mode): void {
     rumbleAudio.sync(null);
+    paintedGloves.clear();
     pause.resume();
     const s = seed ?? seedMode.next(); seedMode.remember(s);
     startedMode = as;
@@ -961,10 +964,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const hidden = new Set<number>();
     const punch = f.punch;
     if (punch) {
-      punch.result.columns.forEach((column, c) => {
-        const t = (now - punch.start) / PUNCH_STEP_MS;
-        for (const move of column.moves) if (t < punch.steps[c]) hidden.add(cellKey(column.cells[move.to]));
-      });
+      for (const column of punch.result.columns) for (const cell of column.cells) hidden.add(cellKey(cell));
     }
     const sprinkle = f.sprinkle;
     if (sprinkle) for (const ball of sprinkle.balls) hidden.add(cellKey(ball.cell));
@@ -990,6 +990,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (creating()) drawPainting();
     if (aiming() && aim) drawAimTargets();
     if (punch) drawPunch(f, now);
+    drawPunchHits(f, now);
     if (sprinkle) {
       for (const ball of sprinkle.balls) {
         const at = b.pixel(ball.cell);
@@ -1119,7 +1120,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const punch = f.punch!;
     const b = f.board;
     const t = (now - punch.start) / PUNCH_STEP_MS;
-    punch.result.columns.forEach((column, c) => {
+    punch.result.columns.forEach((column) => {
       const cells = column.cells.map((p) => b.pixel(p));
       if (!cells.length) return;
       const step = cells.length > 1 ? { x: cells[1].x - cells[0].x, y: cells[1].y - cells[0].y } : { x: punch.side === 1 ? 13 : -13, y: STEP_Y };
@@ -1131,28 +1132,30 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         return { x: cells[lo].x + (cells[hi].x - cells[lo].x) * r, y: cells[lo].y + (cells[hi].y - cells[lo].y) * r };
       };
       for (const move of column.moves) {
-        const pos = Math.max(move.from, Math.min(move.to, move.to - (punch.steps[c] - t)));
+        const pos = punchPosition(move, t);
         const p = at(pos);
         drawBall(move.piece, p.x, p.y, now);
       }
       for (const d of column.destroyed) {
         const frame = Math.floor((now - (punch.start + d.step * PUNCH_STEP_MS)) * 24 / 1000);
         const name = COLOUR_NAMES[colourOf(d.piece)];
-        if (frame < 0 || frame >= 5 || !name) continue;
         const p = cells[d.at];
+        if (frame < 0) { drawBall(d.piece, p.x, p.y, now); continue; }
+        if (frame >= 5 || !name) continue;
         ctx.drawImage(img(`explode_${name}`), frame * BALL, 0, BALL, BALL, p.x, p.y, BALL, BALL);
       }
     });
-    // A fist hits at each bounce, alternating sides, flashing for 300ms.
-    let right = punch.side === 0;
-    for (const row of punch.result.bounces) {
-      const at = punch.start + (row <= 1 ? 1 : PUNCH_STEP_MS * (row - 1));
+  }
+
+  function drawPunchHits(f: Fighter, now: number): void {
+    // Keep wall impacts visible even when the moving balls have already settled.
+    for (const { side, row, at } of f.punchHits) {
       if (now >= at && now < at + 300) {
+        const right = side === 0;
         ctx.globalAlpha = Math.floor((now - at) / 50) % 2 ? 0.6 : 1;
         ctx.drawImage(img('fist_hit'), right ? 120 : 0, 0, 120, 120, right ? VIEW_W - 120 : 0, row * STEP_Y, 120, 120);
         ctx.globalAlpha = 1;
       }
-      right = !right;
     }
   }
 
@@ -1320,10 +1323,19 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
 
   /** The glove art over a face: the pirate's bludgeon (werewolf claws for everyone in werewolf rumbling). */
-  function gloveArt(m: Match, index: number): HTMLImageElement | null {
-    const type = m.gloves[index].type;
+  const paintedGloves = new Map<string, HTMLCanvasElement>();
+  function gloveArt(m: Match, index: number): HTMLCanvasElement | null {
+    const glove = m.gloves[index];
+    const type = glove.type;
+    const skin = index === 0 ? currentPirate().face.skin : m.looks[index].colours.skin ?? 'tan';
     const names = settings.werewolf || m.settings.werewolf ? [`glove_werewolf${type}`, `glove${type}`] : [`glove${type}`];
-    for (const name of names) if (gloveImages.has(name)) return gloveImages.get(name);
+    for (const name of names) {
+      if (!gloveImages.has(name)) continue;
+      const key = `${name}:${glove.colours}:${skin}`;
+      let image = paintedGloves.get(key);
+      if (!image) paintedGloves.set(key, image = paintGlove(gloveImages.get(name), glove, skin));
+      return image;
+    }
     return null;
   }
 

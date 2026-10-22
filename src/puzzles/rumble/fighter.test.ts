@@ -101,7 +101,7 @@ describe('Rumble incoming sounds', () => {
     f.update(landed);
     expect(f.stats.received).toBe(0);
     expect(f.warnings).toBe(2);
-    expect(heard).toContainEqual({ name: 'shaft_warning_small', at: landed });
+    expect(heard).toContainEqual({ name: 'shaft_warning_large', at: landed });
     const nextLanding = shoot(f, landed + 1);
     f.update(nextLanding);
     expect(f.punch!.start).toBe(nextLanding);
@@ -118,7 +118,49 @@ describe('Rumble incoming sounds', () => {
     f.update(shoot(f, 0));
     expect(f.picked).toHaveLength(4);
     expect(f.warnings).toBe(2 | 8);
-    expect(heard.filter(s => s.name.startsWith('shaft_warning')).map(s => s.name)).toEqual(['shaft_warning_small']);
+    expect(heard.filter(s => s.name.startsWith('shaft_warning')).map(s => s.name)).toEqual(['shaft_warning_large']);
+  });
+
+  it.each([
+    { height: 0, count: 1, sound: 'shaft_warning_large' },
+    { height: 0, count: 17, sound: 'shaft_warning_large' },
+    { height: 1, count: 0, sound: 'shaft_warning_large' },
+    { height: 5, count: 0, sound: 'shaft_warning_large' },
+    { height: 6, count: 0, sound: 'shaft_warning_medium' },
+    { height: 10, count: 0, sound: 'shaft_warning_medium' },
+    { height: 11, count: 0, sound: 'shaft_warning_small' },
+    { height: 20, count: 0, sound: 'shaft_warning_small' },
+  ])('selects $sound for height $height and sprinkle $count', ({ height, count, sound }) => {
+    const { f, heard } = setup();
+    f.receive(attack({ height, count }));
+    f.update(shoot(f, 0));
+    expect(heard.filter(s => s.name.startsWith('shaft_warning')).map(s => s.name)).toEqual([sound]);
+  });
+
+  it('keeps delayed wall impacts after the board has settled', () => {
+    const { f } = setup();
+    // An almost full board sends the punch down a long diagonal, even for a short punch.
+    for (let y = 0; y < 19; y++) for (let x = 0; x < f.board.width(y); x++) f.board.set({ x, y }, 1);
+    const punch = f.strikeNow(attack({ height: 3, width: 9 }), new Glove(0), 100)!;
+    const hit = f.punchHits.find(h => h.at > punch.end)!;
+    expect(hit).toBeDefined();
+    f.update(punch.end);
+    expect(f.punch).toBeNull();
+    expect(f.punchHits).toContain(hit);
+    f.update(hit.at + 300);
+    expect(f.punchHits).not.toContain(hit);
+  });
+
+  it('holds Freeplay input until the punch has finished pushing the board', () => {
+    const { f } = setup();
+    const punch = f.strikeNow(attack(), new Glove(0), 100)!;
+    expect(f.canFire).toBe(false);
+    f.press(1, 101);
+    expect(f.charging).toBe(-1);
+    f.update(punch.end);
+    expect(f.canFire).toBe(true);
+    expect(f.charging).toBe(1);
+    expect(f.chargeStart).toBe(punch.end);
   });
 });
 
