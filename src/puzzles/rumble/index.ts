@@ -1038,12 +1038,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     drawWarnings(f, now);
     drawShouts(f, now);
     drawPunchHits(f, now);
-    // One or two shots from a drop, the board's edge goes magenta, then red.
-    if (!f.out && (b.shots === 6 || b.shots === 7)) {
-      ctx.strokeStyle = b.shots === 7 ? '#ff0000' : '#ff00ff';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(1, 1, VIEW_W - 2, VIEW_H - 2);
-    }
     if (f.rumless) ctx.drawImage(img('rumless_icon'), 90, 475);
     if (f.out) {
       ctx.fillStyle = 'rgba(0,0,0,0.3)';
