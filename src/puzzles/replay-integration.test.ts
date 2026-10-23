@@ -16,6 +16,7 @@ import { COL_PX as SWORD_COLUMN_PX } from './swordfight/fighter';
 import { setWarningTimer } from '../core/audio';
 import { SailingGame } from './sailing/game';
 import { PatchingBoard, movable as patchingMovable } from './patching/logic';
+import { CELL as CARP_CELL, COLS as CARP_COLS, Game as CarpentryGame, ROWS as CARP_ROWS, VIEW_X as CARP_X, VIEW_Y as CARP_Y } from './vampire-carp/game';
 import { AIM_HISTORY, AIM_LANDING_MS, AIM_MS, AimTrainer } from './rumble/aim';
 import { Match as RumbleMatch } from './rumble/match';
 import { Glove as RumbleGlove } from './rumble/gloves';
@@ -601,6 +602,138 @@ describe('Distilling session dismissal', () => {
 afterEach(async () => {
   await replayWrites.idle();
   vi.restoreAllMocks(); vi.unstubAllGlobals();
+});
+
+describe('Carpentry pickup input', () => {
+  async function placedPlank(ship = false) {
+    const update = vi.spyOn(CarpentryGame.prototype, 'update');
+    const store = new Store('vampire-carp');
+    store.set('seeded', true); store.set('sessionSeed', 5);
+    store.set('config', { ship, difficulty: 5, tokens: 0 });
+    const { panel, buttons, setters } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const input = { mouse: [-1, -1] as [number, number] };
+    const factory = (await import('./vampire-carp/index')).default;
+    const context = { screen, input, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext;
+    const open = () => factory(context);
+    const instance = await open();
+    const step = (mouse: [number, number], events: InputEvent[] = []) => {
+      input.mouse = mouse; now += 20; instance.frame(events);
+    };
+    buttons.get('Play::Start')!();
+    now = 1600; instance.frame([]);
+    const currentGame = () => update.mock.instances.at(-1)! as CarpentryGame;
+    const game = currentGame();
+    const slot = game.tools.findIndex(tool => tool && !tool.piece.isPutty);
+    step([-1, -1], [{ type: 'keydown', key: String(slot + 1) }]);
+    const piece = game.held!.piece;
+    // Find a non-finishing placement that can be nudged one cell to the right.
+    let at: [number, number] | undefined;
+    for (let y = 0; y < CARP_ROWS && !at; y++) for (let x = 0; x < CARP_COLS && !at; x++) {
+      const target = game.target([x, y], piece), next = game.target([x + 1, y], piece);
+      if (game.inToolbox([x, y]) || !target || !next || target.hole !== next.hole) continue;
+      if (target.hole.checkPiece(piece, ...target.at) > 0 && next.hole.checkPiece(piece, ...next.at) > 0 &&
+          !target.hole.wouldFinish(piece, ...target.at)) at = [CARP_X + x * CARP_CELL + 5, CARP_Y + y * CARP_CELL + 5];
+    }
+    expect(at).toBeDefined();
+    const pos = at!;
+    step(pos, [{ type: 'mousedown', button: 1, pos }, { type: 'mouseup', button: 1, pos }]);
+    expect(game.tentative).not.toBeNull();
+    return { game, pos, step, instance, buttons, setters, recorder: captured.recorders[0], currentGame, open };
+  }
+
+  it.each([[false, false], [false, true], [true, false], [true, true]])('keeps a picked-up plank held when movement follows release (ship: %s, batched pickup: %s)', async (ship, batched) => {
+    const { game, pos, step, instance } = await placedPlank(ship);
+    const down: InputEvent = { type: 'mousedown', button: 1, pos };
+    if (!batched) step(pos, [down]);
+    step([pos[0] + CARP_CELL, pos[1]], [...(batched ? [down] : []), { type: 'mouseup', button: 1, pos }]);
+    expect(game.held).not.toBeNull();
+    expect(game.tentativeAt).not.toBeNull();
+    expect(game.stats.replaced).toBe(0);
+    // An intentional second click still completes the adjustment.
+    const moved: [number, number] = [pos[0] + CARP_CELL, pos[1]];
+    step(moved, [{ type: 'mousedown', button: 1, pos: moved }, { type: 'mouseup', button: 1, pos: moved }]);
+    expect(game.held).toBeNull();
+    expect(game.tentativeAt).toBeNull();
+    expect(game.stats.replaced).toBe(1);
+    instance.dispose?.();
+  });
+
+  it.each([15, 16])('uses the client drag threshold at release even if the pointer moves back before the frame (%s px)', async distance => {
+    const { game, pos, step, instance } = await placedPlank();
+    step(pos, [{ type: 'mousedown', button: 1, pos }]);
+    step(pos, [{ type: 'mouseup', button: 1, pos: [pos[0] + distance, pos[1]] }]);
+    expect(game.stats.replaced).toBe(distance > 15 ? 1 : 0);
+    expect(game.held === null).toBe(distance > 15);
+    instance.dispose?.();
+  });
+
+  it('places a drag batched into one frame at the release position', async () => {
+    const { game, pos, step, instance } = await placedPlank();
+    const at = game.tentativeAt!;
+    const target = game.target([at[0] + 1, at[1]], game.tentative!.sprite.piece)!;
+    step(pos, [{ type: 'mousedown', button: 1, pos }, { type: 'mouseup', button: 1, pos: [pos[0] + CARP_CELL, pos[1]] }]);
+    expect(game.held).toBeNull();
+    expect(game.stats.replaced).toBe(1);
+    expect(target.hole.tools.at(-1)!.at).toEqual(target.at);
+    instance.dispose?.();
+  });
+
+  it('replays and seeks the corrected pickup order', async () => {
+    const { game, pos, step, instance, buttons, setters, recorder, currentGame } = await placedPlank();
+    step(pos, [{ type: 'mousedown', button: 1, pos }]);
+    step([pos[0] + CARP_CELL, pos[1]], [{ type: 'mouseup', button: 1, pos }]);
+    expect(game.held).not.toBeNull();
+    const tape = recorder.finish('Pickup regression')!;
+    expect(tape.simulatorVersion).toBe(3);
+    buttons.get('Play::Start')!(); // Stop the live session before playback.
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration); instance.frame([]);
+    expect(currentGame().held).not.toBeNull();
+    expect(currentGame().stats.replaced).toBe(0);
+    expect(recorder.divergedAt).toBeNull();
+    setters.get('History:Replays:Jump to (s)')!(tape.duration / 1000);
+    buttons.get('History:Replays:Jump')!();
+    await vi.waitFor(() => expect(recorder.isSeeking).toBe(false));
+    expect(currentGame().held).not.toBeNull();
+    expect(currentGame().stats.replaced).toBe(0);
+    expect(recorder.divergedAt).toBeNull();
+    instance.dispose?.();
+  });
+
+  it('preserves the input order when loading and seeking a version 2 replay', async () => {
+    const { pos, step, instance, buttons, setters, recorder, currentGame, open } = await placedPlank();
+    step(pos, [{ type: 'mousedown', button: 1, pos }]);
+    step([pos[0] + CARP_CELL, pos[1]], [{ type: 'mouseup', button: 1, pos }]);
+    const tape = recorder.finish('Historical pickup order')!;
+    buttons.get('Play::Start')!();
+    instance.dispose?.();
+    await replayWrites.idle();
+    // Store the same timeline with the old semantics. Version 2 committed this pickup.
+    tape.simulatorVersion = 2;
+    delete tape.checks;
+    const { encodeReplayBlob, replayMetadata } = await import('../core/replay');
+    const { saveReplayFile } = await import('../core/replay-storage');
+    const blob = await encodeReplayBlob(tape);
+    await saveReplayFile({ metadata: replayMetadata(tape, blob.size), blob });
+    const reopened = await open();
+    const historical = captured.recorders.at(-1)!;
+    await vi.waitFor(() => expect(historical.hasPlayableAt(tape.at, tape.runId)).toBe(true));
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await historical.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration); reopened.frame([]);
+    expect(currentGame().held).toBeNull();
+    expect(currentGame().stats.replaced).toBe(1);
+    setters.get('History:Replays:Jump to (s)')!(tape.duration / 1000);
+    buttons.get('History:Replays:Jump')!();
+    await vi.waitFor(() => expect(historical.isSeeking).toBe(false));
+    expect(currentGame().held).toBeNull();
+    expect(currentGame().stats.replaced).toBe(1);
+    reopened.dispose?.();
+  });
 });
 
 describe('Shipwrightery sessions and replays', () => {
