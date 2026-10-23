@@ -4,10 +4,35 @@ import type { Random } from '../../core/random';
 import { COLOURS, CRATE_SIZES, isAnts, isCrate, isCrateAnchor, isTool, MAX_CRATE_AREA, MAX_CRATES, crateSize, WIDTH } from './board';
 import type { CrateSource, Forage } from './engine';
 
-/** Paced chest eligibility is evaluated in two-second batches. */
-export const MOVE_BATCH_MS = 2000;
-/** Additional delivery delay after each batch. */
+/** Practice delivery delay, measured from the first fresh move. */
+export const CHEST_DELAY_MS = 2000;
+/** Versions 3–4 evaluated eligibility in globally aligned two-second batches. */
+export const MOVE_BATCH_MS = CHEST_DELAY_MS;
+/** Versions 3–4 added this delivery delay after each batch. */
 export const ROUND_TRIP_MS = 120;
+
+/** Count moves and elapsed time together, then wait for the requested chest to land. */
+class ChestPacing {
+  private moves = 0;
+  private startedAt: number | null = null;
+  private inFlight = false;
+
+  beforeMove(now: number): boolean {
+    if (this.inFlight) return false;
+    this.startedAt ??= now;
+    this.moves++;
+    return this.moves >= 2 && now - this.startedAt >= CHEST_DELAY_MS;
+  }
+
+  requested(): void { this.inFlight = true; }
+
+  afterMove(game: Forage): void {
+    if (!this.inFlight || game.board.bonusMode !== 0) return;
+    this.moves = 0;
+    this.startedAt = null;
+    this.inFlight = false;
+  }
+}
 
 /** Crate art (crate1x1.png etc.): fruit 0-4 for small and medium crates; 3x2 gems 0 or gold 1. */
 const FRUIT_TILES = COLOURS;
@@ -24,6 +49,7 @@ export class CrateRequests implements CrateSource {
   /** Paced: moves since the last request was sent, and when the one on its way reaches the board. */
   private moves = 0;
   private readyAt: number | null = null;
+  private readonly delivery = new ChestPacing();
 
   constructor(
     private readonly rng: Random,
@@ -32,13 +58,15 @@ export class CrateRequests implements CrateSource {
     /** How many crates the board brings in all. */
     private readonly budget: number,
     /**
-     * Paced, as in the game: two moves after the last request, a crate is asked for. The ask goes
-     * out with the next two-second batch, and reaches the board on the first move after that.
+     * Paced delivery. Versions 3–4 asked for a crate after two moves, waited for the next
+     * two-second batch, then delivered on a later move. Version 5 uses overlappingDelay below.
      * Unpaced (replays recorded before) asks before every move there's room.
      */
     private readonly paced = false,
     /** Paced: the game clock in milliseconds. */
     private readonly now: () => number = () => 0,
+    /** Version 5: the delay overlaps the two fresh moves and resets after landing. */
+    private readonly overlappingDelay = false,
   ) {}
 
   /** Room on the board and in the budget for another crate. */
@@ -49,6 +77,10 @@ export class CrateRequests implements CrateSource {
 
   afterMove(game: Forage): boolean {
     if (!this.paced) return false;
+    if (this.overlappingDelay) {
+      this.delivery.afterMove(game);
+      return false;
+    }
     this.moves++;
     if (this.readyAt === null && this.moves >= 2 && this.room(game)) {
       this.readyAt = (Math.floor(this.now() / MOVE_BATCH_MS) + 1) * MOVE_BATCH_MS + ROUND_TRIP_MS;
@@ -59,7 +91,9 @@ export class CrateRequests implements CrateSource {
 
   beforeMove(game: Forage): void {
     const b = game.board;
-    if (this.paced) {
+    if (this.paced && this.overlappingDelay) {
+      if (!this.delivery.beforeMove(this.now())) return;
+    } else if (this.paced) {
       if (this.readyAt === null || this.now() < this.readyAt || b.bonusMode !== 0) return;
       this.readyAt = null;
     }
@@ -79,6 +113,7 @@ export class CrateRequests implements CrateSource {
     if (game.werewolf) game.crateArt[key] = WEREWOLF_TILES[size];
     b.bonusMode = 64 | size | (key << 2);
     this.requested++;
+    if (this.paced && this.overlappingDelay) this.delivery.requested();
   }
 }
 
@@ -95,6 +130,7 @@ export class GauntletChests implements CrateSource {
   private movesSinceLast = -1;
   /** Chests still to come on this board: one per banana. */
   budget: number;
+  private readonly delivery = new ChestPacing();
 
   constructor(
     private readonly rng: Random,
@@ -103,8 +139,8 @@ export class GauntletChests implements CrateSource {
     budget: number,
     private readonly chaos = false,
     /**
-     * Paced: a chest that's due doesn't drop in at once. It's asked for when the player next moves,
-     * and then it has to find room like a Normal crate: each time the board settles it lands with a
+     * Paced: a chest goes through delivery before it can drop. It then has to find room like a
+     * Normal crate: each time the board settles it lands with a
      * chance that falls as the board fills, in any column whose top cells are clear.
      */
     private readonly paced = false,
@@ -115,6 +151,8 @@ export class GauntletChests implements CrateSource {
      * Off (replays recorded before): from the third move it tries every column, keeping the last.
      */
     private readonly retryColumns = false,
+    /** Version 5: the delay overlaps the two fresh moves and resets after landing. */
+    private readonly overlappingDelay = false,
   ) {
     this.budget = budget;
     this.pick();
@@ -125,6 +163,20 @@ export class GauntletChests implements CrateSource {
   private readyAt = 0;
 
   beforeMove(game: Forage): void {
+    if (this.paced && this.overlappingDelay) {
+      if (!this.enabled || (!this.chaos && this.budget <= 0) || !this.delivery.beforeMove(this.now())) return;
+      if (game.board.bonusMode !== 0) return;
+      const onBoard = [0, 0, 0];
+      for (const p of game.board.cells) if (isCrateAnchor(p)) onBoard[crateSize(p)]++;
+      if (!this.chaos && (onBoard.reduce((a, b) => a + b, 0) >= 3 || !this.fits(onBoard))) return;
+      const size = this.next - 1;
+      game.crateArt[size] = (game.werewolf ? WEREWOLF_TILES : CURSED_TILES)[size];
+      game.board.bonusMode = 64 | size | (size << 2);
+      this.budget--;
+      this.pick();
+      this.delivery.requested();
+      return;
+    }
     if (!this.paced || this.waiting < 0 || game.board.bonusMode !== 0 || this.now() < this.readyAt) return;
     game.crateArt[this.waiting] = (game.werewolf ? WEREWOLF_TILES : CURSED_TILES)[this.waiting];
     game.board.bonusMode = 64 | this.waiting | (this.waiting << 2);
@@ -160,6 +212,10 @@ export class GauntletChests implements CrateSource {
 
   afterMove(game: Forage): boolean {
     game.board.unlimitedCrates = this.chaos;
+    if (this.paced && this.overlappingDelay) {
+      this.delivery.afterMove(game);
+      return false;
+    }
     if (!this.enabled || (!this.chaos && this.budget <= 0)) return false;
     const onBoard = [0, 0, 0];
     for (const p of game.board.cells) if (isCrateAnchor(p)) onBoard[crateSize(p)]++;
@@ -174,13 +230,15 @@ export class GauntletChests implements CrateSource {
     }
     let placed = false;
     if (this.movesSinceLast >= 2 && (this.chaos || total < 3)) {
-      const fits =
-        (this.next === 3 && onBoard[1] === 0 && onBoard[2] < 1) || (this.next === 2 && onBoard[2] === 0 && onBoard[1] < 2) || this.next === 1;
-      if (this.chaos || fits) placed = this.trySpawn(game);
+      if (this.chaos || this.fits(onBoard)) placed = this.trySpawn(game);
     }
     // Check the count from before the spawn.
     if (!this.chaos && total === 3) this.movesSinceLast = -1;
     return placed;
+  }
+
+  private fits(onBoard: number[]): boolean {
+    return (this.next === 3 && onBoard[1] === 0 && onBoard[2] < 1) || (this.next === 2 && onBoard[2] === 0 && onBoard[1] < 2) || this.next === 1;
   }
 
   private trySpawn(game: Forage): boolean {
