@@ -288,6 +288,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let meterShown = 0;
   let meterAt = 0;
   let lastMouse: Cell = [-1, -1];
+  // Replays through simulator version 2 applied the final pointer position before queued releases.
+  let legacyPointerOrder = false;
   const sessionTime = () => (config.unlimited || config.create ? SESSION_LONG : SESSION_SHORT);
   /** Freeplay mode: the palette choice a left click paints (recorded, so replays click the same way), the key held, and pasted-text errors. */
   let paletteOpen: boolean | null = null, paintWith: boolean | null = null, painting = false, pasteNote = '';
@@ -327,6 +329,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   }
 
   function startSession(): void {
+    legacyPointerOrder = false;
     stats = newStats();
     duty.clear();
     if (!replays.isPlaying) store.setScoresEnabled(!seeded && !config.create);
@@ -451,13 +454,21 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     });
     if (!game || !boardActive) return;
     const [mx, my] = input.mouse;
-    if ((mx !== lastMouse[0] || my !== lastMouse[1]) && inView(mx, my)) {
-      game.pointerMove(mx, my);
-      const open = paintWith ?? (painting ? paletteOpen : null);
-      if (creating() && open !== null) paintAt(mx, my, open);
-    }
-    lastMouse = [mx, my];
+    const movePointer = (x: number, y: number) => {
+      if ((x !== lastMouse[0] || y !== lastMouse[1]) && inView(x, y)) {
+        game!.pointerMove(x, y);
+        const open = paintWith ?? (painting ? paletteOpen : null);
+        if (creating() && open !== null) paintAt(x, y, open);
+      }
+      lastMouse = [x, y];
+    };
+    // The latest position can be from AFTER a release. Start at the first queued pointer event,
+    // process each button event where it happened, then catch up to the latest position.
+    const firstPointer = events.find((event): event is Extract<InputEvent, { pos: Cell }> => 'pos' in event);
+    const initialPointer = !legacyPointerOrder && firstPointer ? firstPointer.pos : input.mouse;
+    movePointer(...initialPointer);
     for (const event of events) {
+      if (!legacyPointerOrder && (event.type === 'mousedown' || event.type === 'mouseup')) movePointer(...event.pos);
       if (creating()) {
         const paintKey = event.type === 'keydown' || event.type === 'keyup' ? PAINT_KEYS.find((k) => keyMatches(event.key, 'vampire-carp', k.id, k.defaultKey)) : undefined;
         if (paintKey) {
@@ -491,6 +502,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         else if (keyMatches(k, 'vampire-carp', 'place', KEYS.place) && inView(mx, my)) game.placeKey(mx, my);
       }
     }
+    if (!legacyPointerOrder) movePointer(mx, my);
   }
 
   /** Freeplay mode: cuts open or closes the square of a hole's box under the pointer. */
@@ -1089,7 +1101,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   // Version 2 added ship carpentry; version 1 replays are all the Vampire Lair's.
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 2,
-    simulatorVersion: 2,
+    simulatorVersion: 3,
     migrate: (version, value) => {
       if ((version !== 1 && version !== 2) || !value || typeof value !== 'object') return null;
       const wrapper = value as Record<string, unknown>;
@@ -1129,6 +1141,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     replayBoardSeeds = [...seedData.boardSeeds];
     replaySpeedState = seedData.speedRng;
     startSession();
+    legacyPointerOrder = (tape.simulatorVersion ?? 1) <= 2;
     boardActive = true;
   }, () => {
     if (boardActive) endSession();
