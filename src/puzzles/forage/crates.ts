@@ -5,14 +5,16 @@ import { COLOURS, CRATE_SIZES, isAnts, isCrate, isCrateAnchor, isTool, MAX_CRATE
 import type { CrateSource, Forage } from './engine';
 
 /** Practice delivery delay, measured from the first fresh move. */
-export const CHEST_DELAY_MS = 2000;
+export const CHEST_DELAY_MS = 1000;
 /** Versions 3–4 evaluated eligibility in globally aligned two-second batches. */
-export const MOVE_BATCH_MS = CHEST_DELAY_MS;
+export const MOVE_BATCH_MS = 2000;
 /** Versions 3–4 added this delivery delay after each batch. */
 export const ROUND_TRIP_MS = 120;
 
 /** Count moves and elapsed time together, then wait for the requested chest to land. */
 class ChestPacing {
+  constructor(private readonly delayMs: number) {}
+
   private moves = 0;
   private startedAt: number | null = null;
   private inFlight = false;
@@ -21,7 +23,7 @@ class ChestPacing {
     if (this.inFlight) return false;
     this.startedAt ??= now;
     this.moves++;
-    return this.moves >= 2 && now - this.startedAt >= CHEST_DELAY_MS;
+    return this.moves >= 2 && now - this.startedAt >= this.delayMs;
   }
 
   requested(): void { this.inFlight = true; }
@@ -49,7 +51,7 @@ export class CrateRequests implements CrateSource {
   /** Paced: moves since the last request was sent, and when the one on its way reaches the board. */
   private moves = 0;
   private readyAt: number | null = null;
-  private readonly delivery = new ChestPacing();
+  private readonly delivery: ChestPacing;
 
   constructor(
     private readonly rng: Random,
@@ -67,7 +69,9 @@ export class CrateRequests implements CrateSource {
     private readonly now: () => number = () => 0,
     /** Version 5: the delay overlaps the two fresh moves and resets after landing. */
     private readonly overlappingDelay = false,
-  ) {}
+    /** Versions 5–6 retain their two-second overlapping delay. */
+    delayMs = CHEST_DELAY_MS,
+  ) { this.delivery = new ChestPacing(delayMs); }
 
   /** Room on the board and in the budget for another crate. */
   private room(game: Forage): boolean {
@@ -130,7 +134,7 @@ export class GauntletChests implements CrateSource {
   private movesSinceLast = -1;
   /** Chests still to come on this board: one per banana. */
   budget: number;
-  private readonly delivery = new ChestPacing();
+  private readonly delivery: ChestPacing;
 
   constructor(
     private readonly rng: Random,
@@ -153,7 +157,10 @@ export class GauntletChests implements CrateSource {
     private readonly retryColumns = false,
     /** Version 5: the delay overlaps the two fresh moves and resets after landing. */
     private readonly overlappingDelay = false,
+    /** Versions 5–6 retain their two-second overlapping delay. */
+    delayMs = CHEST_DELAY_MS,
   ) {
+    this.delivery = new ChestPacing(delayMs);
     this.budget = budget;
     this.pick();
   }

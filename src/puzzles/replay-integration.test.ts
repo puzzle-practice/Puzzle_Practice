@@ -2294,7 +2294,7 @@ describe('Forage art toggle', () => {
 });
 
 describe('puzzle completion during replay', () => {
-  it.each([['ci', 1], ['werewolf', 1], ['ci', 5]] as const)('preserves historical Forage %s version %s replay rules', async (mode, version) => {
+  it.each([['ci', 1], ['werewolf', 1], ['ci', 5], ['ci', 6]] as const)('preserves historical Forage %s version %s replay rules', async (mode, version) => {
     const { encodeReplayBlob, replayMetadata } = await import('../core/replay');
     const { saveReplayFile } = await import('../core/replay-storage');
     const { MoonField } = await import('./forage/werewolf');
@@ -2305,7 +2305,7 @@ describe('puzzle completion during replay', () => {
       settings: { mode, bb: true, fj: true, cc: false, eq: true, machete: true, shovel: true,
         monkey: true, ants: true, scramble: true, forageLevel: 6,
         normalRatios: [0.6472, 0.3435, 0.0094], roundSeconds: 1, pacedChests: true,
-        ...(version === 5 ? { moons: true } : {}),
+        ...(version >= 5 ? { moons: true } : {}),
         puzzleId: '0', pickedRandomly: false },
       seed: { format: 'forage-replay-state', seeds: [1, 2], boards: ['42'] },
       frames: [{ t: 0, mouse: [-1, -1], events: [] }, { t: 12000, mouse: [-1, -1], events: [] }],
@@ -2324,7 +2324,7 @@ describe('puzzle completion during replay', () => {
     await vi.waitFor(() => expect(recorder.hasPlayableAt(tape.at)).toBe(true));
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     expect(await recorder.playAt(tape.at)).toBe(true);
-    if (mode === 'werewolf' || version === 5) expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).maxMoons).toBe(2);
+    if (mode === 'werewolf' || version >= 5) expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).maxMoons).toBe(version === 6 ? 1 : 2);
     perf.mockReturnValue(tape.duration);
     instance.frame([]);
     const report = (results()[0] as { report: DutyReport }).report;
@@ -2425,7 +2425,7 @@ describe('puzzle completion during replay', () => {
           expect(tape!.settings).toMatchObject({ maxMoons: savedSettings.maxMoons ?? 1 });
         }
         expect(Object.keys(data).some((k) => k.endsWith(':normalBestPerMove'))).toBe(false);
-        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 6 });
+        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 7 });
       }
     }
     if (puzzle === 'treasure-haul') {

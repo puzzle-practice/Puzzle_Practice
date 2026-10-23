@@ -64,16 +64,17 @@ for practice, without claiming to match the isle's session rules.
 
 ## Practice chest timing
 
-Normal and paced Gauntlet delivery require two valid moves and a two-second delay that starts
+Normal and paced Gauntlet delivery require two valid moves and a one-second delay that starts
 on the first move. The second move counts while the delay runs. On a clear opening board,
-click, click, wait two seconds, click therefore lands the first chest on click three. If the
+click, click, wait one second, click therefore lands the first chest on click three. If the
 second click itself arrives after the delay, that click can deliver it.
 
 The move that lands a chest finishes that delivery. The next valid move starts a fresh delay
 and counts as the first move toward the next chest; moves while a delivery is blocked do not
 prepay the next chest. Normal board-space, chest-size and nine-chest budget restrictions apply.
-Older replays retain their original timing under simulator versions 1–4. Version 5 uses the
-overlapping delay; new recordings use version 6, which also saves the selected moon limit.
+Older replays retain their original timing under simulator versions 1–4. Versions 5–6 use a
+two-second overlapping delay. Version 6 also saves the selected moon limit. New recordings
+use version 7 with the one-second overlapping delay.
 Replays from versions 1–5 retain the original two-moon limit. One- and two-moon games keep
 separate history and best scores.
 

@@ -148,13 +148,13 @@ describe('paced Gauntlet chests', () => {
 
 describe('paced chest timing', () => {
   describe.each(['normal', 'gauntlet', 'werewolf'] as const)('overlapping delay: %s', (mode) => {
-    function setup(size = 0) {
+    function setup(size = 0, delayMs = 1000) {
       let now = 0;
       const weights: [number, number, number] = [0, 0, 0];
       weights[size] = 1;
       const source = mode === 'normal'
-        ? new CrateRequests(new Random(8), weights, 9, true, () => now, true)
-        : new GauntletChests(new Random(8), weights, 9, false, true, () => now, true, true);
+        ? new CrateRequests(new Random(8), weights, 9, true, () => now, true, delayMs)
+        : new GauntletChests(new Random(8), weights, 9, false, true, () => now, true, true, delayMs);
       const game = new Forage(21n, source, 8, false, mode === 'werewolf');
       game.board.allowed = [false, false, false, false, false];
       game.load(Array.from({ length: WIDTH * HEIGHT }, (_, i) => (i % WIDTH + 2 * Math.floor(i / WIDTH)) % 5));
@@ -172,9 +172,19 @@ describe('paced chest timing', () => {
       click(10000);
       click(10200);
       expect(requested()).toBe(0);
-      time(12000);
+      time(11000);
       expect(game.crateCount()).toBe(0); // Time alone never spawns a chest.
-      click(12000);
+      click(11000);
+      expect(requested()).toBe(1);
+      expect(game.crateCount()).toBe(1);
+    });
+
+    it.each([1000, 2000])('delivers exactly at the %s ms threshold, preserving historical delays', (delayMs) => {
+      const { game, click, requested } = setup(0, delayMs);
+      click(100);
+      click(100 + delayMs - 1);
+      expect(requested()).toBe(0);
+      click(100 + delayMs);
       expect(requested()).toBe(1);
       expect(game.crateCount()).toBe(1);
     });
@@ -183,11 +193,11 @@ describe('paced chest timing', () => {
       const { game, click, requested } = setup();
       click(100);
       click(300);
-      click(2100);
+      click(1100);
       expect(game.crateCount()).toBe(1);
       click(3000); // First fresh click starts the next delay.
       expect(requested()).toBe(1);
-      click(5000); // Second fresh click counts and delivers on this same move.
+      click(4000); // Second fresh click counts and delivers on this same move.
       expect(requested()).toBe(2);
       expect(game.crateCount()).toBe(2);
     });

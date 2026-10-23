@@ -38,7 +38,7 @@ import {
   isTool,
   WIDTH,
 } from './board';
-import { GauntletChests, CrateRequests, CURSED_TILES, WEREWOLF_TILES } from './crates';
+import { GauntletChests, CrateRequests, CHEST_DELAY_MS, CURSED_TILES, WEREWOLF_TILES } from './crates';
 import { keyMatches } from '../../core/controls';
 import { copyText, pasteText } from '../../core/clipboard';
 import {
@@ -255,8 +255,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * by the rules they were recorded with. 4 adds native, independent per-board streams.
    * 5 overlaps the chest delay with two fresh moves, restarting only after the chest lands.
    * 6 makes the moon limit selectable, defaulting to one for new games.
+   * 7 restores the one-second chest delay, keeping the overlapping click requirement.
    */
-  const RULES = 6;
+  const RULES = 7;
   let rules = RULES;
   const moonLimit = (): 1 | 2 => rules < 6 ? 2 : settings.maxMoons ?? 1;
   let sessionSeed: ForageReplaySeed | null = null;
@@ -323,12 +324,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       sessionSeed.boards.push(String(seed));
       replays?.updateSeed(sessionSeed);
     }
+    const chestDelay = rules >= 7 ? CHEST_DELAY_MS : 2000;
     const source =
       normalMode()
-        ? new CrateRequests(rng, crateWeights(), BANANAS, rules >= 3, () => clock(), rules >= 5)
+        ? new CrateRequests(rng, crateWeights(), BANANAS, rules >= 3, () => clock(), rules >= 5, chestDelay)
         : settings.mode === 'puzzle' || settings.mode === 'create'
           ? {}
-          : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock(), rules >= 3, rules >= 5);
+          : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock(), rules >= 3, rules >= 5, chestDelay);
     const g = new Forage(seed, source, 8, useMoons(), werewolf(), settings.mode === 'create', moonLimit());
     // Shovel, machete, monkey, earthquake, ants.
     g.board.allowed = [settings.shovel, settings.machete, settings.monkey, settings.eq, settings.ants];
@@ -1016,9 +1018,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       { min: 0, step: 0.0001 },
     ),
   );
-  ratios.number('Chest mix preset', setting('forageLevel').get, (level) => { settings.forageLevel = Math.round(level); settings.chestRatios = undefined; saveSettings(); }, {
-    min: 0,
-    max: 15,
+  ratios.select('Forage preset', Array.from({ length: 16 }, (_, value) => ({ value, label: String(value) })), setting('forageLevel').get,
+    (level) => { settings.forageLevel = level; settings.chestRatios = undefined; saveSettings(); }, {
     hidden: () => normalMode(),
     title: 'Changes chest spawn rates only',
   });
