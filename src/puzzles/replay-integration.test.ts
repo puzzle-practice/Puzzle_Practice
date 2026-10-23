@@ -41,7 +41,7 @@ vi.mock('../core/audio', async (original) => ({
   SoundBank: class {
     constructor(_urls: unknown, private readonly muted = () => false) {}
     play(name: string) { if (!this.muted()) captured.sounds.push(name); }
-    loop() { return () => {}; }
+    loop(name: string) { if (!this.muted()) captured.sounds.push(name); return () => {}; }
     dispose() {}
   },
 }));
@@ -2268,6 +2268,7 @@ describe('Forage art toggle', () => {
     expect(blit.mock.calls.some(([image, , , options]) => image.asset === 'pieces' && options.area[0] === (art ? 9 : 7) * 45)).toBe(true);
     expect(blit.mock.calls.some(([image]) => image.asset === 'wolf_head')).toBe(art);
     expect(ctx.drawImage.mock.calls.some(([image]) => image.asset === 'monkey')).toBe(!art);
+    expect(captured.sounds).not.toContain('forage_night');
     instance.dispose?.();
   });
 });
@@ -2394,7 +2395,7 @@ describe('puzzle completion during replay', () => {
         expect(histories[0][0].includes(':werewolf-art')).toBe(!!savedSettings.werewolfArt);
         expect(histories[0][0].includes(':moons')).toBe(!!savedSettings.moons);
         expect(Object.keys(data).some((k) => k.endsWith(':normalBestPerMove'))).toBe(false);
-        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 4 });
+        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 5 });
       }
     }
     if (puzzle === 'treasure-haul') {

@@ -48,8 +48,8 @@ sheets retain every original tile pixel.
 - Moons appear at full strength; each new phase shows at full strength for 250ms, then fades
   over 250ms to 60%. A firing moon fades from 60%. From `20261017062155` the claw marks do the
   same whenever their count (or the moon's phase) changes.
-- From `20261017062155`: every scoring move howls (`chest_howl`), the Werewolf intro plays on
-  the first game only, and the night sounds loop from then on.
+- From `20261017062155`: every scoring move howls (`chest_howl`) and the Werewolf intro plays on
+  the first game only. Practice omits the continuous night ambience.
 - Moon snapshots are kept per animation step, and birth times are tracked during replay seeking.
 
 ## Not reproduced
@@ -58,6 +58,34 @@ Crate request timing, size ratios, round length, labor budget and duty rating on
 are decided by the isle itself and can't be read from the installed game. The toggles use the
 simulator's existing Gauntlet session rules: they give the board's mechanics and presentation
 for practice, without claiming to match the isle's session rules.
+
+## Practice chest timing
+
+Normal and paced Gauntlet delivery require two valid moves and a two-second delay that starts
+on the first move. The second move counts while the delay runs. On a clear opening board,
+click, click, wait two seconds, click therefore lands the first chest on click three. If the
+second click itself arrives after the delay, that click can deliver it.
+
+The move that lands a chest finishes that delivery. The next valid move starts a fresh delay
+and counts as the first move toward the next chest; moves while a delivery is blocked do not
+prepay the next chest. Normal board-space, chest-size and nine-chest budget restrictions apply.
+Older replays retain their original timing under simulator versions 1–4; new recordings use 5.
+
+The installed client was checked through `PuzzleController`, `DutyPuzzleController`,
+`ForageController`, the Forage input delegate, crate spawner and `ForageBoard`:
+
+- Duty progress is sent at a two-second interval (`wu()` and the controller's ticker).
+- Forage receives bonus requests separately, queues them and synchronizes them with valid
+  moves (`ForageController.p(byte)` / `v(byte)` in the October client).
+- The spawner checks the delivered bonus during board settling, clears it when a chest lands,
+  and retains it for another attempt when placement is blocked.
+- An empty board's placement chance is 100% if a suitable position is clear. Crates, tools,
+  ants and moon targets can obstruct a position, and fuller boards can fail the chance check.
+
+The downloaded client does not include the server's eligibility rule. Its progress interval
+does not establish a fixed server delay or the number of moves needed for a request. The
+overlapping delay above implements the requested practice cadence; it is not a verified
+reconstruction of server scheduling.
 
 ## Verification
 

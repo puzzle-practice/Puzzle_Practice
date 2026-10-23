@@ -94,16 +94,25 @@ describe('crate sources', () => {
 describe('paced Gauntlet chests', () => {
   it('keeps delivery, crate sizes and scoring the same when only Werewolf art changes', () => {
     let now = 0;
-    const normalSource = new GauntletChests(new Random(8), [0.5, 0.35, 0.15], 9, false, true, () => now);
-    const artSource = new GauntletChests(new Random(8), [0.5, 0.35, 0.15], 9, false, true, () => now);
+    const normalSource = new GauntletChests(new Random(8), [0.5, 0.35, 0.15], 9, false, true, () => now, true, true);
+    const artSource = new GauntletChests(new Random(8), [0.5, 0.35, 0.15], 9, false, true, () => now, true, true);
     const normal = new Forage(21n, normalSource);
     const art = new Forage(21n, artSource, 8, false, true);
     // Exclude monkey throws, whose presentation intentionally differs.
     normal.board.allowed = art.board.allowed = [true, true, false, true, true];
     let collected = 0;
-    for (let i = 0; i < 600; i++) {
+    const clicks = new Random(77);
+    for (let i = 0; i < 1500; i++) {
       now = i * 1000;
-      for (const game of [normal, art]) game.act(i % (WIDTH - 1), (i * 7) % (HEIGHT - 1), i % 3 === 0);
+      let x = clicks.integer(0, WIDTH - 2);
+      let y = clicks.integer(0, HEIGHT - 2);
+      const tools = normal.cells.flatMap((p, j) => isTool(p) ? [j] : []);
+      if (tools.length && clicks.random() < 0.3) {
+        const j = clicks.choice(tools);
+        [x, y] = [j % WIDTH, Math.floor(j / WIDTH)];
+      }
+      const ccw = clicks.random() < 0.5;
+      for (const game of [normal, art]) game.act(x, y, ccw);
       expect(art.cells).toEqual(normal.cells);
       expect(art.lastResult).toEqual(normal.lastResult);
       expect(artSource.budget).toBe(normalSource.budget);
@@ -138,6 +147,93 @@ describe('paced Gauntlet chests', () => {
 });
 
 describe('paced chest timing', () => {
+  describe.each(['normal', 'gauntlet', 'werewolf'] as const)('overlapping delay: %s', (mode) => {
+    function setup(size = 0) {
+      let now = 0;
+      const weights: [number, number, number] = [0, 0, 0];
+      weights[size] = 1;
+      const source = mode === 'normal'
+        ? new CrateRequests(new Random(8), weights, 9, true, () => now, true)
+        : new GauntletChests(new Random(8), weights, 9, false, true, () => now, true, true);
+      const game = new Forage(21n, source, 8, false, mode === 'werewolf');
+      game.board.allowed = [false, false, false, false, false];
+      game.load(Array.from({ length: WIDTH * HEIGHT }, (_, i) => (i % WIDTH + 2 * Math.floor(i / WIDTH)) % 5));
+      let clicks = 0;
+      const click = (at: number) => {
+        now = at;
+        expect(game.act(0, HEIGHT - 2, ++clicks % 2 === 0)).toBe('moved');
+      };
+      const requested = () => source instanceof CrateRequests ? source.requested : 9 - source.budget;
+      return { game, source, click, requested, time: (at: number) => { now = at; } };
+    }
+
+    it.each([0, 1, 2])('click, click, wait guarantees the first size %s chest on click three on a clear board', (size) => {
+      const { game, click, time, requested } = setup(size);
+      click(10000);
+      click(10200);
+      expect(requested()).toBe(0);
+      time(12000);
+      expect(game.crateCount()).toBe(0); // Time alone never spawns a chest.
+      click(12000);
+      expect(requested()).toBe(1);
+      expect(game.crateCount()).toBe(1);
+    });
+
+    it('starts each later delay on the first fresh click and can spawn chest two on click five', () => {
+      const { game, click, requested } = setup();
+      click(100);
+      click(300);
+      click(2100);
+      expect(game.crateCount()).toBe(1);
+      click(3000); // First fresh click starts the next delay.
+      expect(requested()).toBe(1);
+      click(5000); // Second fresh click counts and delivers on this same move.
+      expect(requested()).toBe(2);
+      expect(game.crateCount()).toBe(2);
+    });
+
+    it('does not let a long idle period after spawning replace the fresh clicks or their delay', () => {
+      const { click, requested } = setup();
+      click(100);
+      click(2100);
+      expect(requested()).toBe(1);
+      click(20000);
+      click(20100);
+      expect(requested()).toBe(1);
+      click(22000);
+      expect(requested()).toBe(2);
+    });
+
+    it('keeps a blocked delivery pending without counting its retry clicks toward the next chest', () => {
+      const { game, click, requested } = setup();
+      for (let x = 0; x < WIDTH; x++) game.board.setPiece(x, 0, SHOVEL);
+      click(100);
+      click(2100);
+      click(5000);
+      expect(requested()).toBe(1);
+      expect(game.crateCount()).toBe(0);
+      for (let x = 0; x < WIDTH; x++) game.board.setPiece(x, 0, x % 5);
+      click(8000);
+      expect(game.crateCount()).toBe(1);
+      click(10000);
+      expect(requested()).toBe(1);
+      click(12000);
+      expect(requested()).toBe(2);
+    });
+
+    it('does not count illegal or identical rotations as fresh clicks', () => {
+      const { game, click, time, requested } = setup();
+      time(100);
+      expect(game.act(-1, -1, false)).toBe('illegal');
+      for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) game.board.setPiece(x, y, 1);
+      expect(game.act(0, 0, false)).toBe('same');
+      click(5000);
+      expect(requested()).toBe(0);
+      click(7000);
+      expect(requested()).toBe(1);
+    });
+  });
+
   it('wait for the next two-second batch and delivery delay', () => {
     let now = 0;
     const source = new GauntletChests(new Random(8), [0.5, 0.35, 0.15], 9, false, true, () => now);

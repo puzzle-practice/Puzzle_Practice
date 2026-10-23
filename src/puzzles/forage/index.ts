@@ -50,7 +50,7 @@ import { CHEST_WEIGHTINGS, fillPuzzle, type Mode, parseBoard, randomizeColours, 
 import type { Moon, MoonBlast } from './werewolf';
 import { PUZZLES } from './puzzles';
 
-const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
+const soundUrls = import.meta.glob<string>(['./sounds/*.mp3', '!./sounds/forage_night.mp3'], { eager: true, query: '?url', import: 'default' });
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 
 /** The board view sits at (67, 50) in the panel, 315x450 (ForageBoardView.c, d, a, b). */
@@ -168,9 +168,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** The pieces' flight paths in and out, seeded per session so a replay's intros last as long. */
   const flights = new Random();
   looks.random = () => flights.random();
-  const sounds = new SoundBank<SoundName | 'forage_night'>(soundUrls);
+  const sounds = new SoundBank<SoundName>(soundUrls);
   let werewolfIntroPlayed = false;
-  let stopNight: (() => void) | null = null;
   const warning = new TimerWarning('gauntlet', () => replays?.isSeeking ?? false);
 
   const settings: Settings = { ...DEFAULT_SETTINGS, ...store.get<Partial<Settings>>('settings', {}) };
@@ -252,8 +251,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * moons as Gauntlet toggles. 3: Normal crates are paced (two moves, the next two-second batch,
    * then a move), and a Chaos chest whose column is blocked tries another each move. Replays play
    * by the rules they were recorded with. 4 adds native, independent per-board streams.
+   * 5 overlaps the chest delay with two fresh moves, restarting only after the chest lands.
    */
-  const RULES = 4;
+  const RULES = 5;
   let rules = RULES;
   let sessionSeed: ForageReplaySeed | null = null;
   let recordedAction = false;
@@ -268,8 +268,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   } | null = null;
   /**
    * Game time. While watching, the replay sets ticks() to the time each recorded frame ran, from
-   * the same starting point as the game it recorded: the 14ms frames and two-second chest batches
-   * fall on the same times, so the replay plays out the same.
+   * the same starting point as the game it recorded, keeping the 14ms frames and chest delays
+   * on the same times so playback produces the same board.
    */
   const clock = () => ticks();
   game = newGame();
@@ -321,10 +321,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
     const source =
       normalMode()
-        ? new CrateRequests(rng, crateWeights(), BANANAS, rules >= 3, () => clock())
+        ? new CrateRequests(rng, crateWeights(), BANANAS, rules >= 3, () => clock(), rules >= 5)
         : settings.mode === 'puzzle' || settings.mode === 'create'
           ? {}
-          : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock(), rules >= 3);
+          : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock(), rules >= 3, rules >= 5);
     const g = new Forage(seed, source, 8, useMoons(), werewolf(), settings.mode === 'create');
     // Shovel, machete, monkey, earthquake, ants.
     g.board.allowed = [settings.shovel, settings.machete, settings.monkey, settings.eq, settings.ants];
@@ -388,14 +388,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   /** Pieces fly in from beyond the nearest corner, 1 ms a pixel along an arc. */
   function intro(restartClock: boolean): void {
-    // Werewolf's intro plays for the first game only; its night sounds then loop.
+    // Werewolf's intro plays for the first game only.
     if (werewolf()) {
       if (!werewolfIntroPlayed && !replays?.isSeeking) sounds.play('werewolf_intro');
       werewolfIntroPlayed = true;
-      stopNight ??= sounds.loop('forage_night');
     } else {
-      stopNight?.();
-      stopNight = null;
       if (!replays?.isSeeking) sounds.play(cursed() ? 'cursed_intro' : 'intro');
     }
     flight = { pieces: flyingPieces(), start: clock(), out: false };
@@ -1516,7 +1513,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (boardActive && !replay) toggleRunning(); });
-  return { frame, dispose: () => { if (!recordedAction) replays.cancel(); stopNight?.(); replays.dispose(); sounds.dispose(); warning.dispose(); } };
+  return { frame, dispose: () => { if (!recordedAction) replays.cancel(); replays.dispose(); sounds.dispose(); warning.dispose(); } };
 }) satisfies PuzzleFactory;
 
 /** Initial reserve used when filling hand-made puzzles. */
