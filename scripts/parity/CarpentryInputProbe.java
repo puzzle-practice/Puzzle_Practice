@@ -62,4 +62,3 @@ public class CarpentryInputProbe {
     System.out.println("{\"case\":\"place-key\",\"mousePickupPath\":" + c.held() + ",\"placementCallbacks\":" + c.placements + ",\"mousePlacement\":" + c.mousePlacement + "}");
   }
 }
-
