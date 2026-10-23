@@ -1004,12 +1004,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   bind(crateGroup, 'Large treasure', 'cc', () => !werewolf());
 
   const ratios = panel.settings.group('Chest ratios', { columns: 3, hidden: isPuzzle });
-  ratios.number('Chest mix preset', setting('forageLevel').get, (level) => { settings.forageLevel = Math.round(level); settings.chestRatios = undefined; saveSettings(); }, {
-    min: 0,
-    max: 15,
-    hidden: () => normalMode(),
-    title: 'Changes chest spawn rates only',
-  });
   (['1x1', '2x2', '3x2'] as const).forEach((label, i) =>
     ratios.number(
       label,
@@ -1022,6 +1016,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       { min: 0, step: 0.0001 },
     ),
   );
+  ratios.number('Chest mix preset', setting('forageLevel').get, (level) => { settings.forageLevel = Math.round(level); settings.chestRatios = undefined; saveSettings(); }, {
+    min: 0,
+    max: 15,
+    hidden: () => normalMode(),
+    title: 'Changes chest spawn rates only',
+  });
   ratios.button(
     'Defaults',
     () => {
