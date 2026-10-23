@@ -681,13 +681,23 @@ describe('Carpentry pickup input', () => {
     instance.dispose?.();
   });
 
+  it.each([false, true])('routes the place key directly to the controller action (ship: %s)', async ship => {
+    const { game, pos, step, instance } = await placedPlank(ship);
+    const plank = game.tentative!.sprite, tool = game.tools[game.selected];
+    step(pos, [{ type: 'keydown', key: 'z' }, { type: 'keyup', key: 'z' }]);
+    expect(game.held).toBe(tool);
+    expect(plank.state).toBe(5);
+    expect(game.tentativeAt).toBeNull();
+    instance.dispose?.();
+  });
+
   it('replays and seeks the corrected pickup order', async () => {
     const { game, pos, step, instance, buttons, setters, recorder, currentGame } = await placedPlank();
     step(pos, [{ type: 'mousedown', button: 1, pos }]);
     step([pos[0] + CARP_CELL, pos[1]], [{ type: 'mouseup', button: 1, pos }]);
     expect(game.held).not.toBeNull();
     const tape = recorder.finish('Pickup regression')!;
-    expect(tape.simulatorVersion).toBe(3);
+    expect(tape.simulatorVersion).toBe(4);
     buttons.get('Play::Start')!(); // Stop the live session before playback.
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
@@ -732,6 +742,32 @@ describe('Carpentry pickup input', () => {
     await vi.waitFor(() => expect(historical.isSeeking).toBe(false));
     expect(currentGame().held).toBeNull();
     expect(currentGame().stats.replaced).toBe(1);
+    reopened.dispose?.();
+  });
+
+  it('preserves mouse-style place-key pickup in version 3 replays', async () => {
+    const { pos, step, instance, buttons, setters, recorder, currentGame, open } = await placedPlank();
+    step(pos, [{ type: 'keydown', key: 'z' }, { type: 'keyup', key: 'z' }]);
+    const tape = recorder.finish('Historical place key')!;
+    buttons.get('Play::Start')!(); instance.dispose?.();
+    await replayWrites.idle();
+    tape.simulatorVersion = 3; delete tape.checks;
+    const { encodeReplayBlob, replayMetadata } = await import('../core/replay');
+    const { saveReplayFile } = await import('../core/replay-storage');
+    const blob = await encodeReplayBlob(tape);
+    await saveReplayFile({ metadata: replayMetadata(tape, blob.size), blob });
+    const reopened = await open(), historical = captured.recorders.at(-1)!;
+    await vi.waitFor(() => expect(historical.hasPlayableAt(tape.at, tape.runId)).toBe(true));
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await historical.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration); reopened.frame([]);
+    expect(currentGame().held).not.toBeNull();
+    expect(currentGame().tentativeAt).not.toBeNull();
+    setters.get('History:Replays:Jump to (s)')!(tape.duration / 1000);
+    buttons.get('History:Replays:Jump')!();
+    await vi.waitFor(() => expect(historical.isSeeking).toBe(false));
+    expect(currentGame().held).not.toBeNull();
+    expect(currentGame().tentativeAt).not.toBeNull();
     reopened.dispose?.();
   });
 });

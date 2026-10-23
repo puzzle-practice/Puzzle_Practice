@@ -290,6 +290,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let lastMouse: Cell = [-1, -1];
   // Replays through simulator version 2 applied the final pointer position before queued releases.
   let legacyPointerOrder = false;
+  let inputVersion = 4;
   const sessionTime = () => (config.unlimited || config.create ? SESSION_LONG : SESSION_SHORT);
   /** Freeplay mode: the palette choice a left click paints (recorded, so replays click the same way), the key held, and pasted-text errors. */
   let paletteOpen: boolean | null = null, paintWith: boolean | null = null, painting = false, pasteNote = '';
@@ -323,13 +324,15 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       speedRng,
       timePassed,
       { ship: config.ship, difficulty: config.difficulty, tokens: config.tokens, independentStreams: true },
+      inputVersion,
     );
     meterShown = 0;
     meterAt = timePassed;
   }
 
-  function startSession(): void {
-    legacyPointerOrder = false;
+  function startSession(version = 4): void {
+    inputVersion = version;
+    legacyPointerOrder = version <= 2;
     stats = newStats();
     duty.clear();
     if (!replays.isPlaying) store.setScoresEnabled(!seeded && !config.create);
@@ -1101,7 +1104,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   // Version 2 added ship carpentry; version 1 replays are all the Vampire Lair's.
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 2,
-    simulatorVersion: 3,
+    simulatorVersion: 4,
     migrate: (version, value) => {
       if ((version !== 1 && version !== 2) || !value || typeof value !== 'object') return null;
       const wrapper = value as Record<string, unknown>;
@@ -1140,8 +1143,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     seedAtStart = seedData.seed;
     replayBoardSeeds = [...seedData.boardSeeds];
     replaySpeedState = seedData.speedRng;
-    startSession();
-    legacyPointerOrder = (tape.simulatorVersion ?? 1) <= 2;
+    startSession(tape.simulatorVersion ?? 1);
     boardActive = true;
   }, () => {
     if (boardActive) endSession();

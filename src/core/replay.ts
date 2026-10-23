@@ -291,8 +291,9 @@ export function decodeReplaySettings(tape: PuzzleReplay, codec: ReplaySettingsCo
  * Puzzles whose pointer moves the game on its own, between clicks and keys: compression keeps their
  * hover. Weaving's hover places the next incoming shuttle; Gunning, Bilging and Alchemistry's moves
  * the cursor the keys act on; Rumble's aims the fists a key fires when it is let go.
+ * Carpentry's cursor affects place-key selection and whether a held click has crossed its drag threshold.
  */
-const HOVER_PUZZLES = new Set(['weaving', 'gunning', 'bilging', 'alchemistry', 'rumble']);
+const HOVER_PUZZLES = new Set(['weaving', 'gunning', 'bilging', 'alchemistry', 'rumble', 'vampire-carp']);
 
 export function compressReplay(tape: PuzzleReplay): PuzzleReplay {
   const heldButtons = new Set<number>();
@@ -306,8 +307,7 @@ export function compressReplay(tape: PuzzleReplay): PuzzleReplay {
       else if (event.type === 'keyup') heldKeys.delete(event.key);
     }
     const meaningful = frame.events.length > 0 || (frame.commands?.length ?? 0) > 0 || (frame.actions?.length ?? 0) > 0;
-    // Distilling and Shipwrightery use held-mouse paths for swaps. Carpentry applies
-    // a drag at release, so it needs the pickup/release coordinates but not cursor samples between.
+    // Distilling and Shipwrightery use held-mouse paths for swaps.
     // The last hover sample before a key or button press establishes cursor/selection state, and
     // where a drag that starts with the press comes from.
     const beforePress = tape.frames[index + 1]?.events.some((event) => event.type === 'keydown' || event.type === 'mousedown');

@@ -81,6 +81,20 @@ describe('shareable replay format', () => {
     expect(compressReplay(replay).frames.map((frame) => frame.t)).toEqual([10, 20, 30]);
   });
 
+  it('keeps Carpentry cursor paths that cross the drag threshold and return before release', () => {
+    const replay: PuzzleReplay = {
+      format: 'puzzle-practice-replay', version: 1, puzzle: 'vampire-carp', at: 1, duration: 500,
+      simulatorVersion: 4, result: 'Stopped', settings: {}, seed: {}, frames: [
+        { t: 10, mouse: [100, 100], events: [{ type: 'mousedown', button: 1, pos: [100, 100] }] },
+        { t: 20, mouse: [118, 100], events: [] },
+        { t: 30, mouse: [100, 100], events: [] },
+        { t: 40, mouse: [100, 100], events: [{ type: 'mouseup', button: 1, pos: [100, 100] }] },
+        { t: 50, mouse: [160, 100], events: [] },
+      ],
+    };
+    expect(compressReplay(replay).frames).toEqual(replay.frames);
+  });
+
   it('keeps Weaving hover samples because they choose incoming shuttle positions', () => {
     const replay: PuzzleReplay = {
       format: 'puzzle-practice-replay', version: 1, puzzle: 'weaving', at: 1, duration: 500,
