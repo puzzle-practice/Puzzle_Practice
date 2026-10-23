@@ -126,6 +126,7 @@ const DEFAULT_SETTINGS: Settings = {
   mode: 'ci',
   werewolfArt: false,
   moons: false,
+  maxMoons: 1,
   bb: true,
   fj: true,
   cc: false,
@@ -173,6 +174,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const warning = new TimerWarning('gauntlet', () => replays?.isSeeking ?? false);
 
   const settings: Settings = { ...DEFAULT_SETTINGS, ...store.get<Partial<Settings>>('settings', {}) };
+  settings.maxMoons = settings.maxMoons === 2 ? 2 : 1;
   // The initial local test exposed a separate mode. Fold saved play settings into Gauntlet.
   // Replay settings are restored separately below, preserving that version's rules.
   if (settings.mode === 'werewolf') {
@@ -252,9 +254,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * then a move), and a Chaos chest whose column is blocked tries another each move. Replays play
    * by the rules they were recorded with. 4 adds native, independent per-board streams.
    * 5 overlaps the chest delay with two fresh moves, restarting only after the chest lands.
+   * 6 makes the moon limit selectable, defaulting to one for new games.
    */
-  const RULES = 5;
+  const RULES = 6;
   let rules = RULES;
+  const moonLimit = (): 1 | 2 => rules < 6 ? 2 : settings.maxMoons ?? 1;
   let sessionSeed: ForageReplaySeed | null = null;
   let recordedAction = false;
   let nextReplayBoard = 0;
@@ -282,7 +286,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const original = normalMode() ? 0 : 120;
     return base + (roundSeconds() === original ? '' : `:timer:${roundSeconds()}`) +
       (settings.mode === 'ci' && settings.werewolfArt ? ':werewolf-art' : '') +
-      (settings.mode === 'ci' && settings.moons ? ':moons' : '');
+      (settings.mode === 'ci' && settings.moons ? `:moons${moonLimit() === 1 ? ':1' : ''}` : '');
   };
 
   const roundSeconds = () => settings.mode === 'create' ? 0 : settings.roundSeconds ?? (settings.mode === 'ci' ? 120 : 0);
@@ -325,7 +329,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         : settings.mode === 'puzzle' || settings.mode === 'create'
           ? {}
           : new GauntletChests(rng, crateWeights(), BANANAS, settings.mode === 'chaos', settings.mode === 'ci' && !!settings.pacedChests, () => clock(), rules >= 3, rules >= 5);
-    const g = new Forage(seed, source, 8, useMoons(), werewolf(), settings.mode === 'create');
+    const g = new Forage(seed, source, 8, useMoons(), werewolf(), settings.mode === 'create', moonLimit());
     // Shovel, machete, monkey, earthquake, ants.
     g.board.allowed = [settings.shovel, settings.machete, settings.monkey, settings.eq, settings.ants];
     if (!normalMode()) g.crateArt = [...CURSED_TILES];
@@ -943,6 +947,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         Number.isInteger(s.forageLevel) && (s.forageLevel as number) >= 0 && (s.forageLevel as number) <= 15 &&
         ['bb', 'fj', 'cc', 'eq', 'machete', 'shovel', 'monkey', 'ants', 'scramble'].every((key) => typeof s[key] === 'boolean') &&
         ['werewolfArt', 'moons'].every((key) => s[key] === undefined || typeof s[key] === 'boolean') &&
+        (s.maxMoons === undefined || s.maxMoons === 1 || s.maxMoons === 2) &&
         ratios(s.normalRatios) && (s.chestRatios === undefined || ratios(s.chestRatios)) &&
         (s.roundSeconds === undefined || (Number.isFinite(s.roundSeconds) && (s.roundSeconds as number) >= 0)) &&
         typeof s.puzzleId === 'string' && (s.puzzleId === '0' || s.puzzleId in PUZZLES) &&
@@ -1035,6 +1040,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   bind(specials, 'Wolf', 'monkey', () => !werewolf());
   bind(specials, 'Ants', 'ants');
   bind(specials, 'Moons', 'moons', () => settings.mode !== 'ci');
+  specials.select('Maximum moons', [1, 2].map((value) => ({ value, label: String(value) })), moonLimit,
+    (value) => { settings.maxMoons = value === 2 ? 2 : 1; saveSettings(); },
+    { hidden: () => settings.mode !== 'ci' || !settings.moons, title: 'Maximum moons on the board at once; applies to the next game' });
   panel.settings.group('Reset').button('Reset to defaults', () => {
     Object.assign(settings, structuredClone(DEFAULT_SETTINGS));
     delete settings.roundSeconds;

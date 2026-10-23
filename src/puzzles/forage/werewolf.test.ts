@@ -34,6 +34,25 @@ describe('Werewolf parity with test build 20261017062155', () => {
 });
 
 describe('Werewolf moons', () => {
+  it.each([1, 2] as const)('caps automatic moons at %s and replaces expired moons', (limit) => {
+    const game = new Forage(42, {}, 8, true, false, false, limit);
+    const moons = game.moons!;
+    const ids = new Set(moons.active.map((moon) => moon.id));
+    let most = moons.active.length;
+    let expired = 0;
+    for (let move = 0; move < 20; move++) {
+      moons.noteCleared(0, 0);
+      expired += moons.endMove(game.board).expired.length;
+      most = Math.max(most, moons.active.length);
+      expect(moons.active.length).toBeLessThanOrEqual(limit);
+      for (const moon of moons.active) ids.add(moon.id);
+      if (moons.active.length === limit) expect(moons.spawn(game.board)).toBeNull();
+    }
+    expect(most).toBe(limit);
+    expect(expired).toBeGreaterThan(0);
+    expect(ids.size).toBeGreaterThan(limit);
+  });
+
   it('allows art without moons, and moons with the original monkey presentation', () => {
     const normal = new Forage(42);
     const artOnly = new Forage(42, {}, 8, false, true);

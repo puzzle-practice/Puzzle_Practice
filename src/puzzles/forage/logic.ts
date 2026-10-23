@@ -30,6 +30,8 @@ export interface Settings {
   werewolfArt?: boolean;
   /** Gauntlet: enable the Werewolf moons and their beams. */
   moons?: boolean;
+  /** Gauntlet: maximum simultaneous moons; practice defaults to one. */
+  maxMoons?: 1 | 2;
   /** Which crate sizes spawn outside puzzle mode. */
   bb: boolean;
   fj: boolean;

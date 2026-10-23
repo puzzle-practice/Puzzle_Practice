@@ -4,6 +4,8 @@
 
 Open <http://localhost:5212/#/forage>, select **Gauntlet**, and open **Settings**.
 Enable **Werewolf art** under Display and/or **Moons** under Specials, then press **Start**.
+With Moons enabled, **Maximum moons** under Specials selects one (the default) or two
+simultaneous moons. The choice applies to the next game and is saved with recordings.
 If the local server has stopped, run from this worktree:
 
 ```powershell
@@ -33,7 +35,8 @@ sheets retain every original tile pixel.
 - Every nonempty, noncrate clear within a moon adds one charge. Four charges fire it.
   Repeated clears of the same coordinate count. Ant bites charge moons too.
 - Moons age once per move that clears pieces anywhere, expire after four such moves,
-  and respawn after two or three clearing moves, with at most two present. Ant bites and
+  and respawn after two or three clearing moves, with at most the selected one or two present.
+  Ant bites and
   the moon beams themselves do not advance that age/spawn clock.
 - Check charged moons after gravity, crate collection and matches, before crate placement.
   A firing moon beams along both of its rows to each side of the board and down both of its
@@ -69,7 +72,10 @@ second click itself arrives after the delay, that click can deliver it.
 The move that lands a chest finishes that delivery. The next valid move starts a fresh delay
 and counts as the first move toward the next chest; moves while a delivery is blocked do not
 prepay the next chest. Normal board-space, chest-size and nine-chest budget restrictions apply.
-Older replays retain their original timing under simulator versions 1–4; new recordings use 5.
+Older replays retain their original timing under simulator versions 1–4. Version 5 uses the
+overlapping delay; new recordings use version 6, which also saves the selected moon limit.
+Replays from versions 1–5 retain the original two-moon limit. One- and two-moon games keep
+separate history and best scores.
 
 The installed client was checked through `PuzzleController`, `DutyPuzzleController`,
 `ForageController`, the Forage input delegate, crate spawner and `ForageBoard`:

@@ -27,6 +27,9 @@ export class MoonField {
   /** Freeplay places its own moons, so none come up on their own. */
   spawning = true;
 
+  /** Engine callers and native parity fixtures retain the game's two-moon limit. */
+  constructor(readonly maxMoons: 1 | 2 = 2) {}
+
   snapshot(): Moon[] { return this.active.map((moon) => ({ ...moon })); }
 
   overlaps(x: number, y: number, width = 1, height = 1): boolean {
@@ -46,6 +49,7 @@ export class MoonField {
   }
 
   spawn(board: ForageBoard): Moon | null {
+    if (this.active.length >= this.maxMoons) return null;
     const positions: [number, number][] = [];
     for (let x = 0; x < WIDTH - 1; x++) {
       for (let y = 0; y < HEIGHT - 1; y++) {
@@ -93,7 +97,7 @@ export class MoonField {
       this.clearingMoves++;
     }
     this.cleared = false;
-    const spawned = this.spawning && this.active.length < 2 && this.clearingMoves >= this.spawnAfter ? this.spawn(board) : null;
+    const spawned = this.spawning && this.active.length < this.maxMoons && this.clearingMoves >= this.spawnAfter ? this.spawn(board) : null;
     return { expired, spawned };
   }
 
@@ -130,11 +134,12 @@ export class MoonField {
 }
 
 export class WerewolfForageBoard extends ForageBoard {
-  readonly moons = new MoonField();
+  readonly moons: MoonField;
 
   /** Freeplay's board starts without a moon, and none come up: they're painted on. */
-  constructor(seed: number | bigint, difficulty = 8, spawning = true) {
+  constructor(seed: number | bigint, difficulty = 8, spawning = true, maxMoons: 1 | 2 = 2) {
     super(seed, difficulty);
+    this.moons = new MoonField(maxMoons);
     this.moons.spawning = spawning;
     if (spawning) this.moons.spawn(this);
   }

@@ -186,9 +186,11 @@ export class Forage {
     readonly werewolf = moonsEnabled,
     /** Freeplay: moons only where they're painted, none coming up on their own. */
     paintedMoons = false,
+    /** Practice limit; older replay and parity callers retain two moons. */
+    maxMoons: 1 | 2 = 2,
   ) {
     this.board = paintedMoons ? new WerewolfForageBoard(seed, difficulty, false)
-      : moonsEnabled ? new WerewolfForageBoard(seed, difficulty) : new ForageBoard(seed, difficulty);
+      : moonsEnabled ? new WerewolfForageBoard(seed, difficulty, true, maxMoons) : new ForageBoard(seed, difficulty);
   }
 
   get moons() { return this.board instanceof WerewolfForageBoard ? this.board.moons : null; }
