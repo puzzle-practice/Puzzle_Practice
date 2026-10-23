@@ -74,6 +74,8 @@ const RANK_SOUND_DELAY = 640;
 const LEVEL_PAUSE = 500;
 /** Hole blinks: every 500, 250, then 125ms over the last three moves before it grows. */
 const BLINKS = [125, 250, 500];
+/** Practice safeguard for click bursts; chosen to match Haul's swap duration, not a verified native Carpentry timer. */
+export const PICKUP_QUIET_MS = 250;
 
 export type SoundName =
   | 'fanfare'
@@ -299,6 +301,7 @@ export class Game {
   /** Press point and whether it's become a drag (CarpentryController.z, y). */
   private press: Cell | null = null;
   private dragging = false;
+  private lastPlacementClick = -Infinity;
   now = 0;
 
   // Speed.
@@ -318,6 +321,8 @@ export class Game {
     private readonly prng: Random,
     now: number,
     readonly kind: CarpentryKind = VAMPIRE_LAIR,
+    /** Earlier replays used cell-only pickup bounds and treated the place key as a mouse click. */
+    readonly inputVersion = 5,
   ) {
     this.now = now;
     this.speedHoles = kind.independentStreams ? new Random(seedFor(seed, 'speed-holes')) : prng;
@@ -614,12 +619,20 @@ export class Game {
     else this.cursor = cell;
   }
 
-  pointerDown(button: number, px: number, py: number): void {
+  pointerDown(button: number, px: number, py: number, at = this.now): void {
     if (this.blocked()) return;
     if (button === 1) {
       this.press = [px, py];
       const cell = Game.viewCell(px, py);
-      if (!this.held && this.tentative && this.tentativeAt && this.tentativeHit(cell)) {
+      if (!this.held && this.tentative && this.tentativeAt && this.tentativeHit(px, py)) {
+        if (this.inputVersion >= 5 && at - this.lastPlacementClick < PICKUP_QUIET_MS) {
+          // Swallow the whole repeated gesture and extend the quiet period, so the third
+          // click in a burst cannot turn an ignored second click into a fresh pickup.
+          this.lastPlacementClick = at;
+          this.press = null;
+          this.dragging = false;
+          return;
+        }
         // Picks the placed piece back up to nudge it.
         this.held = this.tentative.sprite;
         this.heldSlot = this.tentative.slot;
@@ -628,7 +641,7 @@ export class Game {
         this.detachTentative();
         this.moveHeld(cell[0], cell[1]);
       } else {
-        this.click(true, cell);
+        this.click(true, cell, at);
       }
     } else if (button === 2) this.rotate(true);
     else if (button === 3) this.flip();
@@ -636,22 +649,26 @@ export class Game {
     else if (button === 5) this.rotate(true);
   }
 
-  pointerUp(button: number): void {
+  pointerUp(button: number, at = this.now): void {
     if (button !== 1) return;
-    if (this.dragging && !this.blocked()) this.click(true, this.cursor);
+    if (this.dragging && !this.blocked()) this.click(true, this.cursor, at);
     this.dragging = false;
     this.press = null;
   }
 
-  /** The place key: as if clicked where the mouse is. */
-  placeKey(px: number, py: number): void {
+  /** CarpentryController's place action bypasses the mouse listener's tentative-plank pickup. */
+  placeKey(px: number, py: number, at = this.now): void {
+    if (this.inputVersion >= 4) {
+      if (!this.blocked()) this.click(false, Game.viewCell(px, py), at);
+      return;
+    }
     const press = this.press;
-    this.pointerDown(1, px, py);
+    this.pointerDown(1, px, py, at);
     this.press = press;
   }
 
   /** CarpentryController.c(boolean). */
-  private click(mouse: boolean, cell: Cell): void {
+  private click(mouse: boolean, cell: Cell, at = this.now): void {
     if (this.held) {
       if (this.inToolbox(this.cursor)) {
         if (this.heldSlot < 0 || this.tentativeAt) {
@@ -663,7 +680,7 @@ export class Game {
         this.resetTool(this.heldSlot);
         this.held = null;
       } else {
-        this.place();
+        this.place(at);
       }
       return;
     }
@@ -671,13 +688,24 @@ export class Game {
     this.pickUp(this.selected, false);
   }
 
-  private tentativeHit(cell: Cell): boolean {
+  private tentativeHit(px: number, py: number): boolean {
     const t = this.tentative!;
     const hs = this.holeSprites.find((s) => s.pieces.some((p) => p.sprite === t.sprite));
     if (!hs) return false;
     const entry = hs.pieces.find((p) => p.sprite === t.sprite)!;
     const [hx, hy] = this.holeViewCell(hs);
-    return t.sprite.piece.cells().some(([x, y]) => x + entry.at[0] + hx === cell[0] && y + entry.at[1] + hy === cell[1]);
+    const cells = t.sprite.piece.cells();
+    if (this.inputVersion < 4) {
+      const cell = Game.viewCell(px, py);
+      return cells.some(([x, y]) => x + entry.at[0] + hx === cell[0] && y + entry.at[1] + hy === cell[1]);
+    }
+    // Native Sprite hit-testing uses its full bounding rectangle, including the outline's
+    // extra right/bottom pixel (carpentry/r extends media/b/l), rather than only occupied cells.
+    const x = VIEW_X + (hx + entry.at[0]) * CELL, y = VIEW_Y + (hy + entry.at[1]) * CELL;
+    return px >= x + Math.min(...cells.map(c => c[0])) * CELL &&
+      px < x + (Math.max(...cells.map(c => c[0])) + 1) * CELL + 1 &&
+      py >= y + Math.min(...cells.map(c => c[1])) * CELL &&
+      py < y + (Math.max(...cells.map(c => c[1])) + 1) * CELL + 1;
   }
 
   /** A hole sprite's cell (0, 0) in view cells. */
@@ -692,7 +720,7 @@ export class Game {
 
   // ---- Placing (CarpentryController.t, u, w) ----
 
-  private place(): void {
+  private place(at = this.now): void {
     if (this.waiting || this.scrolling || !this.held) return;
     const nudging = this.tentativeAt !== null;
     const piece = this.held.piece;
@@ -722,6 +750,7 @@ export class Game {
     }
     if (!nudging && !piece.isPutty && !target.hole.wouldFinish(piece, target.at[0], target.at[1]) && !this.mustCommit()) {
       sprite.state = 4;
+      if (this.inputVersion >= 5) this.lastPlacementClick = at;
     } else {
       this.commit();
     }
@@ -737,6 +766,7 @@ export class Game {
     if (!this.tentativeAt) return;
     if (!this.tentative && this.held) {
       const sprite = this.held;
+      if (this.inputVersion >= 4) this.moveHeld(this.tentativeAt[0], this.tentativeAt[1]);
       sprite.piece.orient = sprite.saved;
       this.held = null;
       const target = this.target(this.tentativeAt, sprite.piece);
