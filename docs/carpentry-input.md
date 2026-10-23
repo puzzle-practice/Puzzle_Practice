@@ -8,6 +8,26 @@ The older test build 20261021095321 has the same relevant rules.
 The previous mouse-event-order correction did not cover every pickup difference.
 This audit checks the three input paths separately.
 
+## Rapid repeat-click safeguard
+
+The reported triple click is reproducible: the first click places a plank, the
+second picks it back up and the third places the adjustment, locking it. Input
+ordering and pickup bounds alone do not prevent this sequence.
+
+New sessions require a **250 ms quiet period** before mouse-picking up a freshly
+placed plank. Further clicks on that plank within the period are ignored and
+restart the period, so an entire rapid burst is suppressed. Their releases cannot
+complete an adjustment. After the burst, a deliberate pickup and adjustment work
+normally. Toolbox selection, rotation and placing held pieces remain responsive.
+
+This is an explicit practice safeguard, not a verified native Carpentry timing
+constant. Treasure Haul's 250 ms swap animation provides an analogous input gap:
+its active animation prevents another swap. No equivalent explicit timer was found
+in the inspected Carpentry listener/controller or media-panel dispatch paths.
+The earlier listener probe did not test a full in-game triple-click interaction.
+
+## Native pickup and adjustment rules
+
 | Input | Native client behaviour | Correction |
 | --- | --- | --- |
 | Click and release a placed plank | The mouse listener picks it up if the press lies anywhere in the sprite's bounding rectangle, including blank corners and the extra outline pixel. Releasing without a drag keeps it held. | Use pixel bounds instead of testing only the plank's occupied grid cells. |
@@ -18,7 +38,7 @@ If a picked-up adjustment is cancelled by taking another toolbox piece, the clie
 restores both its original orientation and its original cursor position before
 selecting the next tool. The port previously restored only the orientation.
 
-There is no timed adjustment grace period in these paths. A normal placement stays
+No explicit timed adjustment grace period was found in these native methods. A normal placement stays
 adjustable until another piece is taken. Putty, a hole-finishing placement, and a
 completed adjustment commit immediately. Waiting while a plank is held does not
 commit it.
@@ -50,7 +70,8 @@ keyboard selection and placement, cancellation, and distance versus elapsed time
 in both ship and Vampire Lair carpentry. Integration tests check actual key routing
 and playback/seeking of older input semantics.
 
-New recordings use simulator version 4. Versions 1–3 retain their original pickup
+New recordings use simulator version 5. Version 4 retains the corrected pickup
+bounds and place-key path without the repeat-click safeguard. Versions 1–3 retain their original pickup
 bounds, place-key behaviour and cancellation position. Versions 1–2 additionally
 retain the older mouse-event order.
 

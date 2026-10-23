@@ -605,7 +605,7 @@ afterEach(async () => {
 });
 
 describe('Carpentry pickup input', () => {
-  async function placedPlank(ship = false) {
+  async function placedPlank(ship = false, settle = 250) {
     const update = vi.spyOn(CarpentryGame.prototype, 'update');
     const store = new Store('vampire-carp');
     store.set('seeded', true); store.set('sessionSeed', 5);
@@ -619,8 +619,8 @@ describe('Carpentry pickup input', () => {
       setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext;
     const open = () => factory(context);
     const instance = await open();
-    const step = (mouse: [number, number], events: InputEvent[] = []) => {
-      input.mouse = mouse; now += 20; instance.frame(events);
+    const step = (mouse: [number, number], events: InputEvent[] = [], elapsed = 20) => {
+      input.mouse = mouse; now += elapsed; instance.frame(events);
     };
     buttons.get('Play::Start')!();
     now = 1600; instance.frame([]);
@@ -641,8 +641,99 @@ describe('Carpentry pickup input', () => {
     const pos = at!;
     step(pos, [{ type: 'mousedown', button: 1, pos }, { type: 'mouseup', button: 1, pos }]);
     expect(game.tentative).not.toBeNull();
+    if (settle > 0) step(pos, [], settle);
     return { game, pos, step, instance, buttons, setters, recorder: captured.recorders[0], currentGame, open };
   }
+
+  it.each([[false, 50], [false, 100], [false, 200], [true, 50], [true, 100], [true, 200]] as const)(
+    'keeps triple clicks from picking up and locking the just-placed plank (ship: %s, spacing: %s ms)', async (ship, spacing) => {
+      const { game, pos, step, instance } = await placedPlank(ship, 0);
+      const plank = game.tentative!.sprite;
+      const clicks: InputEvent[] = [{ type: 'mousedown', button: 1, pos }, { type: 'mouseup', button: 1, pos }];
+      step(pos, clicks, spacing); step(pos, clicks, spacing);
+      expect(game.tentative?.sprite).toBe(plank);
+      expect(game.held).toBeNull();
+      expect(game.stats.replaced).toBe(0);
+      // Once the burst has stopped, a deliberate pickup is immediately usable.
+      step(pos, clicks, 250);
+      expect(game.held).toBe(plank);
+      game.rotate(true);
+      step(pos, clicks);
+      expect(game.stats.replaced).toBe(1);
+      instance.dispose?.();
+    },
+  );
+
+  it('ignores multiple repeat clicks delivered together in a single frame', async () => {
+    const { game, pos, step, instance } = await placedPlank(false, 0);
+    const plank = game.tentative!.sprite;
+    const click: InputEvent[] = [{ type: 'mousedown', button: 1, pos }, { type: 'mouseup', button: 1, pos }];
+    step(pos, [...click, ...click], 20);
+    expect(game.tentative?.sprite).toBe(plank);
+    expect(game.stats.replaced).toBe(0);
+    instance.dispose?.();
+  });
+
+  it.each([249, 250])('allows a fresh pickup at the quiet-period boundary (%s ms)', async elapsed => {
+    const { game, pos, step, instance } = await placedPlank(false, 0);
+    step(pos, [{ type: 'mousedown', button: 1, pos }, { type: 'mouseup', button: 1, pos }], elapsed);
+    expect(game.held !== null).toBe(elapsed >= 250);
+    instance.dispose?.();
+  });
+
+  it('does not turn an ignored pickup into a drop when its release arrives after the quiet period', async () => {
+    const { game, pos, step, instance } = await placedPlank(false, 0);
+    const plank = game.tentative!.sprite;
+    step(pos, [{ type: 'mousedown', button: 1, pos }], 100);
+    const moved: [number, number] = [pos[0] + CARP_CELL, pos[1]];
+    step(moved, [{ type: 'mouseup', button: 1, pos: moved }], 300);
+    expect(game.tentative?.sprite).toBe(plank);
+    expect(game.held).toBeNull();
+    expect(game.stats.replaced).toBe(0);
+    instance.dispose?.();
+  });
+
+  it('keeps toolbox selection and rotation responsive immediately after placement', async () => {
+    const { game, step, instance } = await placedPlank(false, 0);
+    const slot = game.tools.findIndex((tool, index) => index !== game.selected && tool && !tool.piece.isPutty);
+    const tool = game.tools[slot];
+    const [x, y] = CarpentryGame.toolCell(slot);
+    const pos: [number, number] = [CARP_X + x * CARP_CELL + 5, CARP_Y + y * CARP_CELL + 5];
+    step(pos, [{ type: 'mousedown', button: 1, pos }, { type: 'mouseup', button: 1, pos }], 20);
+    expect(game.held).toBe(tool);
+    step(pos, [{ type: 'keydown', key: 'c' }], 20);
+    expect(game.stats.spins).toBe(1);
+    expect(game.tentativeAt).toBeNull();
+    instance.dispose?.();
+  });
+
+  it.each([4, 5])('replays and seeks triple clicks with their recorded timing rules (version %s)', async version => {
+    const { pos, step, instance, buttons, setters, recorder, currentGame, open } = await placedPlank(false, 0);
+    const click: InputEvent[] = [{ type: 'mousedown', button: 1, pos }, { type: 'mouseup', button: 1, pos }];
+    step(pos, click, 100); step(pos, click, 100);
+    const tape = recorder.finish('Triple-click regression')!;
+    buttons.get('Play::Start')!(); instance.dispose?.();
+    await replayWrites.idle();
+    if (version === 4) { tape.simulatorVersion = 4; delete tape.checks; }
+    const { encodeReplayBlob, replayMetadata } = await import('../core/replay');
+    const { saveReplayFile } = await import('../core/replay-storage');
+    const blob = await encodeReplayBlob(tape);
+    await saveReplayFile({ metadata: replayMetadata(tape, blob.size), blob });
+    const reopened = await open(), playback = captured.recorders.at(-1)!;
+    await vi.waitFor(() => expect(playback.hasPlayableAt(tape.at, tape.runId)).toBe(true));
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await playback.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration); reopened.frame([]);
+    expect(currentGame().stats.replaced).toBe(version === 4 ? 1 : 0);
+    expect(currentGame().tentative !== null).toBe(version === 5);
+    setters.get('History:Replays:Jump to (s)')!(tape.duration / 1000);
+    buttons.get('History:Replays:Jump')!();
+    await vi.waitFor(() => expect(playback.isSeeking).toBe(false));
+    expect(currentGame().stats.replaced).toBe(version === 4 ? 1 : 0);
+    expect(currentGame().tentative !== null).toBe(version === 5);
+    expect(playback.divergedAt).toBeNull();
+    reopened.dispose?.();
+  });
 
   it.each([[false, false], [false, true], [true, false], [true, true]])('keeps a picked-up plank held when movement follows release (ship: %s, batched pickup: %s)', async (ship, batched) => {
     const { game, pos, step, instance } = await placedPlank(ship);
@@ -697,7 +788,7 @@ describe('Carpentry pickup input', () => {
     step([pos[0] + CARP_CELL, pos[1]], [{ type: 'mouseup', button: 1, pos }]);
     expect(game.held).not.toBeNull();
     const tape = recorder.finish('Pickup regression')!;
-    expect(tape.simulatorVersion).toBe(4);
+    expect(tape.simulatorVersion).toBe(5);
     buttons.get('Play::Start')!(); // Stop the live session before playback.
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);

@@ -290,7 +290,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let lastMouse: Cell = [-1, -1];
   // Replays through simulator version 2 applied the final pointer position before queued releases.
   let legacyPointerOrder = false;
-  let inputVersion = 4;
+  let inputVersion = 5;
   const sessionTime = () => (config.unlimited || config.create ? SESSION_LONG : SESSION_SHORT);
   /** Freeplay mode: the palette choice a left click paints (recorded, so replays click the same way), the key held, and pasted-text errors. */
   let paletteOpen: boolean | null = null, paintWith: boolean | null = null, painting = false, pasteNote = '';
@@ -330,7 +330,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     meterAt = timePassed;
   }
 
-  function startSession(version = 4): void {
+  function startSession(version = 5): void {
     inputVersion = version;
     legacyPointerOrder = version <= 2;
     stats = newStats();
@@ -490,10 +490,10 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         if (inView(event.pos[0], event.pos[1])) {
           // Several clicks can arrive in one frame; each acts where it happened.
           game.pointerMove(event.pos[0], event.pos[1]);
-          game.pointerDown(event.button, event.pos[0], event.pos[1]);
+          game.pointerDown(event.button, event.pos[0], event.pos[1], timePassed);
         }
       } else if (event.type === 'mouseup') {
-        game.pointerUp(event.button);
+        game.pointerUp(event.button, timePassed);
       } else if (event.type === 'keydown') {
         const k = event.key;
         if (keyMatches(k, 'vampire-carp', 'flip', KEYS.flip)) game.flip();
@@ -502,7 +502,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         else if (KEYS.slots.some((key, i) => keyMatches(k, 'vampire-carp', `piece${i + 1}`, key))) {
           game.keyPick(KEYS.slots.findIndex((key, i) => keyMatches(k, 'vampire-carp', `piece${i + 1}`, key)));
         }
-        else if (keyMatches(k, 'vampire-carp', 'place', KEYS.place) && inView(mx, my)) game.placeKey(mx, my);
+        else if (keyMatches(k, 'vampire-carp', 'place', KEYS.place) && inView(mx, my)) game.placeKey(mx, my, timePassed);
       }
     }
     if (!legacyPointerOrder) movePointer(mx, my);
@@ -1104,7 +1104,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   // Version 2 added ship carpentry; version 1 replays are all the Vampire Lair's.
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 2,
-    simulatorVersion: 4,
+    simulatorVersion: 5,
     migrate: (version, value) => {
       if ((version !== 1 && version !== 2) || !value || typeof value !== 'object') return null;
       const wrapper = value as Record<string, unknown>;

@@ -19,6 +19,7 @@ function placedX(ship: boolean) {
   expect(target.hole.checkPiece(game.held!.piece, ...target.at)).toBeGreaterThan(0);
   game.pointerDown(1, x, y); game.pointerUp(1);
   expect(game.tentative).not.toBeNull();
+  game.update(game.now + 250);
   return { game, hole, x, y, plank: game.tentative!.sprite };
 }
 
