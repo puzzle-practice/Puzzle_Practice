@@ -2240,6 +2240,26 @@ describe('Navigation sessions and replay', () => {
 });
 
 describe('Forage art toggle', () => {
+  it.each([undefined, 1, 2])('uses the selected moon limit %s, defaulting to one', async (limit) => {
+    const { MoonField } = await import('./forage/werewolf');
+    const spawn = vi.spyOn(MoonField.prototype, 'spawn');
+    const store = new Store('forage');
+    store.set('settings', { mode: 'ci', moons: true, roundSeconds: 0 });
+    const { panel, buttons, selections } = panelHarness();
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./forage/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => 0 } as unknown as PuzzleContext);
+    const select = selections.get('Settings:Specials:Maximum moons');
+    expect(select).toBeDefined();
+    if (limit !== undefined) {
+      select!(limit);
+      expect(store.get('settings', {})).toMatchObject({ maxMoons: limit });
+    }
+    buttons.get('Play::Start')!();
+    expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).maxMoons).toBe(limit ?? 1);
+    instance.dispose?.();
+  });
+
   it.each([false, true])('swaps the monkey board icon and animation when art is %s', async (art) => {
     const { Forage } = await import('./forage/engine');
     const { WIDTH, HEIGHT, MONKEY } = await import('./forage/board');
@@ -2274,15 +2294,18 @@ describe('Forage art toggle', () => {
 });
 
 describe('puzzle completion during replay', () => {
-  it.each(['ci', 'werewolf'])('preserves version 1 Forage %s replay scoring', async (mode) => {
+  it.each([['ci', 1], ['werewolf', 1], ['ci', 5], ['ci', 6]] as const)('preserves historical Forage %s version %s replay rules', async (mode, version) => {
     const { encodeReplayBlob, replayMetadata } = await import('../core/replay');
     const { saveReplayFile } = await import('../core/replay-storage');
+    const { MoonField } = await import('./forage/werewolf');
+    const spawn = vi.spyOn(MoonField.prototype, 'spawn');
     const tape: PuzzleReplay = {
       format: 'puzzle-practice-replay', version: 1, randomVersion: 1, puzzle: 'forage', at: 123, duration: 12000,
-      settingsVersion: 1, simulatorVersion: 1, result: 'Historical test',
+      settingsVersion: 1, simulatorVersion: version, result: 'Historical test',
       settings: { mode, bb: true, fj: true, cc: false, eq: true, machete: true, shovel: true,
         monkey: true, ants: true, scramble: true, forageLevel: 6,
         normalRatios: [0.6472, 0.3435, 0.0094], roundSeconds: 1, pacedChests: true,
+        ...(version >= 5 ? { moons: true } : {}),
         puzzleId: '0', pickedRandomly: false },
       seed: { format: 'forage-replay-state', seeds: [1, 2], boards: ['42'] },
       frames: [{ t: 0, mouse: [-1, -1], events: [] }, { t: 12000, mouse: [-1, -1], events: [] }],
@@ -2301,6 +2324,7 @@ describe('puzzle completion during replay', () => {
     await vi.waitFor(() => expect(recorder.hasPlayableAt(tape.at)).toBe(true));
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     expect(await recorder.playAt(tape.at)).toBe(true);
+    if (mode === 'werewolf' || version >= 5) expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).maxMoons).toBe(version === 6 ? 1 : 2);
     perf.mockReturnValue(tape.duration);
     instance.frame([]);
     const report = (results()[0] as { report: DutyReport }).report;
@@ -2320,6 +2344,7 @@ describe('puzzle completion during replay', () => {
     ['forage', 12000, 20, { settings: { mode: 'ci', roundSeconds: 5, werewolfArt: true, moons: false } }],
     ['forage', 12000, 20, { settings: { mode: 'ci', roundSeconds: 5, werewolfArt: false, moons: true } }],
     ['forage', 12000, 20, { settings: { mode: 'ci', roundSeconds: 5, werewolfArt: true, moons: true } }],
+    ['forage', 12000, 20, { settings: { mode: 'ci', roundSeconds: 5, moons: true, maxMoons: 2 } }],
     ['forage', 12000, 20, { settings: { mode: 'werewolf', roundSeconds: 5 } }],
     ['swordfight', 90000, 20, { settings: { opponents: 1, skill: 5, difficulty: 5, breakers: 12.5, sword: [2, 0, 0], enemySword: [6, 4, 2] } }],
   ] as const)('%s keeps player history unchanged through playback, seeking and Stop', async (puzzle, end, step, settings) => {
@@ -2383,7 +2408,7 @@ describe('puzzle completion during replay', () => {
       expect(history.anticlockwise).toBeGreaterThan(0);
       expect(result.rows).toContainEqual(['Clockwise, anticlockwise', `0, ${history.anticlockwise}`]);
       if ('settings' in settings) {
-        const savedSettings = store.get<{ werewolfArt: boolean; moons: boolean }>('settings', { werewolfArt: false, moons: false });
+        const savedSettings = store.get<{ werewolfArt: boolean; moons: boolean; maxMoons?: number }>('settings', { werewolfArt: false, moons: false });
         const report = (results()[0] as { report: DutyReport }).report;
         expect(report.mode).toBe('Gauntlet');
         expect(report.score.label).toBe('Score');
@@ -2394,8 +2419,13 @@ describe('puzzle completion during replay', () => {
         expect(histories[0][0]).toContain('ci:');
         expect(histories[0][0].includes(':werewolf-art')).toBe(!!savedSettings.werewolfArt);
         expect(histories[0][0].includes(':moons')).toBe(!!savedSettings.moons);
+        if (savedSettings.moons) {
+          expect(histories[0][0].endsWith(':moons:1')).toBe(savedSettings.maxMoons !== 2);
+          const tape = await recorder['loadTape'](replay);
+          expect(tape!.settings).toMatchObject({ maxMoons: savedSettings.maxMoons ?? 1 });
+        }
         expect(Object.keys(data).some((k) => k.endsWith(':normalBestPerMove'))).toBe(false);
-        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 5 });
+        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 7 });
       }
     }
     if (puzzle === 'treasure-haul') {

@@ -108,7 +108,7 @@ const DEFAULTS: Settings = {
   gameAi: gameSkillStyle(60),
   ai: { pairMs: 3000, breakAverage: 40, variation: 41, heightBoost: 1.5, storeChance: 23, comboMax: 3, strikeShare: 85, pairsPerAttack: 1 },
   difficulty: 1,
-  breakers: 18,
+  breakers: 25,
   sword: [11, 4, 4],
   enemyRoster: [{ kind: 'Cultist', skill: 60, sword: 16 }, { kind: 'Cultist', skill: 60, sword: 16 }],
   allyRoster: [],
