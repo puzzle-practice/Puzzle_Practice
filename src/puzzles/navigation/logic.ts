@@ -13,6 +13,8 @@ export const DISTRIBUTIONS = [
 ];
 /** Werewolf Isle's dense constellations: three innermost targets, two in the middle ring, one outside. */
 export const DENSE_DISTRIBUTION = [3,2,1];
+/** The first WW (Test) constellation on each board, from build 20261024072802. */
+export const FIRST_TEST_DISTRIBUTION = [1,2,1];
 export interface Target { octant: number; ring: number; colour: number; wild: boolean }
 export interface Cell { octant: number; ring: number; colour: number }
 export interface Run { direction: 0 | 1; octant: number; ring: number; length: number }
@@ -59,7 +61,7 @@ export class NaviBoard {
     return { colour: this.bagNext(this.entryBag, this.entryRandom), octant: this.entryRandom.nextInt(8) };
   }
   nextConstellation(): Target[] {
-    let distribution = DENSE_DISTRIBUTION;
+    let distribution = this.dense ? this.denseDistribution() : DENSE_DISTRIBUTION;
     if (!this.dense) {
       const offset = Math.min(3, Math.max(-3, Math.floor(this.targetRandom.nextGaussian() + 0.5)));
       distribution = DISTRIBUTIONS[Math.min(DISTRIBUTIONS.length - 1, Math.max(0, Math.trunc(this.constellationCount / 3) + offset))];
@@ -75,6 +77,7 @@ export class NaviBoard {
     }
     return targets;
   }
+  protected denseDistribution(): number[] { return DENSE_DISTRIBUTION; }
   rotate(ring: number, clockwise: boolean): void {
     const before = this.cells.slice(ring * 8, ring * 8 + 8);
     for (let i = 0; i < 8; i++) this.set(i, ring, before[(i + (clockwise ? 1 : 7)) % 8]);
@@ -143,6 +146,13 @@ export class NaviBoard {
   }
 }
 
+/** Keep the original board's state shape unchanged for existing replay fingerprints. */
+export class NaviTestBoard extends NaviBoard {
+  private dealt = 0;
+  constructor(rings: number, difficulty: number, seed: number) { super(rings, difficulty, seed, true); }
+  protected override denseDistribution(): number[] { return this.dealt++ === 0 ? FIRST_TEST_DISTRIBUTION : DENSE_DISTRIBUTION; }
+}
+
 /** The most targets a constellation can have, with the extra wild one. */
 export const MAX_TARGETS = 10;
 
@@ -180,7 +190,11 @@ export class WildTargets {
     if (!carry) return;
     const inner = this.rings - 1;
     targets.filter(t => t.ring === inner).forEach(t => t.wild = true);
-    if (carry < 2 || !targets.length || targets.length >= MAX_TARGETS) return;
+    if (carry >= 2) this.addWildTarget(targets);
+  }
+  protected addWildTarget(targets: Target[]): void {
+    if (!targets.length || targets.length >= MAX_TARGETS) return;
+    const inner = this.rings - 1;
     const first = targets.find(t => t.ring === inner);
     const start = first?.octant ?? 0, colour = (first ?? targets[0]).colour;
     for (let i = 0; i < 8; i++) {
@@ -190,5 +204,36 @@ export class WildTargets {
         return;
       }
     }
+  }
+}
+
+/** October 24: charting counts as a clear and later cascades can charge the new constellation. */
+export class TestWildTargets extends WildTargets {
+  private charted = false;
+  private carryOver = 0;
+  private applied = 0;
+  override action(): void { super.action(); this.charted = false; }
+  override runs(runs: Run[], targets: Target[]): void {
+    super.runs(runs, targets);
+    if (this.enabled && runs.length && this.charted) this.charge(targets, this.tier());
+  }
+  override completed(targets: Target[]): void {
+    if (!this.enabled) return;
+    targets.forEach(t => t.wild = false);
+    this.clears++;
+    this.carryOver = this.tier();
+    this.charted = true;
+  }
+  override next(targets: Target[]): void {
+    const tier = this.carryOver;
+    this.carryOver = this.applied = 0;
+    this.charge(targets, tier);
+  }
+  private tier(): number { return Math.max(0, Math.min(this.clears - 1, 2)); }
+  private charge(targets: Target[], tier: number): void {
+    if (tier <= this.applied) return;
+    if (this.applied < 1) targets.filter(t => t.ring === this.rings - 1).forEach(t => t.wild = true);
+    if (tier >= 2) this.addWildTarget(targets);
+    this.applied = tier;
   }
 }

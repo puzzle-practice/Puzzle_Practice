@@ -11,7 +11,7 @@ import { LEARNING } from '../../core/duty/ratings';
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { InputEvent } from '../../core/input';
-import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, type NavigationSettings, type RunTotals, type Scene } from './game';
+import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, type NavigationSettings, type RunTotals, type Scene } from './game';
 import { LEVEL_TARGETS } from './logic';
 import { copyText, pasteText } from '../../core/clipboard';
 import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
@@ -35,7 +35,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let settings = readSettings(store.get('settings', DEFAULT_SETTINGS)) ?? { ...DEFAULT_SETTINGS };
   // WW now defaults to the 2-minute timer; move saved WW settings with no timer over once.
   if (!store.get('wwTimerDefault', false)) {
-    if (settings.mode === 'ww' && settings.timerMs === 0) { settings.timerMs = DEFAULT_SETTINGS.timerMs; store.set('settings', settings); }
+    if (isWerewolf(settings.mode) && settings.timerMs === 0) { settings.timerMs = DEFAULT_SETTINGS.timerMs; store.set('settings', settings); }
     store.set('wwTimerDefault', true);
   }
   let liveSettings = { ...settings };
@@ -63,14 +63,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const duty = dutyDesk(panel, store, 'navigation', 'Navigation', []);
   const busy = () => running || (replays?.isPlaying ?? false);
   const history = () => store.history(settingsKey(settings));
-  const radius = (ring: number) => 55 + ((game?.board.rings ?? (settings.mode === 'ww' && settings.extraRing ? 4 : 3)) - 1 - ring) * ((game?.board.rings ?? (settings.mode === 'ww' && settings.extraRing ? 4 : 3)) === 4 ? 47 : 55);
+  const radius = (ring: number) => 55 + ((game?.board.rings ?? (isWerewolf(settings.mode) && settings.extraRing ? 4 : 3)) - 1 - ring) * ((game?.board.rings ?? (isWerewolf(settings.mode) && settings.extraRing ? 4 : 3)) === 4 ? 47 : 55);
   const position = (octant: number, r: number): [number, number] => [CX + Math.cos(octant * Math.PI / 4) * r, CY - Math.sin(octant * Math.PI / 4) * r];
   const elapsed = () => Math.max(0, (running ? ticks() : endTime) - startTime);
   const timerElapsed = () => timerElapsedBeforeBoard + elapsed();
   const timeLeft = () => Math.max(0, liveSettings.timerMs - timerElapsed());
-  const dismissKeepsRun = () => liveSettings.mode === 'ww' || liveSettings.clears;
+  const dismissKeepsRun = () => isWerewolf(liveSettings.mode) || liveSettings.clears;
   const of = (goal: number) => goal === Infinity ? '' : ` / ${goal}`;
-  const keepsTimer = () => liveSettings.mode === 'ww' && settings.mode === 'ww' && liveSettings.timerMs > 0 && settings.timerMs === liveSettings.timerMs;
+  const keepsTimer = () => isWerewolf(liveSettings.mode) && isWerewolf(settings.mode) && liveSettings.timerMs > 0 && settings.timerMs === liveSettings.timerMs;
   const saveSettings = () => store.set('settings', settings);
   const key = (name: string, action: string, fallback: string) => keyMatches(name, 'navigation', action, fallback);
 
@@ -114,10 +114,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     running = false; finished = true; endTime = ticks(); scenes = [];
     if (reason === 'Booched!') sounds.play('booched');
     const run = totals();
-    const report = duty.end({ mode: liveSettings.mode === 'ww' ? 'WW' : 'Normal', performance: LEARNING,
+    const report = duty.end({ mode: modeLabel(liveSettings.mode), performance: LEARNING,
       score: { label: 'Points', value: String(run.points) },
       // Werewolf Isle's report shows each constellation as a moon.
-      cleared: liveSettings.mode === 'ww' ? [{ label: 'Constellations Charted', inScore: true, items: [
+      cleared: isWerewolf(liveSettings.mode) ? [{ label: 'Constellations Charted', inScore: true, items: [
         { icon: 'moon-crescent', label: 'crescent moons, charted with no chain', count: run.moons[0] },
         { icon: 'moon-half', label: 'half moons, charted in a double chain', count: run.moons[1] },
         { icon: 'moon-full', label: 'full moons, charted in a triple chain or longer', count: run.moons[2] },
@@ -204,7 +204,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     ctx.restore();
   }
   function draw(now: number): void {
-    const rings = game?.board.rings ?? (settings.mode === 'ww' && settings.extraRing ? 4 : 3);
+    const rings = game?.board.rings ?? (isWerewolf(settings.mode) && settings.extraRing ? 4 : 3);
     screen.blit(images.get(rings === 4 ? 'werewolf_background' : 'background'), 0, 0);
     screen.blit(images.get('title'), 0, 0);
     // The selected ring's highlight: one frame per ring, innermost first; four rings have their own sheet.
@@ -349,7 +349,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   panel.clock(() => game ? { label: liveSettings.timerMs ? 'Time left' : 'Time', ms: liveSettings.timerMs ? timeLeft() : elapsed(), countdown: !!liveSettings.timerMs } : null);
   const session = panel.session();
-  session.select('Mode', [{ value: 'normal', label: 'Normal' }, { value: 'ww', label: 'WW' }], () => settings.mode, mode => { settings.mode = mode; saveSettings(); selected = mode === 'ww' && settings.extraRing ? 3 : 2; }, { disabled: busy });
+  session.select('Mode', [{ value: 'normal', label: 'Normal' }, { value: 'ww', label: 'WW' }, { value: 'ww-test', label: 'WW (Test)' }], () => settings.mode, mode => { settings.mode = mode; saveSettings(); selected = isWerewolf(mode) && settings.extraRing ? 3 : 2; }, { disabled: busy });
   session.select('Boards', [{ value: 'dealt', label: 'Dealt' }, { value: 'create', label: 'Freeplay' }], () => settings.create ? 'create' : 'dealt', value => { settings.create = value === 'create'; saveSettings(); },
     { disabled: busy, title: 'Freeplay lets you paint the stars, targets and incoming star' });
   session.button('Start', () => {
@@ -414,7 +414,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.button('Back to setup', () => pendingCommands.push('reset'), { disabled: () => editing() || !setup, title: 'Put the board back as it was last painted' });
   boardGroup.note(() => pasteNote || 'Hold B, O, R, W or Y over a cell to paint that colour, X to clear, or select one above and left-click. Select it again to deselect and turn rings. Stars settle inward as they would fall. Paint → Targets paints the constellation instead (the three innermost rings), and A makes a target wild. Each star waits at the top until Drop. Freeplay has no timer or quota and keeps no history.');
   boardGroup.note(() => {
-    const issues = game ? boardIssues(game, liveSettings.mode === 'ww', liveSettings.mode === 'ww' && liveSettings.wildTargets) : [];
+    const issues = game ? boardIssues(game, isWerewolf(liveSettings.mode), isWerewolf(liveSettings.mode) && liveSettings.wildTargets) : [];
     return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
   }, { hidden: () => !creating() });
   const options = panel.settings.group('Game');
@@ -428,9 +428,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }, { disabled: busy });
   options.select('Dismiss delay', DISMISS_DELAYS.map(value => ({ value, label: value ? `${value / 1000} s` : 'None' })), () => settings.dismissDelayMs, delay => { settings.dismissDelayMs = delay; saveSettings(); }, { disabled: busy });
   options.toggle('Slow drop', () => settings.slowDrop, on => { settings.slowDrop = on; saveSettings(); }, { disabled: busy, title: 'Each star waits at the top until you press Drop.' });
-  options.toggle('Wild targets', () => settings.wildTargets, on => { settings.wildTargets = on; saveSettings(); }, { disabled: busy, hidden: () => settings.mode !== 'ww' });
-  options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selected = on ? 3 : 2; saveSettings(); }, { disabled: busy, hidden: () => settings.mode !== 'ww' });
-  options.hint(() => settings.mode === 'ww' ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
+  options.toggle('Wild targets', () => settings.wildTargets, on => { settings.wildTargets = on; saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
+  options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selected = on ? 3 : 2; saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
+  options.hint(() => settings.mode === 'ww-test' ? 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
   options.button('Reset to defaults', () => { settings = { ...DEFAULT_SETTINGS }; selected = 3; saveSettings(); }, { disabled: busy });
   panel.controls('navigation', [
     { id: 'ringOut', label: 'Select outer ring', defaultKey: 'arrowup' },
@@ -461,8 +461,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ['Stars dropped', String(totals().stars)], ['Ring rotations', String(totals().moves)], ['Longest chain', String(totals().longestChain)], ['Time', `${(elapsed()/1000).toFixed(2)}s`]],
   } : null);
   // Version 1 had no looping: an untimed run then ended at the quota, as a quota run does now.
-  const codec: ReplaySettingsCodec = { currentVersion: 2, simulatorVersion: 1, migrate: (version, value) => {
-    const read = version <= 2 ? readSettings(value) : null;
+  const codec: ReplaySettingsCodec = { currentVersion: 3, simulatorVersion: 1, migrate: (version, value) => {
+    const read = version <= 3 ? readSettings(value) : null;
+    if (read?.mode === 'ww-test' && version < 3) return null;
     // Version 1 dealt Dismissed boards at once.
     return read && version === 1 ? { ...read, clears: !read.timerMs, dismissDelayMs: 0 } : read;
   } };
@@ -476,10 +477,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     dealAt = 0; pendingStart = null;
     board = 0; banked = NO_TOTALS;
     if (savedSettings) { settings = savedSettings; savedSettings = null; }
-    selected = settings.mode === 'ww' && settings.extraRing ? 3 : 2;
+    selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
   }, seed => readNavigationSeed(seed) !== null,
   setReplayTime, () => frame([]), codec, () => !running || replays.isPlaying);
-  selected = settings.mode === 'ww' && settings.extraRing ? 3 : 2;
+  selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (running) end('Stopped'); });
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.

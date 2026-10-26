@@ -2,7 +2,7 @@
 // is N and the ring count, then, separated by colons: a character a cell, ring by ring from the
 // outside and octant by octant from the east (. empty, 0-4 a star's colour); the targets, each its
 // ring, octant and colour (* for wild); and the incoming star's colour and octant.
-import { DENSE_DISTRIBUTION, DISTRIBUTIONS, EMPTY, MAX_TARGETS, type NaviBoard, type Target } from './logic';
+import { DENSE_DISTRIBUTION, FIRST_TEST_DISTRIBUTION, DISTRIBUTIONS, EMPTY, MAX_TARGETS, type NaviBoard, type Target } from './logic';
 import type { NavigationGame } from './game';
 
 export const COLOUR_NAMES = ['Blue', 'Orange', 'Red', 'White', 'Yellow'];
@@ -82,10 +82,11 @@ export function boardIssues(game: NavigationGame, ww: boolean, wild: boolean): s
   if (wilds.length && !wild) issues.push('Wild targets only come with WW’s wild targets on.');
   if (ww) {
     const [inner, middle, outer] = DENSE_DISTRIBUTION;
+    const opening = game.settings.mode === 'ww-test' && FIRST_TEST_DISTRIBUTION.every((n, i) => counts[i] === n);
     // A second clear in a row adds one more wild target to the inner ring.
     const extra = wild && counts[0] === inner + 1 && game.targets.filter((t) => t.ring === rings - 1).every((t) => t.wild);
-    if (game.targets.length && ((counts[0] !== inner && !extra) || counts[1] !== middle || counts[2] !== outer)) {
-      issues.push(`WW constellations have ${inner} inner, ${middle} middle and ${outer} outer targets.`);
+    if (game.targets.length && !opening && ((counts[0] !== inner && !extra) || counts[1] !== middle || counts[2] !== outer)) {
+      issues.push(game.settings.mode === 'ww-test' ? 'WW (Test) constellations start with 1 inner, 2 middle and 1 outer target, then use 3/2/1.' : `WW constellations have ${inner} inner, ${middle} middle and ${outer} outer targets.`);
     }
   } else if (game.targets.length && !DISTRIBUTIONS.some((d) => d.every((n, i) => n === counts[i]))) {
     issues.push(`No constellation has ${counts[0]} inner, ${counts[1]} middle and ${counts[2]} outer targets.`);
