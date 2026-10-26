@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import fixture from './navigation-parity.json';
-import { NaviBoard, WildTargets, type Target, type Run } from './logic';
+import legacyFixture from './navigation-parity.json';
+import testFixture from './navigation-test-parity.json';
+import { NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, type Target, type Run } from './logic';
 import { NavigationGame, DEFAULT_SETTINGS, NO_TOTALS, addBoard, boardSeed, readSettings, readNavigationSeed, runGoal, settingsKey } from './game';
 
 const targets = (rows: (number | boolean)[][]): Target[] => rows.map(r => ({ octant: r[0] as number, ring: r[1] as number, colour: r[2] as number, wild: r[3] as boolean }));
 const runs = (rows: number[][]): Run[] => rows.map(r => ({ direction: r[0] as 0 | 1, octant: r[1], ring: r[2], length: r[3] }));
 
-describe('navigation test-build parity', () => {
+describe.each([['WW', legacyFixture, false], ['WW (Test)', testFixture, true]] as const)('%s client parity', (_mode, fixture, testRules) => {
   it('matches 4,320 incoming stars and constellation generations, across both ring counts and dense Werewolf constellations', () => {
     for (const c of fixture.generation) {
-      const b = new NaviBoard(c.rings,c.difficulty,c.seed,c.dense);
+      const b = testRules && c.dense ? new NaviTestBoard(c.rings,c.difficulty,c.seed) : new NaviBoard(c.rings,c.difficulty,c.seed,c.dense);
       c.entries.forEach((entry,i) => {
         expect(b.nextEntry(), `entry ${c.seed}/${c.difficulty}/${c.rings}/${i}`).toEqual({ octant: entry[0], colour: entry[1] });
         expect(b.nextConstellation(), `target ${c.seed}/${c.difficulty}/${c.rings}/${i}`).toEqual(targets(c.targets[i]));
@@ -26,9 +27,9 @@ describe('navigation test-build parity', () => {
   });
   it('matches 480 wild-target chains and carryover cases, including the extra wild target and dense constellations', () => {
     for (const c of fixture.wild) {
-      const b = new NaviBoard(c.rings,4,c.seed,c.dense); const current = b.nextConstellation();
+      const b = testRules && c.dense ? new NaviTestBoard(c.rings,4,c.seed) : new NaviBoard(c.rings,4,c.seed,c.dense); const current = b.nextConstellation();
       expect(current).toEqual(targets(c.before));
-      const helper = new WildTargets(c.enabled,c.rings);
+      const helper = testRules ? new TestWildTargets(c.enabled,c.rings) : new WildTargets(c.enabled,c.rings);
       c.steps.forEach(s => { helper.runs(runs(s.runs),current); expect(current).toEqual(targets(s.targets)); });
       helper.completed(current);expect(current).toEqual(targets(c.completed));
       const next = b.nextConstellation();helper.next(next);expect(next).toEqual(targets(c.next));

@@ -1940,9 +1940,9 @@ describe('Swordfight knockout messages', () => {
 });
 
 describe('Navigation sessions and replay', () => {
-  it('keeps the WW score and countdown across repeated Dismiss, excludes pauses and replays the whole run', async () => {
+  it.each(['ww', 'ww-test'] as const)('keeps the %s score and countdown across repeated Dismiss, excludes pauses and replays the whole run', async mode => {
     const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
-    const settings = { ...DEFAULT_SETTINGS, timerMs: 120000 };
+    const settings = { ...DEFAULT_SETTINGS, mode, timerMs: 120000 };
     const store = new Store('navigation');
     store.set('settings', settings);
     const { panel, buttons, buttonStates, clocks, results } = panelHarness();
@@ -1992,7 +1992,7 @@ describe('Navigation sessions and replay', () => {
     instance.dispose?.();
   });
 
-  it.each(['normal', 'ww'] as const)('%s Dismiss restarts a paused board and a finished board without duplicating history', async mode => {
+  it.each(['normal', 'ww', 'ww-test'] as const)('%s Dismiss restarts a paused board and a finished board without duplicating history', async mode => {
     const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
     const settings = { ...DEFAULT_SETTINGS, mode, timerMs: 120000, dismissDelayMs: 0 };
     const store = new Store('navigation');
@@ -2041,7 +2041,7 @@ describe('Navigation sessions and replay', () => {
     if (mode === 'normal') expect(replays.map(replay => replay.result)).toContain('Dismissed · 0 points');
   });
 
-  it.each(['normal', 'ww'] as const)('%s Dismiss holds play for the dismiss delay', async mode => {
+  it.each(['normal', 'ww', 'ww-test'] as const)('%s Dismiss holds play for the dismiss delay', async mode => {
     const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
     const settings = { ...DEFAULT_SETTINGS, mode, timerMs: 120000 };
     expect(settings.dismissDelayMs).toBe(1000);
@@ -2124,7 +2124,7 @@ describe('Navigation sessions and replay', () => {
     instance.dispose?.();
   });
 
-  it.each(['normal', 'ww'] as const)('%s loads again with saved history and makes its replay available', async mode => {
+  it.each(['normal', 'ww', 'ww-test'] as const)('%s loads again with saved history and makes its replay available', async mode => {
     const store = new Store('navigation');
     store.set('settings', { mode, difficulty: 4, extraRing: true, wildTargets: true, timerMs: 0 });
     const first = panelHarness(true);
@@ -2153,6 +2153,7 @@ describe('Navigation sessions and replay', () => {
 
   it.each([
     ['normal',false,false], ['ww',false,false], ['ww',false,true], ['ww',true,false], ['ww',true,true],
+    ['ww-test',false,false], ['ww-test',false,true], ['ww-test',true,false], ['ww-test',true,true],
   ] as const)('%s extraRing=%s wildTargets=%s preserves results through pause, playback, seeking and Stop', async (mode,extraRing,wildTargets) => {
     const store = new Store('navigation');
     const settings = { mode,difficulty:4,extraRing,wildTargets,timerMs:120000 };
@@ -2180,7 +2181,7 @@ describe('Navigation sessions and replay', () => {
     const expected = results()[0] as { rows:string[][]; report:DutyReport };
     expect(expected).not.toBeNull();
     expect(Number(expected.rows.find(([name])=>name==='Stars dropped')![1])).toBeGreaterThan(0);
-    expect(expected.report.mode).toBe(mode==='ww'?'WW':'Normal');
+    expect(expected.report.mode).toBe(mode === 'ww-test' ? 'WW (Test)' : mode === 'ww' ? 'WW' : 'Normal');
     await replayWrites.idle();
     const data=JSON.parse(exportAll()).data;
     const files=await listReplayFiles('navigation');expect(files).toHaveLength(1);

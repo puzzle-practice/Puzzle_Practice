@@ -4,6 +4,8 @@
 
 Open <http://localhost:5212/#/navigation>. **WW** is selected initially, with difficulty 4,
 wild targets and the extra ring enabled, matching the Werewolf Isle testing options.
+**WW (Test)** adds the current test-client rules (build `20261024072802`, October 24). Each board starts with 1 inner, 2 middle and 1 outer target, then uses the usual 3/2/1 layout. Charting counts toward wild-target charging, and charging continues through new constellations in the same action. Both WW modes share the ring and wild-target options, with separate history and replay settings.
+
 **Normal** uses three rings and ordinary colour-specific targets. Choose difficulty 0–9,
 an optional 2- or 5-minute practice timer, and the independent WW options in Settings.
 
@@ -30,13 +32,13 @@ support playback and seeking, and never add another score when watched.
 
 ## Freeplay mode
 
-Boards → Freeplay (with either Mode) is a sandbox for showing a setup to someone else. Start it, then hold B, O, R, W or Y over a cell to paint a blue, orange, red, white or yellow star, X to clear one, or select one in the Board panel and click or drag. Stars settle inward as they would fall, without clearing. Paint → Targets paints the constellation instead, in the three innermost rings, and A makes a target wild. Next star and Drops at set the incoming star. Each star waits at the top until Drop, and rings turn as usual. Back to setup puts the board back as it was last painted. Freeplay has no timer or quota and keeps no history.
+Boards → Freeplay (with any Mode) is a sandbox for showing a setup to someone else. Start it, then hold B, O, R, W or Y over a cell to paint a blue, orange, red, white or yellow star, X to clear one, or select one in the Board panel and click or drag. Stars settle inward as they would fall, without clearing. Paint → Targets paints the constellation instead, in the three innermost rings, and A makes a target wild. Next star and Drops at set the incoming star. Each star waits at the top until Drop, and rings turn as usual. Back to setup puts the board back as it was last painted. Freeplay has no timer or quota and keeps no history.
 
 A note says when the board could not come from the game: three or more stars in a row (they'd have cleared), a constellation already charted or missing, a target count no constellation has (WW always deals 3 inner, 2 middle and 1 outer, plus an extra wild inner one after two clears), wild targets without WW's wild targets, or an incoming star with nowhere to land. Copy and Paste share boards as text: `N` and the ring count, then the cells ring by ring from the outside, the targets, and the incoming star (see `create.ts`). Generate deals a new board.
 
 ## Implemented rules
 
-The rules follow test build **20261018210340** (WW dense constellations arrived with it;
+WW retains test build **20261018210340** (WW dense constellations arrived with it;
 the rest is unchanged since `20261014053332`, and the WW mechanics first appeared in
 `20261012032517`).
 
@@ -73,6 +75,26 @@ the rest is unchanged since `20261014053332`, and the WW mechanics first appeare
   (ringed in every colour, lit once filled) and sounds are included. Falling, rotation,
   gravity and clear delays follow the game's timing constants; decorative fragments
   and floating text use a simplified browser presentation.
+
+## WW (Test): October 24 changes
+
+Checked against the test server's build **20261024072802**, downloaded on October 26, 2026. The installed client was still on October 21; the current deployment descriptor was checked before comparing. Code jar SHA-256: `f3a530e9bf7069ea937190f3b9dbf169113ad130ae1891d03cae81c72742af9d`.
+
+- Every fresh board, including after Dismiss or Freeplay Generate, starts with **1/2/1** targets (innermost first). Subsequent constellations use **3/2/1**. Both skip the Gaussian draw; target bags and random draws match the client.
+- Charting a constellation counts as a clear for wild charging. The action's count continues through charts rather than resetting at each completion. One earlier clear makes the next inner targets wild; two or more also add an extra wild target.
+- After charting, further run-clear passes can charge the current constellation immediately: first its inner targets become wild, then it gains an extra wild target. Each tier applies once per constellation, so later passes cannot add repeated extras. Ordinary adjacency effects still apply from the second clear, including a chart followed by a run.
+- A new drop or rotation resets the action's clear count and charted flag. The scoring chain still resets after each completed constellation, as in the client; charging and scoring use separate counters.
+- Normal and WW keep their existing rules, saved settings, history keys and replay state shape. New tapes use settings schema 3, with mode `ww-test`; schemas 1 and 2 continue to play Normal/WW by their previous rules. The default remains WW.
+- Freeplay accepts both opening and later target layouts in WW (Test), including the extra wild target on the later layout.
+
+`scripts/parity/NavigationTestParity.java` calls the October 24 client's board, matcher, scorer and wild helper. Its committed fixture covers 4,320 generated entries/constellations, 400 match boards, 480 carryover cases, 200 scoring cases, and 960 longer sequences interleaving charts, runs, empty passes and new actions. The earlier fixture and generator remain available for WW.
+
+Regenerate the new fixture from this worktree with that code jar:
+
+```powershell
+& ../../tools/jdk21/jdk-21.0.12.1+1/bin/javac.exe -cp <code-jar> -d <output> scripts/parity/NavigationTestParity.java
+& ../../tools/jdk21/jdk-21.0.12.1+1/bin/java.exe -cp '<code-jar>;<output>' NavigationTestParity > src/puzzles/navigation/navigation-test-parity.json
+```
 
 ## Not reproduced
 

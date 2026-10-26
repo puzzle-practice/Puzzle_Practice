@@ -1,11 +1,11 @@
-import { NaviBoard, WildTargets, LEVEL_TARGETS, type Clear, type Fall, type Target } from './logic';
+import { NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, LEVEL_TARGETS, type Clear, type Fall, type Target } from './logic';
 
 /**
  * `clears` is the untimed run that ends at the difficulty's constellation quota, counted across
  * dismissed boards. With no timer and no `clears`, boards keep dealing constellations until a booch or Stop.
  * `slowDrop` holds each incoming star at the top until Drop is pressed, for practice without the fall.
  */
-export interface NavigationSettings { mode: 'normal' | 'ww'; difficulty: number; extraRing: boolean; wildTargets: boolean; timerMs: number; clears: boolean; dismissDelayMs: number; slowDrop: boolean;
+export interface NavigationSettings { mode: 'normal' | 'ww' | 'ww-test'; difficulty: number; extraRing: boolean; wildTargets: boolean; timerMs: number; clears: boolean; dismissDelayMs: number; slowDrop: boolean;
   /** Freeplay mode paints the board, with no timer, quota or history, and each star waits for Drop. */
   create: boolean }
 export const DEFAULT_SETTINGS: NavigationSettings = { mode: 'ww', difficulty: 4, extraRing: true, wildTargets: true, timerMs: 120000, clears: false, dismissDelayMs: 1000, slowDrop: false, create: false };
@@ -14,7 +14,7 @@ export const DISMISS_DELAYS = [0, 500, 1000, 1500, 2000, 3000];
 export function readSettings(value: unknown): NavigationSettings | null {
   if (!value || typeof value !== 'object') return null;
   const s = value as NavigationSettings;
-  if ((s.mode !== 'normal' && s.mode !== 'ww') || !Number.isInteger(s.difficulty) || s.difficulty < 0 || s.difficulty > 9 ||
+  if ((s.mode !== 'normal' && s.mode !== 'ww' && s.mode !== 'ww-test') || !Number.isInteger(s.difficulty) || s.difficulty < 0 || s.difficulty > 9 ||
       typeof s.extraRing !== 'boolean' || typeof s.wildTargets !== 'boolean' || ![0, 120000, 300000].includes(s.timerMs) ||
       (s.clears !== undefined && typeof s.clears !== 'boolean') || (s.clears && s.timerMs !== 0) ||
       (s.dismissDelayMs !== undefined && !DISMISS_DELAYS.includes(s.dismissDelayMs)) ||
@@ -22,7 +22,9 @@ export function readSettings(value: unknown): NavigationSettings | null {
   return { mode: s.mode, difficulty: s.difficulty, extraRing: s.extraRing, wildTargets: s.wildTargets, timerMs: s.timerMs, clears: s.clears ?? false,
     dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false };
 }
-export const settingsKey = (s: NavigationSettings): string => `${s.mode}:${s.difficulty}:${s.mode === 'ww' && s.extraRing ? 4 : 3}:${s.mode === 'ww' && s.wildTargets ? 1 : 0}:${s.timerMs}${s.clears ? ':c' : ''}${s.slowDrop ? ':s' : ''}`;
+export const isWerewolf = (mode: NavigationSettings['mode']): boolean => mode === 'ww' || mode === 'ww-test';
+export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 'ww-test' ? 'WW (Test)' : mode === 'ww' ? 'WW' : 'Normal';
+export const settingsKey = (s: NavigationSettings): string => `${s.mode}:${s.difficulty}:${isWerewolf(s.mode) && s.extraRing ? 4 : 3}:${isWerewolf(s.mode) && s.wildTargets ? 1 : 0}:${s.timerMs}${s.clears ? ':c' : ''}${s.slowDrop ? ':s' : ''}`;
 /** The constellations a run is played to: the quota, except with no timer, which loops. */
 export const runGoal = (s: NavigationSettings): number => s.timerMs || s.clears ? LEVEL_TARGETS[s.difficulty] : Infinity;
 export interface NavigationSeed { boardSeed: number; timerElapsedMs: number }
@@ -73,9 +75,9 @@ export class NavigationGame {
   booched = false;
   /** `goal` is what this board must chart to end the run; a later board in a quota run gets what's left. */
   constructor(readonly settings: NavigationSettings, readonly seed: number, readonly goal = runGoal(settings)) {
-    const rings = settings.mode === 'ww' && settings.extraRing ? 4 : 3;
-    this.board = new NaviBoard(rings, settings.difficulty, seed, settings.mode === 'ww');
-    this.wild = new WildTargets(settings.mode === 'ww' && settings.wildTargets, rings);
+    const rings = isWerewolf(settings.mode) && settings.extraRing ? 4 : 3;
+    this.board = settings.mode === 'ww-test' ? new NaviTestBoard(rings, settings.difficulty, seed) : new NaviBoard(rings, settings.difficulty, seed, isWerewolf(settings.mode));
+    this.wild = settings.mode === 'ww-test' ? new TestWildTargets(settings.wildTargets, rings) : new WildTargets(isWerewolf(settings.mode) && settings.wildTargets, rings);
     this.targets = this.board.nextConstellation();
     this.entry = this.board.nextEntry();
   }
