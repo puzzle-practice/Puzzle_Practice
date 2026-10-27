@@ -9,7 +9,7 @@ const targets = (rows: (number | boolean)[][]): Target[] => rows.map(r => ({ oct
 const runs = (rows: number[][]): Run[] => rows.map(r => ({ direction: r[0] as 0 | 1, octant: r[1], ring: r[2], length: r[3] }));
 const counts = (ts: Target[], rings: number) => [rings - 1, rings - 2, rings - 3].map(r => ts.filter(t => t.ring === r).length);
 
-describe('WW (Test)', () => {
+describe('Dennav', () => {
   it('matches 960 native sequences mixing charts, cascades, empty passes and new actions', () => {
     for (const c of fixture.chains) {
       const b = new NaviTestBoard(c.rings, 4, c.seed), helper = new TestWildTargets(c.enabled, c.rings);
@@ -81,7 +81,8 @@ describe('WW (Test)', () => {
     expect(readSettings(settings)).toEqual(settings);
     expect(readSettings({ ...settings, mode: 'test' })).toBeNull();
     expect(settingsKey(settings)).toBe('ww-test:4:4:1:120000');
-    expect(settingsKey(DEFAULT_SETTINGS)).toBe('ww:4:4:1:120000');
+    expect(settingsKey(DEFAULT_SETTINGS)).toBe('ww-test:4:4:1:120000');
+    expect(settingsKey({ ...settings, mode: 'ww' })).toBe('ww:4:4:1:120000');
     expect(settingsKey({ ...settings, extraRing: false, wildTargets: false })).toBe('ww-test:4:3:0:120000');
   });
 
@@ -95,6 +96,6 @@ describe('WW (Test)', () => {
       game.targets = game.board.nextConstellation();
     }
     game.targets.pop();
-    expect(boardIssues(game, true, true).join(' ')).toContain('WW (Test)');
+    expect(boardIssues(game, true, true).join(' ')).toContain('Dennav');
   });
 });

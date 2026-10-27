@@ -7,7 +7,7 @@ import { NavigationGame, DEFAULT_SETTINGS, NO_TOTALS, addBoard, boardSeed, readS
 const targets = (rows: (number | boolean)[][]): Target[] => rows.map(r => ({ octant: r[0] as number, ring: r[1] as number, colour: r[2] as number, wild: r[3] as boolean }));
 const runs = (rows: number[][]): Run[] => rows.map(r => ({ direction: r[0] as 0 | 1, octant: r[1], ring: r[2], length: r[3] }));
 
-describe.each([['WW', legacyFixture, false], ['WW (Test)', testFixture, true]] as const)('%s client parity', (_mode, fixture, testRules) => {
+describe.each([['Old Dennav', legacyFixture, false], ['Dennav', testFixture, true]] as const)('%s client parity', (_mode, fixture, testRules) => {
   it('matches 4,320 incoming stars and constellation generations, across both ring counts and dense Werewolf constellations', () => {
     for (const c of fixture.generation) {
       const b = testRules && c.dense ? new NaviTestBoard(c.rings,c.difficulty,c.seed) : new NaviBoard(c.rings,c.difficulty,c.seed,c.dense);
@@ -122,7 +122,7 @@ describe('navigation sessions', () => {
   it('deals WW boards dense 3/2/1 constellations and Normal boards from the difficulty distribution', () => {
     const perRing = (ts: Target[], rings: number) => [rings - 1, rings - 2, rings - 3].map(r => ts.filter(t => t.ring === r).length);
     for (const extraRing of [false, true]) {
-      const g = new NavigationGame({ ...DEFAULT_SETTINGS, extraRing, wildTargets: false }, 5);
+      const g = new NavigationGame({ ...DEFAULT_SETTINGS, mode: 'ww', extraRing, wildTargets: false }, 5);
       const rings = extraRing ? 4 : 3;
       expect(perRing(g.targets, rings)).toEqual([3, 2, 1]);
       for (let i = 0; i < 20; i++) expect(perRing(g.board.nextConstellation(), rings)).toEqual([3, 2, 1]);
@@ -147,7 +147,7 @@ describe('navigation sessions', () => {
   });
   it('rejects invalid replay and stored settings', () => {
     expect(readSettings(DEFAULT_SETTINGS)).toEqual(DEFAULT_SETTINGS);
-    expect(DEFAULT_SETTINGS).toMatchObject({ mode: 'ww', timerMs: 120000 });
+    expect(DEFAULT_SETTINGS).toMatchObject({ mode: 'ww-test', timerMs: 120000 });
     expect(readSettings({ ...DEFAULT_SETTINGS,difficulty:10 })).toBeNull();
     expect(readSettings({ ...DEFAULT_SETTINGS,extraRing:'yes' })).toBeNull();
     expect(readSettings({ ...DEFAULT_SETTINGS,timerMs:Infinity })).toBeNull();

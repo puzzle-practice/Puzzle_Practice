@@ -3,7 +3,7 @@ import thumbnail from './thumbnail.jpg?url';
 
 export default {
   title: 'Navigation',
-  description: 'Arrange stars into constellations. Normal, WW and WW (Test) navigation.',
+  description: 'Arrange stars into constellations. Normal, Dennav and Old Dennav navigation.',
   help: 'Up/Down select a ring. Left/Right rotate it. Space drops the incoming star. Click a ring to select it; left/right click to rotate, or use the buttons. Escape pauses. Boards → Freeplay lets you paint the stars, targets and incoming star, and share the board as text.',
   width: 450,
   height: 600,

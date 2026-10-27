@@ -2,7 +2,7 @@
 
 Play online at [puzzle-practice.github.io/Puzzle_Practice](https://puzzle-practice.github.io/Puzzle_Practice/).
 
-Navigation offers Normal, WW and **WW (Test)**. WW (Test) follows the October 24 test client:
+Navigation offers Normal, **Dennav** (the default) and Old Dennav. Dennav follows the October 24 test client:
 each board opens with a smaller constellation, and wild-target charging continues across
 constellations in the same action. See [the rules and verification](docs/navigation-test-build.md).
 

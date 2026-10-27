@@ -3,7 +3,7 @@ import { boardCode, boardIssues, CLEAR, load, paintStar, paintTarget, readBoardC
 import { DEFAULT_SETTINGS, NavigationGame, readSettings } from './game';
 import { EMPTY } from './logic';
 
-const ww = { ...DEFAULT_SETTINGS, create: true };
+const ww = { ...DEFAULT_SETTINGS, mode: 'ww' as const, create: true };
 const normal = { ...DEFAULT_SETTINGS, mode: 'normal' as const, create: true };
 
 describe('navigation create', () => {
@@ -50,7 +50,7 @@ describe('navigation create', () => {
     expect(boardIssues(game, false, false).join(' ')).toContain('in a row');
     const ww4 = new NavigationGame(ww, 4);
     paintTarget(ww4, ww4.targets[0].octant, ww4.targets[0].ring, CLEAR);
-    expect(boardIssues(ww4, true, true).join(' ')).toContain('WW constellations');
+    expect(boardIssues(ww4, true, true).join(' ')).toContain('Old Dennav constellations');
     paintTarget(ww4, ww4.targets[0].octant, ww4.targets[0].ring, WILD);
     expect(boardIssues(ww4, true, false).join(' ')).toContain('Wild targets');
     setEntry(ww4, 0, 5);

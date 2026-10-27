@@ -187,7 +187,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     else if (name === 'load' || name === 'reset') {
       const read = readBoardCode(name === 'load' ? command.slice(5) : setup);
       if (!read) return;
-      if (read.rings !== game.board.rings) { pasteNote = `That board has ${read.rings} rings. ${read.rings === 4 ? 'Choose WW with the extra ring' : 'Choose Normal, or WW without the extra ring'}, then Start.`; return; }
+      if (read.rings !== game.board.rings) { pasteNote = `That board has ${read.rings} rings. ${read.rings === 4 ? 'Choose Dennav or Old Dennav with the extra ring' : 'Choose Normal, or Dennav or Old Dennav without the extra ring'}, then Start.`; return; }
       loadBoard(game, read);
     } else if (name === 'generate') {
       board++;
@@ -349,7 +349,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   panel.clock(() => game ? { label: liveSettings.timerMs ? 'Time left' : 'Time', ms: liveSettings.timerMs ? timeLeft() : elapsed(), countdown: !!liveSettings.timerMs } : null);
   const session = panel.session();
-  session.select('Mode', [{ value: 'normal', label: 'Normal' }, { value: 'ww', label: 'WW' }, { value: 'ww-test', label: 'WW (Test)' }], () => settings.mode, mode => { settings.mode = mode; saveSettings(); selected = isWerewolf(mode) && settings.extraRing ? 3 : 2; }, { disabled: busy });
+  session.select('Mode', [{ value: 'normal', label: modeLabel('normal') }, { value: 'ww-test', label: modeLabel('ww-test') }, { value: 'ww', label: modeLabel('ww') }], () => settings.mode, mode => { settings.mode = mode; saveSettings(); selected = isWerewolf(mode) && settings.extraRing ? 3 : 2; }, { disabled: busy });
   session.select('Boards', [{ value: 'dealt', label: 'Dealt' }, { value: 'create', label: 'Freeplay' }], () => settings.create ? 'create' : 'dealt', value => { settings.create = value === 'create'; saveSettings(); },
     { disabled: busy, title: 'Freeplay lets you paint the stars, targets and incoming star' });
   session.button('Start', () => {

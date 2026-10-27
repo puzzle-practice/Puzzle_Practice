@@ -8,7 +8,7 @@ import { NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, LEVEL_TARGETS, 
 export interface NavigationSettings { mode: 'normal' | 'ww' | 'ww-test'; difficulty: number; extraRing: boolean; wildTargets: boolean; timerMs: number; clears: boolean; dismissDelayMs: number; slowDrop: boolean;
   /** Freeplay mode paints the board, with no timer, quota or history, and each star waits for Drop. */
   create: boolean }
-export const DEFAULT_SETTINGS: NavigationSettings = { mode: 'ww', difficulty: 4, extraRing: true, wildTargets: true, timerMs: 120000, clears: false, dismissDelayMs: 1000, slowDrop: false, create: false };
+export const DEFAULT_SETTINGS: NavigationSettings = { mode: 'ww-test', difficulty: 4, extraRing: true, wildTargets: true, timerMs: 120000, clears: false, dismissDelayMs: 1000, slowDrop: false, create: false };
 /** How long Dismiss holds play before the next board is dealt. */
 export const DISMISS_DELAYS = [0, 500, 1000, 1500, 2000, 3000];
 export function readSettings(value: unknown): NavigationSettings | null {
@@ -23,7 +23,7 @@ export function readSettings(value: unknown): NavigationSettings | null {
     dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false };
 }
 export const isWerewolf = (mode: NavigationSettings['mode']): boolean => mode === 'ww' || mode === 'ww-test';
-export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 'ww-test' ? 'WW (Test)' : mode === 'ww' ? 'WW' : 'Normal';
+export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal';
 export const settingsKey = (s: NavigationSettings): string => `${s.mode}:${s.difficulty}:${isWerewolf(s.mode) && s.extraRing ? 4 : 3}:${isWerewolf(s.mode) && s.wildTargets ? 1 : 0}:${s.timerMs}${s.clears ? ':c' : ''}${s.slowDrop ? ':s' : ''}`;
 /** The constellations a run is played to: the quota, except with no timer, which loops. */
 export const runGoal = (s: NavigationSettings): number => s.timerMs || s.clears ? LEVEL_TARGETS[s.difficulty] : Infinity;

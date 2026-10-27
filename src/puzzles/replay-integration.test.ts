@@ -2181,7 +2181,7 @@ describe('Navigation sessions and replay', () => {
     const expected = results()[0] as { rows:string[][]; report:DutyReport };
     expect(expected).not.toBeNull();
     expect(Number(expected.rows.find(([name])=>name==='Stars dropped')![1])).toBeGreaterThan(0);
-    expect(expected.report.mode).toBe(mode === 'ww-test' ? 'WW (Test)' : mode === 'ww' ? 'WW' : 'Normal');
+    expect(expected.report.mode).toBe(mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal');
     await replayWrites.idle();
     const data=JSON.parse(exportAll()).data;
     const files=await listReplayFiles('navigation');expect(files).toHaveLength(1);
