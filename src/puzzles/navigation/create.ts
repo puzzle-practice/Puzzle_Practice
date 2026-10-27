@@ -79,14 +79,14 @@ export function boardIssues(game: NavigationGame, ww: boolean, wild: boolean): s
   if (!game.targets.length) issues.push('There’s no constellation to chart.');
   const counts = [0, 1, 2].map((i) => game.targets.filter((t) => t.ring === rings - 1 - i).length);
   const wilds = game.targets.filter((t) => t.wild);
-  if (wilds.length && !wild) issues.push('Wild targets only come with WW’s wild targets on.');
+  if (wilds.length && !wild) issues.push('Wild targets only come with Dennav or Old Dennav’s wild targets on.');
   if (ww) {
     const [inner, middle, outer] = DENSE_DISTRIBUTION;
     const opening = game.settings.mode === 'ww-test' && FIRST_TEST_DISTRIBUTION.every((n, i) => counts[i] === n);
     // A second clear in a row adds one more wild target to the inner ring.
     const extra = wild && counts[0] === inner + 1 && game.targets.filter((t) => t.ring === rings - 1).every((t) => t.wild);
     if (game.targets.length && !opening && ((counts[0] !== inner && !extra) || counts[1] !== middle || counts[2] !== outer)) {
-      issues.push(game.settings.mode === 'ww-test' ? 'WW (Test) constellations start with 1 inner, 2 middle and 1 outer target, then use 3/2/1.' : `WW constellations have ${inner} inner, ${middle} middle and ${outer} outer targets.`);
+      issues.push(game.settings.mode === 'ww-test' ? 'Dennav constellations start with 1 inner, 2 middle and 1 outer target, then use 3/2/1.' : `Old Dennav constellations have ${inner} inner, ${middle} middle and ${outer} outer targets.`);
     }
   } else if (game.targets.length && !DISTRIBUTIONS.some((d) => d.every((n, i) => n === counts[i]))) {
     issues.push(`No constellation has ${counts[0]} inner, ${counts[1]} middle and ${counts[2]} outer targets.`);
