@@ -20,6 +20,9 @@ const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
 const CX = 225, CY = 300;
+const MODES = ['normal', 'ww-test', 'ww'] as const;
+const MODE_OPTIONS = [...MODES.map(value => ({ value, label: modeLabel(value) })),
+  ...MODES.map(mode => ({ value: `create-${mode}` as const, label: mode === 'normal' ? 'Freeplay' : `Freeplay (${modeLabel(mode)})` }))];
 /** Freeplay mode paints with each colour's initial held over a cell, X to clear and A for a wild target. */
 const PAINT_KEYS = [...COLOUR_NAMES.map((name, colour) => ({ id: `paint${name}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: name[0].toLowerCase(), colour })),
   { id: 'paintClear', label: 'Clear (Freeplay)', defaultKey: 'x', colour: CLEAR }, { id: 'paintWild', label: 'Wild target (Freeplay)', defaultKey: 'a', colour: WILD }];
@@ -349,9 +352,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   panel.clock(() => game ? { label: liveSettings.timerMs ? 'Time left' : 'Time', ms: liveSettings.timerMs ? timeLeft() : elapsed(), countdown: !!liveSettings.timerMs } : null);
   const session = panel.session();
-  session.select('Mode', [{ value: 'normal', label: modeLabel('normal') }, { value: 'ww-test', label: modeLabel('ww-test') }, { value: 'ww', label: modeLabel('ww') }], () => settings.mode, mode => { settings.mode = mode; saveSettings(); selected = isWerewolf(mode) && settings.extraRing ? 3 : 2; }, { disabled: busy });
-  session.select('Boards', [{ value: 'dealt', label: 'Dealt' }, { value: 'create', label: 'Freeplay' }], () => settings.create ? 'create' : 'dealt', value => { settings.create = value === 'create'; saveSettings(); },
-    { disabled: busy, title: 'Freeplay lets you paint the stars, targets and incoming star' });
+  // Freeplay paints a board under any rule set, so each rule set has a Freeplay entry too.
+  session.select('Mode', MODE_OPTIONS, () => settings.create ? `create-${settings.mode}` as const : settings.mode, value => {
+    settings.create = value.startsWith('create-'); settings.mode = MODES.find(mode => value.endsWith(mode)) ?? 'normal'; saveSettings(); selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
+  }, { disabled: busy, title: 'Freeplay lets you paint the stars, targets and incoming star' });
   session.button('Start', () => {
     if (replays.isPlaying) replays.stop();
     pendingStart = null;
