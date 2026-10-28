@@ -13,7 +13,7 @@ import { BoardRandom } from '../forage/board';
 import { AlchemyBoard, Bottle, colorOf, hasInlet, valid, withColor, MAX_LAYERS, MIN_LAYERS, OVERLAP, GOALS, type Cell, type Drop, type FillGroup } from './logic';
 import { Art, position, cellAt, bottleX, slotPosition, ROTATE_MS, DRAIN_STEP_MS, SQUIRT_MS, FADE_MS,
   BELT_MS, BOTTLE_FLIGHT_MS, TEXT_MS, type Drain } from './presentation';
-import { addLabel, boardCode, boardIssues, bulbOf, cycleBottle, cycleBulb, fill as fillBoard, LABEL_COLORS, LABEL_NAMES, load as loadBoard, makePiece,
+import { addLabel, boardCode, boardIssues, cycleBottle, cycleBulb, fill as fillBoard, LABEL_COLORS, LABEL_NAMES, load as loadBoard, makePiece,
   paint as paintSquare, readBoardCode, removeLabel, setBulbs, SHAPE_NAMES, SHAPES, SPECIAL_NAMES } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -33,16 +33,13 @@ const codec: ReplaySettingsCodec = { currentVersion: 1, simulatorVersion: 2, mig
 /** Freeplay mode paints the single tubes with keys 1-9, 0 and - held over the board, and adds bottle labels with their colors' initials. */
 const SHAPE_KEYS = SHAPE_NAMES.slice(0, 11).map((name, shape) => ({ id: `paint${shape + 1}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: '1234567890-'[shape], shape }));
 const LABEL_KEYS = LABEL_COLORS.map(color => ({ id: `label${color}`, label: `Add ${LABEL_NAMES[color].toLowerCase()} label (Freeplay)`, defaultKey: LABEL_NAMES[color][0].toLowerCase(), color }));
+/** The pause between quicksilver pulses running down its path. */
+const QUICKSILVER_REST_MS = 1000;
 const bottleAt = ([px, py]: Point) => py >= 480 && py < 555 ? Array.from({ length: 11 }, (_, x) => x).find(x => px >= bottleX(x) && px < bottleX(x) + 36) ?? -1 : -1;
-/** The column under a point on the bulbs along the top, laid out as Art.bulbs draws them. */
-function bulbColumnAt([px, py]: Point): number {
-  if (py < 28 || py >= 63) return -1;
-  for (let column = 0, x = 16; column < 11; column++) {
-    const width = column % 2 === 0 ? 48 : 26;
-    if (px >= x && px < x + width) return column;
-    x += width;
-  }
-  return -1;
+/** The bulb under a point along the top, laid out as Art.bulbs draws them 48 wide with 26 between. */
+function bulbAt([px, py]: Point): number {
+  const bulb = Math.floor((px - 16) / 74);
+  return py >= 28 && py < 63 && bulb >= 0 && bulb < 6 && px - 16 - bulb * 74 < 48 ? bulb : -1;
 }
 interface Message { text: string; start: number; x: number; y: number; color: string; size: number; sound?: string; duration: number }
 interface Squirt { x: number; color: number; start: number }
@@ -314,7 +311,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ctx.save();
       if (now >= clearAt && allConnected.has(y * 11 + x)) ctx.globalAlpha = Math.max(0, 1 - (now - clearAt) / FADE_MS);
       const quickIndex = quickNodes.findIndex(n => n.x === x && n.y === y);
-      const quickTime = quickIndex < 0 ? -1 : (now % (quickNodes.length * 15 + 250)) - quickIndex * 15;
+      const quickTime = quickIndex < 0 ? -1 : (now % (quickNodes.length * 15 + 250 + QUICKSILVER_REST_MS)) - quickIndex * 15;
       art.piece(piece, px, py, angle, drains.filter(d => d.node.x === x && d.node.y === y), now,
         !groupAnims.length && !drops.length && quickTime >= 0 && quickTime < 250 ? quickTime / 250 : 0);
       ctx.restore();
@@ -411,8 +408,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
             painting = true; paintAt(cellAt(event.pos), paletteShape, now); continue;
           }
           if (event.type === 'mouseup' && event.button === 1 && painting) { painting = false; continue; }
-          if (event.type === 'mouseup' && (event.button === 1 || event.button === 3) && bulbColumnAt(event.pos) >= 0) {
-            if (!busy(now) && cycleBulb(board, bulbOf(board, bulbColumnAt(event.pos)), event.button === 3 ? -1 : 1)) edited();
+          if (event.type === 'mouseup' && (event.button === 1 || event.button === 3) && bulbAt(event.pos) >= 0) {
+            if (!busy(now) && cycleBulb(board, bulbAt(event.pos), event.button === 3 ? -1 : 1)) edited();
             continue;
           }
           if (event.type === 'mouseup' && (event.button === 1 || event.button === 3) && bottleAt(event.pos) >= 0) {

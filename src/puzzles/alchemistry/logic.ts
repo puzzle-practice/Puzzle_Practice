@@ -304,6 +304,8 @@ export class AlchemyBoard {
       const base = this.baseColors[x];
       this.colors[x] = this.quicksilver.delete(base) ? 9 : base;
     }
+    // Freeplay can make any bulb quicksilver; it wears off after a fill too.
+    for (let x = 0; x < WIDTH; x++) if (![0, 4, 10].includes(x)) this.colors[x] = this.baseColors[x];
     this.lastCell = [-1, -1];
     return groups;
   }

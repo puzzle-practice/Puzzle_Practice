@@ -65,23 +65,29 @@ describe('alchemistry create', () => {
     }
   });
 
-  it('cycles bulbs freely through quicksilver', () => {
+  it('cycles each bulb on its own through quicksilver', () => {
     const board = new AlchemyBoard(6, 8);
     setBulbs(board, 0);
-    cycleBulb(board, 2); expect(board.colors[10]).toBe(9);
-    expect(bulbColors(board)[2]).toEqual({ color: 4, quicksilver: true });
+    cycleBulb(board, 5); expect(board.colors[10]).toBe(2);
+    cycleBulb(board, 5); cycleBulb(board, 5); expect(board.colors[10]).toBe(9);
+    expect(board.colors[9]).toBe(4);
+    expect(bulbColors(board)[5]).toEqual({ color: 3, quicksilver: true });
     expect(bulbOrder(board)).toBe(-1);
-    cycleBulb(board, 1, -1); expect(board.colors.slice(4, 7)).toEqual([2, 2, 2]);
-    expect(boardIssues(board).join(' ')).toContain('different primary');
+    cycleBulb(board, 3, -1); expect(board.colors.slice(4, 8)).toEqual([3, 3, 2, 4]);
+    expect(boardIssues(board).join(' ')).toContain('groups');
+    cycleBulb(board, 1, -1); cycleBulb(board, 1, -1);
+    expect(board.colors[2]).toBe(9);
+    expect(boardIssues(board).join(' ')).toContain('first, third and last');
     const copy = new AlchemyBoard(6, 1);
     load(copy, readBoardCode(boardCode(board))!);
     expect(copy.colors).toEqual(board.colors);
     expect(boardCode(copy)).toBe(boardCode(board));
-    cycleBulb(board, 2); expect(bulbColors(board)[2]).toEqual({ color: 2, quicksilver: false });
-    cycleBulb(board, 2, -1); expect(bulbColors(board)[2]).toEqual({ color: 2, quicksilver: true });
+    cycleBulb(board, 5); expect(bulbColors(board)[5]).toEqual({ color: 4, quicksilver: false });
+    cycleBulb(board, 5, -1); expect(bulbColors(board)[5]).toEqual({ color: 4, quicksilver: true });
+    board.fill();
+    expect(board.colors.filter((c) => c === 9)).toEqual([]);
     const small = new AlchemyBoard(1, 2);
-    cycleBulb(small, 1, -1);
-    expect(readBoardCode(boardCode(small))?.bulbs.length).toBe(2);
+    while (!bulbColors(small)[0].quicksilver) cycleBulb(small, 0);
     expect(boardIssues(small).join(' ')).toContain('Quicksilver bulbs');
   });
 
