@@ -1059,11 +1059,19 @@ export class Game {
 
   // ---- Each frame ----
 
-  update(now: number, updateVisualEffects = true): void {
+  /** A scroll, a piece flying in, a rating or a token is still animating. */
+  get settling(): boolean {
+    return !!this.scroll || this.flyers.length > 0 || this.texts.length > 0 || this.tokenFlyers.length > 0;
+  }
+
+  /** `runTimers` false, after time's up, lets what's on screen finish without dealing the next holes. */
+  update(now: number, updateVisualEffects = true, runTimers = true): void {
     this.now = now;
-    const due = this.timers.filter((t) => t.at <= now);
-    this.timers = this.timers.filter((t) => t.at > now);
-    for (const t of due) t.fn();
+    if (runTimers) {
+      const due = this.timers.filter((t) => t.at <= now);
+      this.timers = this.timers.filter((t) => t.at > now);
+      for (const t of due) t.fn();
+    }
     if (this.scroll) {
       const s = this.scroll;
       const t = Math.min(1, (now - s.start) / s.ms);

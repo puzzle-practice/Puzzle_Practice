@@ -6,6 +6,7 @@ import { SessionPause } from '../../core/pause';
 import { ReplayRecorder, stateText, type ReplaySettingsCodec } from '../../core/replay';
 import { historyGroup } from '../../core/history';
 import { dutyDesk } from '../../core/duty/desk';
+import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
 import { keyMatches } from '../../core/controls';
 import { copyText, pasteText } from '../../core/clipboard';
@@ -54,7 +55,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const sounds=new SoundBank(import.meta.glob<string>('./sounds/*.mp3',{eager:true,query:'?url',import:'default'}),()=>replays?.isSeeking??false);
   let settings=readSettings(store.get('settings',DEFAULT_SETTINGS))??{...DEFAULT_SETTINGS};
   let liveSettings={...settings}, savedSettings:BilgingSettings|null=null;
-  let game=new BilgingGame(settings,42), running=false, finished=false;
+  let game=new BilgingGame(settings,42), running=false, finished=false, timeUp=false;
   let startAt=0,endAt=0,lastAt=0,soundTurn=0;
   let commands:string[]=[], held=new Set<string>(), repeats=new Map<string,number>();
   let altArt=store.get('altArt',false), lastMouse:Point=[-1,-1];
@@ -64,10 +65,11 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'bilging','Bilging',[]);
   const busy=()=>running||(replays?.isPlaying??false);
-  const elapsed=()=>Math.max(0,(running?ticks():endAt)-startAt);
+  const elapsed=()=>Math.min(timerMs()||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
+  const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
   const history=()=>store.history(settingsKey(settings));
-  const queue=(action:string)=>{if(running&&!pause.paused&&!replays.isPlaying)commands.push(action);};
+  const queue=(action:string)=>{if(running&&!timeUp&&!pause.paused&&!replays.isPlaying)commands.push(action);};
   const resetInput=()=>{held.clear();repeats.clear();};
   const key=(name:string,id:string,fallback:string)=>keyMatches(name,'bilging',id,fallback);
   const play=(name:string)=>{const files=SOUNDS[name]??[name];sounds.play(files[soundTurn++%files.length]);};
@@ -84,14 +86,15 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
 
   function start(seed=seedMode.next()):void { seedMode.remember(seed);
     pause.resume(); liveSettings={...settings}; game=new BilgingGame(liveSettings,seed);
-    running=true;finished=false;startAt=endAt=lastAt=ticks(); duty.clear(); resetInput();commands=[];
+    running=true;finished=false;timeUp=false;hold.clear();startAt=endAt=lastAt=ticks(); duty.clear(); resetInput();commands=[];
     lastScene=null;callout=null;paintWith=null;painting=false;pasteNote='';
     replays.begin(liveSettings,seed); play('fanfare');
   }
   function end(reason:string):void {
     if(!running)return;
     game.settle();
-    running=false;finished=true;endAt=ticks();resetInput();commands=[];
+    running=false;finished=true;timeUp=false;endAt=ticks();resetInput();commands=[];
+    if(reason==='Time up')hold.start();
     const report=duty.end({mode:liveSettings.mode==='create'?'Freeplay':liveSettings.tokens?'Token practice':'Normal',performance:LEARNING,
       score:{label:'Points / swap',value:game.efficiency.toFixed(2)}});
     const tape=replays.finish(`${reason} · ${game.efficiency.toFixed(2)} points/swap`,report);
@@ -102,7 +105,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       ...(tape?{replayAt:tape.at,replayId:tape.runId??''}:{})});
   }
   function action(id:string):void {
-    if(!running||pause.paused)return;
+    if(!running||timeUp||pause.paused)return;
     const move=MOVES[id];
     if(move)game.moveCursor(...move);
     if(id==='swap'){const result=game.swap();if(result==='crab')play('crab_angry');}
@@ -119,7 +122,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   }
   function draw(now:number):void {
     screen.blit(images.get('background'),0,0);
-    drawBoard(ctx,images,game,running&&!pause.paused,altArt);
+    drawBoard(ctx,images,game,running&&!timeUp&&!pause.paused,altArt);
     const performance=indicatorStep(game.performance.value,liveSettings.indicatorMax);
     const level=Math.round(performance/20*6);
     const frame=performance?Math.floor(now/(1000/(20*performance/20)))%7:0;
@@ -169,7 +172,9 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       if(!(liveSettings.mode==='create'&&replays.isPlaying))handleInput(routed.events,routed.mouse,now);
       const scene=game.scenes[0]??null;
       if(scene!==lastScene){if(scene)sceneStarted(scene,now);lastScene=scene;}
-      if(timerMs()&&elapsed()>=timerMs())end('Time up');
+      // Time's up: no more moves, and the session ends once the board has settled.
+      if(timerMs()&&elapsed()>=timerMs())timeUp=true;
+      if(timeUp&&!game.busy)end('Time up');
     }
     if(!replays.isSeeking&&!replays.isAdvancing)draw(now);
   }
@@ -296,7 +301,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     available:g=>typeof g.replayAt==='number'&&(replays?.hasPlayableAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined)??false),
     play:g=>{if(typeof g.replayAt==='number')void replays.playAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined);},
   });
-  panel.results(()=>finished&&!running?{title:'Bilging results',report:duty.last,rows:[
+  panel.results(()=>finished&&!running&&!hold.holding?{title:'Bilging results',report:duty.last,rows:[
     ['Points / swap',game.efficiency.toFixed(2)],['Points',String(game.points)],['Swaps',String(game.moves)],
     ['Levels',String(game.levels)],['Crabs',String(game.crabs)],['Longest chain',String(game.longestChain)],['Tokens',String(game.tokens)],
   ]}:null);
@@ -304,7 +309,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   replays=new ReplayRecorder('bilging',store,panel,ticks,tape=>{
     savedSettings??={...settings};settings=readSettings(tape.settings)!;start(tape.seed as number);
   },()=>{
-    running=false;finished=false;resetInput();commands=[];duty.clear();
+    running=false;finished=false;timeUp=false;resetInput();commands=[];duty.clear();
     if(savedSettings){settings=savedSettings;savedSettings=null;}preview();
   },validSeed,setReplayTime,()=>frame([]),codec,()=>!running||replays.isPlaying);
   replays.setStopLive(()=>{if(running)end('Stopped');});

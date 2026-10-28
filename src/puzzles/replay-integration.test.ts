@@ -14,6 +14,7 @@ import { Match } from './swordfight/match';
 import { W as SWORD_COLUMNS } from './swordfight/board';
 import { COL_PX as SWORD_COLUMN_PX } from './swordfight/fighter';
 import { setWarningTimer } from '../core/audio';
+import { END_HOLD_MS } from '../core/end-hold';
 import { SailingGame } from './sailing/game';
 import { PatchingBoard, movable as patchingMovable } from './patching/logic';
 import { CELL as CARP_CELL, COLS as CARP_COLS, Game as CarpentryGame, ROWS as CARP_ROWS, VIEW_X as CARP_X, VIEW_Y as CARP_Y } from './vampire-carp/game';
@@ -270,6 +271,9 @@ describe('Rumble aim trainer sessions', () => {
     expect(h.aim().result).toBe('Time up');
     expect(h.aim().score).toBe(8);
     expect(h.aim().lives).toBe(2);
+    // The board stays in view a moment before the results.
+    expect(h.results()[0]).toBeNull();
+    h.advance(END_HOLD_MS);
     expect(h.results()[0]).toMatchObject({ title: 'Aim trainer · Mixed · Time up' });
     expect(h.store.history(AIM_HISTORY)).toHaveLength(1);
     expect(h.store.history(AIM_HISTORY)[0]).toMatchObject({ score: 8, shots: 9, lives: 2, ms: AIM_MS });
@@ -896,6 +900,9 @@ describe('Shipwrightery sessions and replays', () => {
     expect(clocks()).toContainEqual(expect.objectContaining({ label: 'Overtime' }));
     now = 4400; instance.frame([]);
     now = 6400; instance.frame([]);
+    // The board stays in view a moment before the results.
+    expect(results()[0]).toBeNull();
+    now = 6400 + END_HOLD_MS; instance.frame([]);
     const result = results()[0] as { rows: string[][] };
     expect(result.rows).toContainEqual(['Points', '18']);
     expect(result.rows).toContainEqual(['Best combo', '3']);
@@ -907,6 +914,8 @@ describe('Shipwrightery sessions and replays', () => {
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     expect(await captured.recorders[0].playAt(replay.at, replay.runId)).toBe(true);
     perf.mockReturnValue(replay.duration);
+    instance.frame([]);
+    perf.mockReturnValue(replay.duration + END_HOLD_MS);
     instance.frame([]);
     expect(results()[0]).toEqual(result);
     expect(JSON.parse(exportAll()).data).toEqual(data);
@@ -1135,6 +1144,8 @@ describe('preset Treasure Haul drills', () => {
     expect((boards.mock.contexts.at(-1)! as HaulBoard).cells).toEqual(nextDrill);
     expect(stats()[0]).toContainEqual(['Chests cleared', '1', expect.any(String)]);
     now = stage === 'paused' ? 125100 : 120100; instance.frame([]);
+    // The board stays in view a moment before the results.
+    now += END_HOLD_MS; instance.frame([]);
     expect((results()[0] as { rows: string[][] }).rows).toEqual(expect.arrayContaining([['Time', '120.00s'], ['Chests cleared', '1']]));
     expect(buttonStates.get('Play::Retry')!.disabled!()).toBe(true);
     const finalStats = stats();
@@ -1405,6 +1416,8 @@ describe('Rubies spawn mode', () => {
     expect(boards.mock.calls).toHaveLength(3);
     expect(stats()[0]).toContainEqual(['Ruby score', String(points), expect.any(String)]);
     now = 35100; instance.frame([]);
+    // The board stays in view a moment before the results.
+    now += END_HOLD_MS; instance.frame([]);
     const finalStats = stats();
     expect((results()[0] as { rows: string[][] }).rows).toContainEqual(['Ruby score', String(points)]);
     await replayWrites.idle();
@@ -1571,6 +1584,8 @@ describe('Treasure Haul dismissal during a cascade', () => {
     expect(stats()[0]).toContainEqual(['Chests cleared', '1', expect.any(String)]);
     now = Math.max(now, 300100); instance.frame([]);
     for (let frame = 0; frame < 300 && buttonStates.get('Play::Start')!.label!() === 'Stop'; frame++) { now += 50; instance.frame([]); }
+    // The board stays in view a moment before the results.
+    now += END_HOLD_MS; instance.frame([]);
     const finalStats = stats();
     expect((results()[0] as { rows: string[][] }).rows).toContainEqual(['Chests cleared', '1']);
     await replayWrites.idle();
@@ -1605,6 +1620,8 @@ describe('Treasure Haul dismissal during a cascade', () => {
     now = 3100; instance.frame([]);
     expect(stats()[0]).toContainEqual(['Chests hauled', '0', expect.any(String)]);
     now = 32100; instance.frame([]);
+    // The board stays in view a moment before the results.
+    now += END_HOLD_MS; instance.frame([]);
     expect(buttonStates.get('Play::Start')!.label!()).toBe('Play again');
     expect((results()[0] as { rows: string[][] }).rows).toContainEqual(['Time', '30.00s']);
     instance.dispose?.();
@@ -1661,6 +1678,8 @@ describe('Blacksmithing perfect board scoring', () => {
     for (; now <= 5000; now += 25) instance.frame([]);
     expect(stats().flat()).toContainEqual(['Points', String(points), '']);
     now = 120000; instance.frame([]);
+    // The board stays in view a moment before the results.
+    now += END_HOLD_MS; instance.frame([]);
     expect(results()[0]).toMatchObject({ rows: expect.arrayContaining([['Points', String(points)], ['Boards', '1']]) });
     expect(store.get<Record<string, number>>('perfectTimedBests', {})).toEqual({ '3-4:scoring2': points });
     await replayWrites.idle();
@@ -1965,6 +1984,12 @@ describe('Navigation sessions and replay', () => {
     expect(clocks()[0]).toMatchObject({ ms: 1 });
     expect(results()[0]).toBeNull();
     now = 130000; instance.frame([]);
+    // Time's up, but the star that was landing plays out first; then the board stays in view a moment.
+    expect(buttonStates.get('Play::Start')!.label!()).toBe('Stop');
+    expect(store.history(settingsKey(settings))).toHaveLength(0);
+    for (let frame = 0; frame < 100 && buttonStates.get('Play::Start')!.label!() === 'Stop'; frame++) { now += 50; instance.frame([]); }
+    expect(results()[0]).toBeNull();
+    now += END_HOLD_MS; instance.frame([]);
     expect(clocks()[0]).toMatchObject({ ms: 0 });
     const expected = results()[0];
     expect(expected).not.toBeNull();
@@ -1983,6 +2008,7 @@ describe('Navigation sessions and replay', () => {
     expect(await captured.recorders[0].playAt(replay.at, replay.runId)).toBe(true);
     expect(clocks()[0]).toMatchObject({ ms: 120000 });
     perf.mockReturnValue(replay.duration); instance.frame([]);
+    perf.mockReturnValue(replay.duration + END_HOLD_MS); instance.frame([]);
     expect(clocks()[0]).toMatchObject({ ms: 0 });
     expect(results()[0]).toEqual(expected);
     expect(JSON.parse(exportAll()).data).toEqual(before);
@@ -2458,7 +2484,8 @@ describe('puzzle completion during replay', () => {
     instance.frame([]);
     expect(recorder.divergedAt).toBeNull();
     expect(stats()).toEqual(expectedStats);
-    if (puzzle === 'distilling') expect(results()[0]).not.toBeNull();
+    // A full jug holds the board under "Finished!"; the replay ends, showing its saved report, before the results would cover it.
+    if (puzzle === 'distilling') expect(results()[0]).toBeNull();
     expect(JSON.parse(exportAll()).data).toEqual(data);
     setters.get('History:Replays:Jump to (s)')!(replay.duration / 1000);
     buttons.get('History:Replays:Jump')!();
@@ -2740,8 +2767,11 @@ describe('Gunning loop drill replay', () => {
     }
     expect(live.stats.loaded).toBeGreaterThan(20);
     expect(live.stats.wrong).toBe(0);
+    // Time's up: the deck stops, and the last guns finish firing before the board holds a moment.
+    expect(results()[0]).toBeNull();
+    for (let frame = 0; frame < 100 && results()[0] === null; frame++) { now += 50; instance.frame([]); }
     expect(live.stats.fired).toBe(live.stats.loaded);
-    expect(live.now).toBe(120000);
+    expect(live.activeTime).toBe(120000);
     const result = results()[0] as { rows: string[][] };
     expect(result.rows).toContainEqual(['Guns / minute', (live.stats.loaded / 2).toFixed(2)]);
     expect(store.history('loop-v4-120000')).toHaveLength(1);
@@ -2751,11 +2781,14 @@ describe('Gunning loop drill replay', () => {
     const recorder = captured.recorders[0], perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
     perf.mockReturnValue(tape.duration); instance.frame([]);
+    perf.mockReturnValue(tape.duration + END_HOLD_MS); instance.frame([]);
     expect(results()[0]).toEqual(result);
     expect(warnings).not.toHaveBeenCalled();
-    setters.get('History:Replays:Jump to (s)')!(120);
+    setters.get('History:Replays:Jump to (s)')!(tape.duration / 1000);
     buttons.get('History:Replays:Jump')!();
     await vi.waitFor(() => expect(recorder.isSeeking).toBe(false));
+    instance.frame([]);
+    perf.mockReturnValue(tape.duration + 2 * END_HOLD_MS); instance.frame([]);
     expect(results()[0]).toEqual(result);
     expect(JSON.parse(exportAll()).data).toEqual(data);
     buttons.get('History:Replays:Stop')!(); instance.dispose?.();

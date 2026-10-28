@@ -15,6 +15,7 @@ import {
 } from './logic';
 import { keyMatches } from '../../core/controls';
 import { copyText, pasteText } from '../../core/clipboard';
+import { EndHold } from '../../core/end-hold';
 import { MATERIAL_NAMES, SLOTS, boardCode, boardIssues, cardChoices, slotTier, fill as fillBoard, load as loadBoard, paint as paintSquare, readBoardCode, setCard } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -82,6 +83,7 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
   let lastPointer: Point = [-1, -1];
   let moves: MoveAnim[] = [], placements: PlacementAnim[] = [], falling: Falling[] = [], messages: Message[] = [];
   let finishAt = Infinity, saved = false, outcome = '';
+  const hold = new EndHold(ticks);
   let flagFrom = 249, flagTarget = 249, flagAt = 0, flagMs = 0;
   const historyKey = () => `difficulty:${difficulty}`;
   const creating = () => running() && !!session?.create;
@@ -101,7 +103,7 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
     selected = null; held = -1; dragging = dragged = false;
     paletteMaterial = null; paintWith = null; pasteNote = '';
     moves = []; placements = []; falling = []; messages = [];
-    finishAt = Infinity; saved = false; outcome = '';
+    finishAt = Infinity; saved = false; outcome = ''; hold.clear();
     flagFrom = flagTarget = 249; flagAt = ticks(); flagMs = 0;
     replays?.begin({ difficulty, mode }, seed);
   }
@@ -252,7 +254,8 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
         sounds.play(event.failed ? 'booched' : 'finished_puzzle');
       }
     }
-    if (session.finished && now >= finishAt) saveResult(session.failed ? 'Washed out' : 'Finished');
+    // The tide or overtime ran out: the cards have retreated, and the board stays in view a moment before the results.
+    if (session.finished && now >= finishAt && !saved) { saveResult(session.failed ? 'Washed out' : 'Finished'); hold.start(); }
     moves = moves.filter(s => now < s.start + s.ms);
     placements = placements.filter(p => now < p.start + FLASH_MS + GROW_MS + 600);
     falling = falling.filter(p => now < p.start + p.ms);
@@ -545,7 +548,7 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
     { label: 'Points', value: g => String(g.score) }, { label: '/ pattern', value: g => format(Number(g.average)) },
     { label: 'Combo', value: g => String(g.combo) }, { label: 'Result', value: g => String(g.result) },
   ], 'Past games', undefined, false);
-  panel.results(() => !saved ? null : { title: outcome, rows: [
+  panel.results(() => !saved || hold.holding ? null : { title: outcome, rows: [
     ['Points', String(session?.score ?? 0)], ['Points / pattern', format(average())],
     ['Patterns placed', String(board().completed)], ['Best combo', String(session?.bestCombo ?? 0)], ['Swaps', String(session?.swaps ?? 0)],
   ] });

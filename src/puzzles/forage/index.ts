@@ -49,6 +49,7 @@ import { type Cell, CELL, type Effect, Forage, looks, type SoundName, type Sprit
 import { CHEST_WEIGHTINGS, fillPuzzle, type Mode, parseBoard, randomizeColours, scramblePuzzle, type Settings } from './logic';
 import type { Moon, MoonBlast } from './werewolf';
 import { PUZZLES } from './puzzles';
+import { EndHold } from '../../core/end-hold';
 
 const soundUrls = import.meta.glob<string>(['./sounds/*.mp3', '!./sounds/forage_night.mp3'], { eager: true, query: '?url', import: 'default' });
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -277,6 +278,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * on the same times so playback produces the same board.
    */
   const clock = () => ticks();
+  const hold = new EndHold(clock);
   game = newGame();
 
   const ciKey = () => {
@@ -363,6 +365,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     settledAt = 0;
     pendingNextBoard = false;
     ended = false;
+    hold.clear();
     createStarted = settings.mode === 'create';
     paintWith = null;
     painting = false;
@@ -897,7 +900,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const duty = dutyDesk(panel, store, 'forage', 'Foraging', RATING_SCALES, {
     shown: (id) => (id === 'normal' ? settings.mode === 'normal' : settings.mode === 'ci' || settings.mode === 'chaos'),
   });
-  panel.results(() => ended && !flight ? {
+  panel.results(() => ended && !flight && !hold.holding ? {
     title: 'Foraging results',
     report: duty.last,
     rows: [
@@ -1439,7 +1442,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     timePassed = Math.max(0, now - startTime);
     if (now >= startTime) warning.update(!isPuzzle() && roundSeconds() > 0 ? roundDuration() - timePassed : null);
     if (playing.length || flight || now < settledAt) return;
-    if (!isPuzzle() && roundSeconds() > 0 && timePassed >= roundDuration()) finishScored();
+    // Time's up once the last move has played out; the board stays in view a moment before the results.
+    if (!isPuzzle() && roundSeconds() > 0 && timePassed >= roundDuration()) { finishScored(); hold.start(); }
     else if (pendingNextBoard) newBoard();
     else if (isPuzzle() && game.crateCount() === 0) { finishPuzzle(); outro(); }
     else if (normalMode() && boardDone()) finishScored();

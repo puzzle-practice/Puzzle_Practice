@@ -6,6 +6,7 @@ import { SessionPause } from '../../core/pause';
 import { ReplayRecorder, stateText, type ReplaySettingsCodec } from '../../core/replay';
 import { historyGroup } from '../../core/history';
 import { dutyDesk } from '../../core/duty/desk';
+import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
 import { keyMatches } from '../../core/controls';
 import { Group } from '../../core/panel';
@@ -52,7 +53,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const sounds=new SoundBank(import.meta.glob<string>('./sounds/*.mp3',{eager:true,query:'?url',import:'default'}),()=>replays?.isSeeking??false);
   let settings=readSettings(store.get('settings',DEFAULT_SETTINGS))??{...DEFAULT_SETTINGS};
   let liveSettings={...settings}, savedSettings:GunningSettings|null=null;
-  let game=new GunningGame(settings,42), running=false, finished=false;
+  let game=new GunningGame(settings,42), running=false, finished=false, timeUp=false;
   let startAt=0,endAt=0,lastAt=0,soundTurn=0;
   let commands:string[]=[], held=new Set<string>(), repeats=new Map<string,number>();
   let dragFrom:Point|null=null, lastMouse:Point=[-1,-1];
@@ -62,10 +63,11 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'gunning','Gunning',[]);
   const busy=()=>running||(replays?.isPlaying??false);
-  const elapsed=()=>Math.max(0,(running?ticks():endAt)-startAt);
+  const elapsed=()=>Math.min(liveSettings.mode!=='create'&&liveSettings.timerMs||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
+  const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
   const history=()=>store.history(settingsKey(settings));
-  const queue=(action:string)=>{if(running&&!pause.paused&&!replays.isPlaying)commands.push(action);};
+  const queue=(action:string)=>{if(running&&!timeUp&&!pause.paused&&!replays.isPlaying)commands.push(action);};
   const resetInput=()=>{held.clear();repeats.clear();dragFrom=null;movingBarrel=false;};
   const key=(name:string,id:string,fallback:string)=>keyMatches(name,'gunning',id,fallback);
   const play=(name:string)=>{const files=SOUNDS[name]??[name];sounds.play(files[soundTurn++%files.length]);};
@@ -76,14 +78,15 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
 
   function start(seed=seedMode.next()):void { seedMode.remember(seed);
     pause.resume(); liveSettings={...settings}; game=new GunningGame(liveSettings,seed);
-    running=true;finished=false;startAt=endAt=lastAt=ticks(); duty.clear(); resetInput();commands=[];
+    running=true;finished=false;timeUp=false;hold.clear();startAt=endAt=lastAt=ticks(); duty.clear(); resetInput();commands=[];
     // Freeplay starts frozen, so the deck can be set up before anything moves.
     frozen=liveSettings.mode==='create';palette=paintWith=null;painting=false;setup='';pasteNote='';
     replays.begin(liveSettings,seed); play('fanfare');
   }
   function end(reason:string):void {
     if(!running)return;
-    running=false;finished=true;endAt=ticks();resetInput();commands=[];
+    running=false;finished=true;timeUp=false;endAt=ticks();resetInput();commands=[];
+    if(reason==='Time up')hold.start();
     const s=game.stats, rate=game.loadsPerMinute;
     const report=duty.end({mode:liveSettings.mode==='loop'?'Loop drill':FIRING.find(f=>f.value===liveSettings.firing)!.label,performance:LEARNING,
       score:{label:'Guns / minute',value:rate.toFixed(2)},
@@ -96,7 +99,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       ...(tape?{replayAt:tape.at,replayId:tape.runId??''}:{})});
   }
   function action(id:string):void {
-    if(!running||pause.paused)return;
+    if(!running||timeUp||pause.paused)return;
     const move=MOVES[id];
     if(move)game.moveCursor(...move);
     if(id in SELECT)game.selectArrow(SELECT[id]);
@@ -159,14 +162,15 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     if(running){
       for(const command of [...liveCommands,...routed.commands])action(command);
       const mouse=routed.mouse;
-      if(dragFrom)game.selectArrow(dragArrow(mouse));
+      if(timeUp){/* The deck has stopped. */}
+      else if(dragFrom)game.selectArrow(dragArrow(mouse));
       else if((mouse[0]!==lastMouse[0]||mouse[1]!==lastMouse[1])&&onBoard(mouse)){
         const c=cellAt(mouse);game.pointAt(c.x,c.y);
         const paint=paintWith??(painting?palette:null);
         if(creating()&&paint)paintAt(mouse,paint);
       }
       lastMouse=[mouse[0],mouse[1]];
-      for(const event of routed.events){
+      for(const event of timeUp?[]:routed.events){
         if(creating()){
           if(event.type==='mousedown'&&event.button===1&&!palette){
             const c=cellAt(event.pos);
@@ -200,9 +204,12 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
         }
       }
       for(const id of Object.keys(MOVES))if(held.has(id)&&now>=(repeats.get(id)??Infinity)){action(id);repeats.set(id,now+75);}
-      if(!frozen)game.step(liveSettings.mode==='loop'&&liveSettings.timerMs?Math.min(delta,Math.max(0,liveSettings.timerMs-game.now)):delta);
+      if(timeUp)game.playOut(delta);
+      else if(!frozen)game.step(liveSettings.mode==='loop'&&liveSettings.timerMs?Math.min(delta,Math.max(0,liveSettings.timerMs-game.now)):delta);
       for(const sound of game.sounds.splice(0))play(sound);
-      if(liveSettings.timerMs&&liveSettings.mode!=='create'&&elapsed()>=liveSettings.timerMs)end('Time up');
+      // Time's up: the deck stops, and the session ends once washes and firing have finished.
+      if(liveSettings.timerMs&&liveSettings.mode!=='create'&&elapsed()>=liveSettings.timerMs&&!timeUp){timeUp=true;resetInput();}
+      if(timeUp&&!game.busy)end('Time up');
     }
     if(!replays.isSeeking&&!replays.isAdvancing)draw();
   }
@@ -272,9 +279,9 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     available:g=>typeof g.replayAt==='number'&&(replays?.hasPlayableAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined)??false),
     play:g=>{if(typeof g.replayAt==='number')void replays.playAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined);},
   });
-  panel.results(()=>finished&&!running&&liveSettings.mode!=='create'?{title:'Gunning results',report:duty.last,rows:liveSettings.mode==='loop'?[
+  panel.results(()=>finished&&!running&&!hold.holding&&liveSettings.mode!=='create'?{title:'Gunning results',report:duty.last,rows:liveSettings.mode==='loop'?[
     ['Guns / minute',game.loadsPerMinute.toFixed(2)],['Guns loaded',String(game.stats.loaded)],
-    ['Active time',`${(game.now/1000).toFixed(2)}s`],['Wrong pieces',String(game.stats.wrong)],['Washes',String(game.stats.washes)],
+    ['Active time',`${(game.activeTime/1000).toFixed(2)}s`],['Wrong pieces',String(game.stats.wrong)],['Washes',String(game.stats.washes)],
   ]:[
     ['Cannons loaded',String(game.stats.loaded)],['Guns / minute',game.loadsPerMinute.toFixed(2)],['Fired',String(game.stats.fired)],
     ['Correct pieces',String(game.stats.correct)],['Wrong pieces',String(game.stats.wrong)],['Lost overboard',String(game.stats.overboard)],
@@ -285,7 +292,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   replays=new ReplayRecorder('gunning',store,panel,ticks,tape=>{
     savedSettings??={...settings};settings=readSettings(tape.settings)!;start(tape.seed as number);
   },()=>{
-    running=false;finished=false;resetInput();commands=[];duty.clear();
+    running=false;finished=false;timeUp=false;resetInput();commands=[];duty.clear();
     if(savedSettings){settings=savedSettings;savedSettings=null;}preview();
   },validSeed,setReplayTime,()=>frame([]),codec,()=>!running||replays.isPlaying);
   replays.setStopLive(()=>{if(running)end('Stopped');});

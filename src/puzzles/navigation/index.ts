@@ -7,6 +7,7 @@ import { TimerWarning } from '../../core/timer-warning';
 import { ReplayRecorder, stateText, type ReplaySettingsCodec } from '../../core/replay';
 import { historyGroup } from '../../core/history';
 import { dutyDesk } from '../../core/duty/desk';
+import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
@@ -71,7 +72,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const elapsed = () => Math.max(0, (running ? ticks() : endTime) - startTime);
   const timerElapsed = () => timerElapsedBeforeBoard + elapsed();
   const timeLeft = () => Math.max(0, liveSettings.timerMs - timerElapsed());
-  const dismissKeepsRun = () => isWerewolf(liveSettings.mode) || liveSettings.clears;
+  /** Time's up: no more moves, and the run ends once the board has settled. */
+  const timeUp = () => running && !!liveSettings.timerMs && !timeLeft();
+  const hold = new EndHold(ticks);
+    const dismissKeepsRun = () => isWerewolf(liveSettings.mode) || liveSettings.clears;
   const of = (goal: number) => goal === Infinity ? '' : ` / ${goal}`;
   const keepsTimer = () => isWerewolf(liveSettings.mode) && isWerewolf(settings.mode) && liveSettings.timerMs > 0 && settings.timerMs === liveSettings.timerMs;
   const saveSettings = () => store.set('settings', settings);
@@ -90,7 +94,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     dealAt = 0; pendingStart = null;
     game = new NavigationGame(liveSettings, seed);
     selected = game.board.rings - 1;
-    running = true; finished = false;
+    running = true; finished = false; hold.clear();
     startTime = endTime = sceneStart = ticks();
     timerElapsedBeforeBoard = timerElapsedMs;
     incomingRadius = 220; lastTick = ticks();
@@ -101,7 +105,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
   /** A fresh board in the same run (WW or quota-run Dismiss): what the run has scored stays. */
   function nextBoard(): void {
-    if (!running || !game || game.finished) return;
+    if (!running || !game || game.finished || timeUp()) return;
     banked = totals();
     board++;
     // A quota run's count carries on; a timed WW board has its own quota.
@@ -115,6 +119,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function end(reason: string): void {
     if (!running || !game) return;
     running = false; finished = true; endTime = ticks(); scenes = [];
+    if (reason === 'Time up') hold.start();
     if (reason === 'Booched!') sounds.play('booched');
     const run = totals();
     const report = duty.end({ mode: modeLabel(liveSettings.mode), performance: LEARNING,
@@ -158,11 +163,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     else if (game?.finished) end(game.booched ? 'Booched!' : 'Level complete');
   }
   function rotate(clockwise: boolean): void {
-    if (!running || !game || scenes.length || pause.paused || dealing()) return;
+    if (!running || !game || scenes.length || pause.paused || dealing() || timeUp()) return;
     queue(game.rotate(selected, clockwise));
   }
   function drop(): void {
-    if (!running || scenes.length || pause.paused || dealing()) return;
+    if (!running || scenes.length || pause.paused || dealing() || timeUp()) return;
     // A painted Freeplay board waits with gravity off: the first Drop lets it settle and clear, keeping the incoming star.
     if (liveSettings.create && game?.unsettled) { queue(game.settle()); return; }
     fastDrop = true;
@@ -275,7 +280,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     // The incoming star stays put while a dismissed board waits to be dealt.
     let delta = Math.max(0,ticks()-Math.max(lastTick,dealAt));
     lastTick = ticks();
-    if (running && liveSettings.timerMs && !timeLeft()) end('Time up');
+    if (timeUp() && !scenes.length) end('Time up');
     /** Plays out the time since the last step: finished clear animations, then the incoming star's fall. */
     function advance(delta: number): void {
       let now = ticks();
@@ -316,7 +321,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
     lastMouse = [mouse[0], mouse[1]];
     for (const event of routed.events) {
-      if (!running) continue;
+      if (!running || timeUp()) continue;
       if (creating()) {
         const paintKey = event.type === 'keydown' || event.type === 'keyup' ? PAINT_KEYS.find(k => key(event.key, k.id, k.defaultKey)) : undefined;
         if (paintKey) {
@@ -461,7 +466,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     available: g => typeof g.replayAt === 'number' && (replays?.hasPlayableAt(g.replayAt, typeof g.replayId === 'string' ? g.replayId : undefined) ?? false),
     play: g => { if (typeof g.replayAt === 'number') void replays.playAt(g.replayAt, typeof g.replayId === 'string' ? g.replayId : undefined); },
   });
-  panel.results(() => finished && !running && game && !liveSettings.create ? {
+  panel.results(() => finished && !running && !hold.holding && game && !liveSettings.create ? {
     title: 'Navigation results', report: duty.last,
     averages: duty.averages(store.history(settingsKey(liveSettings)), { scoreLabel: 'Points' }),
     rows: [['Points', String(totals().points)],

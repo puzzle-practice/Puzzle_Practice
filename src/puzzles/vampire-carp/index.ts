@@ -45,6 +45,7 @@ import {
 } from './game';
 import { PIECES_NO_PUTTY } from './shapes';
 import { piecesDrawn } from './report';
+import { EndHold } from '../../core/end-hold';
 import { boardCode, boardIssues, clearHoles, FIXED_GRAIN, load as loadBoard, paintHole, pieceLetter, readBoardCode, setTool, toolFor } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -264,6 +265,9 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let startTime = 0;
   let pauseTime = 0;
   let timePassed = 0;
+  /** Time's up: no more moves, and the session ends once the board has settled. */
+  let timeUp = false;
+  const hold = new EndHold(ticks);
   let boardIndex = 0;
   let seeded = store.get<boolean>('seeded', false);
   let seed = store.get<number>('sessionSeed', Math.floor(Math.random() * MAX_SEED));
@@ -355,6 +359,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     startTime = ticks();
     timePassed = 0;
     pauseTime = 0;
+    timeUp = false;
+    hold.clear();
     warning.reset();
     endProcedureComplete = false;
     sessionScoresComputed = false;
@@ -456,7 +462,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       if (event.type === 'keydown' && keyMatches(event.key, 'vampire-carp', 'pause', 'escape')) { toggleSessionPause(); return false; }
       return true;
     });
-    if (!game || !boardActive) return;
+    if (!game || !boardActive || timeUp) return;
     const [mx, my] = input.mouse;
     const movePointer = (x: number, y: number) => {
       if ((x !== lastMouse[0] || y !== lastMouse[1]) && inView(x, y)) {
@@ -739,12 +745,12 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
 
   /** The simulator's end-of-session table. */
   const duty = dutyDesk(panel, store, 'vampire-carp', 'Carpentry', RATING_SCALES);
-  panel.results(() => endProcedureComplete && !boardActive && endProcedureKey === bestScoresKey ? {
+  panel.results(() => endProcedureComplete && !boardActive && !hold.holding && endProcedureKey === bestScoresKey ? {
     title: 'Carpentry results',
     report: duty.last,
     rows: [
       ['Score', String(score())],
-      ['Time', `${(timePassed / 1000).toFixed(1)}s`],
+      ['Time', `${(Math.min(timePassed, sessionTime()) / 1000).toFixed(1)}s`],
       ...(config.ship
         ? [
             ['Points', String(stats.points)],
@@ -814,7 +820,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   panel.clock(() =>
     config.unlimited || config.create
       ? { label: 'Time', ms: timePassed }
-      : { label: 'Time left', ms: sessionTime() - timePassed, countdown: true, warn: boardActive && sessionTime() - timePassed < 10000 },
+      : { label: 'Time left', ms: Math.max(0, sessionTime() - timePassed), countdown: true, warn: boardActive && sessionTime() - timePassed < 10000 },
   );
 
   const session = panel.session();
@@ -1204,13 +1210,14 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       if (boardActive) timePassed = ticks() - startTime + pauseTime;
       handleEvents(events);
       if (game && boardActive) {
-        game.update(timePassed, !replays.isSeeking);
+        game.update(timePassed, !replays.isSeeking, !timeUp);
         const due = pendingSounds.filter((s) => s.at <= timePassed);
         pendingSounds = pendingSounds.filter((s) => s.at > timePassed);
         for (const s of due) play(s.name);
       }
       if (boardActive) warning.update(config.unlimited || config.create ? null : sessionTime() - timePassed);
-      if (boardActive && timePassed > sessionTime()) endSession();
+      if (boardActive && timePassed > sessionTime()) timeUp = true;
+      if (boardActive && timeUp && !game?.settling) { endSession(); hold.start(); }
 
     }
 

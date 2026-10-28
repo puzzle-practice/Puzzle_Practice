@@ -6,6 +6,7 @@ import { Store } from './storage';
 import { currentPirate } from './duty/profile';
 import { makeReport } from './duty/report';
 import { DEFAULT_FACE } from './duty/face';
+import { END_HOLD_MS } from './end-hold';
 import type { Panel } from './panel';
 import type { InputEvent, Point } from './input';
 
@@ -109,6 +110,11 @@ describe('duty reports with replays', () => {
     expect(await h.recorder.playAt(tape.at)).toBe(true);
     expect(currentPirate().name).toBe('Anne');
     perf.mockReturnValue(now * 10);
+    h.recorder.frame([], [-1, -1], 0);
+    h.recorder.frame([], [-1, -1], 0);
+    // The last board stays in view for a moment before the report covers it.
+    expect(h.recorder.isPlaying).toBe(true);
+    perf.mockReturnValue(now * 10 + END_HOLD_MS);
     h.recorder.frame([], [-1, -1], 0);
     h.recorder.frame([], [-1, -1], 0);
     expect(h.recorder.isPlaying).toBe(false);

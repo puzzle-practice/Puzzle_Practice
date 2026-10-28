@@ -1,6 +1,7 @@
 import { setReplayPirate } from './duty/profile';
 import { readReport, showsDutyReport, type DutyReport } from './duty/report';
 import type { InputEvent, Point } from './input';
+import { END_HOLD_MS } from './end-hold';
 import { isTyping, type Panel } from './panel';
 import { showsReplayClicks, Store } from './storage';
 import { readArchivedReplay, readReplayArchive, REPLAY_REMOVED, replayRetentionLimit } from './data-backups';
@@ -361,6 +362,8 @@ interface RoutedReplayFrame {
 interface Playback {
   tape: PuzzleReplay; start: number; elapsed: number; lastReal: number; paused: boolean;
   speed: number; frame: number; step: number; mouse: Point; finishPending: boolean;
+  /** When (in real time) playback reached the tape's end; the last board stays in view a moment before the report. */
+  endedAt?: number;
   clicks: Array<{ t: number; x: number; y: number; button: number }>;
   /** The next state check to compare, and when playback first differed from the recording. */
   check: number; divergedAt: number | null;
@@ -655,7 +658,12 @@ export class ReplayRecorder {
       p.lastReal = realNow;
       this.advancePlayback(target);
       this.setReplayTime?.(p.start + p.elapsed);
-      if (!p.paused && p.elapsed >= p.tape.duration && p.frame >= p.tape.frames.length) p.finishPending = true;
+      if (!p.paused && p.elapsed >= p.tape.duration && p.frame >= p.tape.frames.length) {
+        p.endedAt ??= realNow;
+        // The clock runs on through the hold, so whatever the board was finishing can finish drawing.
+        this.setReplayTime?.(p.start + p.elapsed + Math.min(END_HOLD_MS, realNow - p.endedAt));
+        if (realNow - p.endedAt >= END_HOLD_MS) p.finishPending = true;
+      } else p.endedAt = undefined;
       // Inputs were applied inside individual simulation steps; the caller paints the final state.
       return { ...this.routed([], p.mouse, p.elapsed), renderOnly: true };
     }

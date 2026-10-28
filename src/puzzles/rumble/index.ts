@@ -42,6 +42,7 @@ import {
 } from './create';
 import type { Board } from './board';
 import { AIM_BOARD_SHOTS, AIM_DIFFICULTIES, AIM_HISTORY, AIM_LIVES, AIM_MS, AIM_REPLAY_VERSION, AimTrainer, type AimDifficulty, type AimTarget } from './aim';
+import { END_HOLD_MS } from '../../core/end-hold';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const gloveUrls = import.meta.glob<string>('./media/gloves/*.png', { eager: true, query: '?url', import: 'default' });
@@ -1494,7 +1495,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       if (match && running) {
         if (aiming()) { aim!.update(now); if (aim!.result) stop(); }
         else { match.update(now); if (match.settledAt) stop(); }
-      }
+      } else if (aiming() && aim?.result) aim.update(now);
     }
     rumbleAudio.sync(running && !aiming() && !replays.isSeeking && !replays.isAdvancing ? match?.player ?? null : null);
     if (replays.isSeeking || replays.isAdvancing) return;
@@ -1673,6 +1674,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   panel.results(() => {
     // Let the final hit/miss remain visible before the results cover the board.
     if (aiming() && aim?.landing && ticks() < aim.landing.until) return null;
+    // When time runs out, a ball still in the air lands, and the board stays in view a moment.
+    if (aiming() && aim?.result === 'Time up' && ticks() < aim.settledAt! + END_HOLD_MS) return null;
     if (finished && showResults && aiming() && aim) return {
       title: `Aim trainer · ${aim.difficulty} · ${aim.result}`,
       averages: sessionAverages(store.history(aimHistory()).map(g => ({ ...g, duty: '' })), { scoreLabel: 'Connections' }),

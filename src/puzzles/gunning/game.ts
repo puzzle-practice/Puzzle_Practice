@@ -96,6 +96,8 @@ export class GunningGame {
   /** Sounds to play, drained by the page. */
   sounds: string[] = [];
   anims: CannonAnim[] = [];
+  /** When time ran out: the deck stopped, though washes and firing may still be finishing. */
+  stoppedAt?: number;
   private timers: Timer[] = [];
   private order = 0;
   private vikingLoads = 0;
@@ -131,7 +133,9 @@ export class GunningGame {
   get tickTime(): number { return Math.max(MIN_TICK, Math.min(this.speed, this.base)); }
   /** How far the pieces are through their move to the next cell, 0 to 1. */
   get progress(): number { return Math.min(1, Math.max(0, (this.now - this.tickAt) / this.interval)); }
-  get loadsPerMinute(): number { return this.now ? this.stats.loaded * 60000 / this.now : 0; }
+  /** Time the deck ran for, not counting washes and firing finishing after time ran out. */
+  get activeTime(): number { return this.stoppedAt ?? this.now; }
+  get loadsPerMinute(): number { return this.activeTime ? this.stats.loaded * 60000 / this.activeTime : 0; }
 
   private faster(yes: boolean): void {
     this.base = yes ? Math.max(MIN_TICK, this.base - TICK_STEP) : Math.min(MAX_TICK, this.base + TICK_STEP);
@@ -208,6 +212,22 @@ export class GunningGame {
       if (at > end) break;
       this.now = at;
       if (timer && timer.at <= nextTick) { this.timers.shift(); this.runTimer(timer); } else this.tick();
+    }
+    this.now = end;
+  }
+
+  /** A wash or a firing is still animating. */
+  get busy(): boolean { return this.anims.length > 0; }
+  /** After time's up: lets washes and firing finish while the deck holds still. */
+  playOut(delta: number): void {
+    this.stoppedAt ??= this.now;
+    const end = this.now + delta;
+    for (;;) {
+      const timer = this.timers.find(t => t.kind === 'washed' || t.kind === 'fired');
+      if (!timer || timer.at > end) break;
+      this.timers.splice(this.timers.indexOf(timer), 1);
+      this.now = timer.at;
+      this.runTimer(timer);
     }
     this.now = end;
   }
