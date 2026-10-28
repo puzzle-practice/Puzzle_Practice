@@ -11,7 +11,7 @@ import { keyMatches } from '../../core/controls';
 import { copyText, pasteText } from '../../core/clipboard';
 import type { InputEvent, Point } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
-import { BONUS_NAMES, BONUS_SETS } from './board';
+import { BONUS_NAMES, BONUS_SETS, SKIPS_FOR_PENALTY } from './board';
 import {
   DEFAULT_SETTINGS, DRAG_START, PAINTABLE, RiggingGame, boardCode, cellAt, dragAxis, indicatorStep, projection, readBoardCode, readSettings,
   settingsKey, slideFor, type Mode, type RiggingSettings, type Scene,
@@ -26,6 +26,8 @@ const MODES:{value:Mode,label:string}[]=[{value:'normal',label:'Normal'},{value:
 const PIECE_NAMES=['Orange','Yellow','Black','Purple','Cyan','White','Blue','Tan','Wild','Tar','Gaff','Splice ↔','Splice ↗','Splice ↘'];
 /** Freeplay mode paints with keys 1–8 (the colours), 9 (wild) and 0 (tar) held over the board. */
 const PAINT_KEYS=['1','2','3','4','5','6','7','8','9','0'].map((key,i)=>({id:`paint${i+1}`,label:`Paint ${PIECE_NAMES[i].toLowerCase()} (Freeplay)`,defaultKey:key,piece:PAINTABLE[i]}));
+const PULLEY_NAMES=['Top','Upper right','Lower right','Bottom','Lower left','Upper left'];
+const BOOCHING=Array.from({length:SKIPS_FOR_PENALTY},(_,value)=>({value,label:value===SKIPS_FOR_PENALTY-1?`${value} · miss −5 coils`:String(value)}));
 const SHAPES=[{value:0,label:'None'},...[1,2,3,4,7].map(value=>({value,label:BONUS_NAMES[value]}))];
 /** The game's keys: W E A D Z X move the cursor (or nudge a selected rope), S selects and lets go, Space cancels. */
 const KEYS=[{id:'nw',label:'Up-left',defaultKey:'w'},{id:'ne',label:'Up-right',defaultKey:'e'},{id:'w',label:'Left',defaultKey:'a'},
@@ -101,6 +103,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     else if(id.startsWith('load:'))game.load(id.slice(5));
     else if(id==='generate')game.generate();
     else if(id==='pulley')game.nextPulley();
+    else if(id.startsWith('pulley:'))game.setPulley(Number(id.slice(7)));
+    else if(id.startsWith('booch:'))game.setBooching(Number(id.slice(6)));
     if(game.moves>before&&game.lastMove?.skipped){
       if(game.board.cache<coils)play('cache_penalty');
       else if(game.board.skipsRemaining<=1&&skips>1&&game.board.cache>0)play('cache_penalty_warning');
@@ -228,8 +232,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   // The board's text can be copied in any mode, and pasted, dealt anew or painted while playing in Freeplay.
   const createOnly=()=>settings.mode!=='create';
   const editing=()=>!creating()||pause.paused||replays.isPlaying||game.busy;
-  const boardGroup=panel.controlSettings.group('Board');
-  boardGroup.button('Copy',()=>copyText(boardCode(game.board),'Copy this board:'),{title:'Copy the board, with its active pulley'});
+  const boardGroup=panel.group('Board');
+  boardGroup.button('Copy',()=>copyText(boardCode(game.board),'Copy this board:'),{title:'Copy the board, with its active pulley and turns since the last clear'});
   boardGroup.button('Paste',()=>void pasteText('Paste a board:').then(text=>{
     if(text===null)return;
     if(readBoardCode(text)){pasteNote='';queue(`load:${text.trim()}`);}
@@ -237,7 +241,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   }),{hidden:createOnly,disabled:editing,title:'Play a board from a pasted copy'});
   boardGroup.button('Generate',()=>{queue('generate');window.setTimeout(()=>copyText(boardCode(game.board),'Copy this board:'),50);},
     {hidden:createOnly,disabled:editing,title:'Deal a new board and copy it'});
-  boardGroup.button('Next pulley',()=>queue('pulley'),{hidden:createOnly,disabled:editing,title:'Make the next pulley the active one'});
+  boardGroup.select('Active pulley',PULLEY_NAMES.map((label,value)=>({value,label})),()=>game.board.nextPulley,value=>queue(`pulley:${value}`),{hidden:createOnly,disabled:editing});
+  boardGroup.select('Turns since last clear',BOOCHING,()=>game.board.skipped,value=>queue(`booch:${value}`),{hidden:createOnly,disabled:editing,title:'Pulls in a row that cleared nothing. A third costs 5 coils and starts the count again.'});
   const palette=document.createElement('div');
   palette.className='piece-palette';
   PAINTABLE.forEach((piece,i)=>{

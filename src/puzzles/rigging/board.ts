@@ -16,7 +16,9 @@ export const PULLEYS: readonly Point[] = [{ x: 2, y: 0 }, { x: 6, y: 2 }, { x: 6
 /** Shapes that may appear on pieces for each maneuver-token setting (circle, diamond, plus, cross; blade). */
 export const BONUS_SETS: readonly (readonly number[])[] = [[], [1, 2, 3, 4], [1, 2, 3, 4, 7]];
 export const BONUS_NAMES = ['None', 'Circle', 'Diamond', 'Plus', 'Cross', 'Ring', 'Star', 'Flower'];
-const PROB_BONUS = 0.2, MIN_PULL = 3, SKIPS_FOR_PENALTY = 3, LOOPS_FOR_WILD = 20, PENALTY = 5;
+const PROB_BONUS = 0.2, MIN_PULL = 3, LOOPS_FOR_WILD = 20, PENALTY = 5;
+/** Pulls in a row that clear nothing before the board takes coils back. */
+export const SKIPS_FOR_PENALTY = 3;
 
 export interface Point { x: number; y: number }
 /** A pulled piece and the piece it was pulled through, which animations follow back to the pulley. */

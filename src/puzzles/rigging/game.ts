@@ -1,7 +1,7 @@
 import { gameFont, gameFontFor } from '../../core/game-text';
 import { Performance } from '../bilging/game';
 import {
-  EMPTY, GAFF, PULLEYS, ROWS, RiggingBoard, TAR, WILD, isLink, isWild, opposite, rowSize, shapeOf, type Link, type Point, type Pull,
+  EMPTY, GAFF, PULLEYS, ROWS, RiggingBoard, SKIPS_FOR_PENALTY, TAR, WILD, isLink, isWild, opposite, rowSize, shapeOf, type Link, type Point, type Pull,
 } from './board';
 
 export interface RiggingSettings {
@@ -32,15 +32,15 @@ export const settingsKey = (s: RiggingSettings) => `d${s.difficulty}-t${s.tokens
 /** Every piece Freeplay mode can paint: the eight colours, wild, tar, gaff and the three splices. */
 export const PAINTABLE = [0, 1, 2, 3, 4, 5, 6, 7, WILD, TAR, GAFF, 12, 13, 14];
 const validPiece = (v: number) => PAINTABLE.includes(v & 15) && (shapeOf(v) === 0 || (v & 15) < 8 && shapeOf(v) <= 7) && v < 128;
-/** A board as text: the active pulley (0–5) then each piece as two hex digits, row by row. */
+/** A board as text: the active pulley (0–5), each piece as two hex digits row by row, then the turns since the last clear when there are any. */
 export function boardCode(board: RiggingBoard): string {
-  return 'R' + board.nextPulley + board.cells().map(v => v.toString(16).padStart(2, '0')).join('');
+  return 'R' + board.nextPulley + board.cells().map(v => v.toString(16).padStart(2, '0')).join('') + (board.skipped ? board.skipped : '');
 }
-export function readBoardCode(text: string): { pulley: number; cells: number[] } | null {
-  const m = /^R([0-5])((?:[0-9a-f]{2}){61})$/i.exec(text.trim());
+export function readBoardCode(text: string): { pulley: number; cells: number[]; skipped: number } | null {
+  const m = /^R([0-5])((?:[0-9a-f]{2}){61})([0-2])?$/i.exec(text.trim());
   if (!m) return null;
   const cells = m[2].match(/../g)!.map(h => parseInt(h, 16));
-  return cells.every(validPiece) ? { pulley: Number(m[1]), cells } : null;
+  return cells.every(validPiece) ? { pulley: Number(m[1]), cells, skipped: Number(m[3] ?? 0) } : null;
 }
 /** Pieces pulled to fill the level meter: 20 at difficulty 0, then 27 per level above it. */
 export const piecesForLevel = (difficulty: number) => difficulty === 0 ? 20 : (difficulty + 1) * 27;
@@ -299,12 +299,20 @@ export class RiggingGame {
     let i = 0;
     this.board.pieces = this.board.pieces.map(r => r.map(() => read.cells[i++]));
     this.board.nextPulley = read.pulley;
+    this.board.skipped = read.skipped;
     return true;
   }
   /** Freeplay mode: makes the next pulley the active one. */
-  nextPulley(): void {
-    if (!this.creating || this.busy) return;
-    this.board.nextPulley = (this.board.nextPulley + 1) % PULLEYS.length;
+  nextPulley(): void { this.setPulley((this.board.nextPulley + 1) % PULLEYS.length); }
+  /** Freeplay mode: makes a pulley (0–5, clockwise from the top) the active one. */
+  setPulley(i: number): void {
+    if (!this.creating || this.busy || !Number.isInteger(i) || i < 0 || i >= PULLEYS.length) return;
+    this.board.nextPulley = i;
+  }
+  /** Freeplay mode: the turns since the last clear; at the last one a missed pull costs coils. */
+  setBooching(turns: number): void {
+    if (!this.creating || this.busy || !Number.isInteger(turns) || turns < 0 || turns >= SKIPS_FOR_PENALTY) return;
+    this.board.skipped = turns;
   }
   /** Freeplay mode: a fresh random board (the next in this session's seed sequence). */
   generate(): void {
