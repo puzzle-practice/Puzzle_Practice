@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PULLEYS, ROWS, TAR, WILD, rowSize } from './board';
-import { DEFAULT_SETTINGS, RiggingGame, STEP, boardCode, cellAt, cellPos, dragAxis, indicatorStep, piecesForLevel, projection, readBoardCode, readSettings, slideFor } from './game';
+import { DEFAULT_SETTINGS, RiggingGame, STEP, boardCode, cellAt, cellPos, dragAxis, indicatorStep, piecesForLevel, projection, readBoardCode, readSettings, repaint, reshape, slideFor } from './game';
 
 const settings = (difficulty = 6, tokens = 0) => ({ ...DEFAULT_SETTINGS, difficulty, tokens });
 /** A slide that pulls at least three pieces from the current board, found by trying each one on a copy. */
@@ -148,6 +148,14 @@ describe('Rigging Create mode', () => {
     g.fill(4);
     expect(new Set(g.board.cells())).toEqual(new Set([4]));
     expect(g.moves).toBe(0);
+  });
+  it('paints pieces and tokens separately', () => {
+    expect(repaint(3 | 2 << 4, 5)).toBe(5 | 2 << 4);
+    expect(repaint(3 | 2 << 4, TAR)).toBe(TAR);
+    expect(repaint(WILD, 5)).toBe(5);
+    expect(reshape(3 | 2 << 4, 7)).toBe(3 | 7 << 4);
+    expect(reshape(3 | 2 << 4, 0)).toBe(3);
+    expect(reshape(WILD, 2)).toBe(WILD);
   });
   it('refuses to paint outside Create', () => {
     const g = new RiggingGame(settings(), 21), before = g.board.cells();

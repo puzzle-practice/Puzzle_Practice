@@ -32,6 +32,11 @@ export const settingsKey = (s: RiggingSettings) => `d${s.difficulty}-t${s.tokens
 /** Every piece Freeplay mode can paint: the eight colours, wild, tar, gaff and the three splices. */
 export const PAINTABLE = [0, 1, 2, 3, 4, 5, 6, 7, WILD, TAR, GAFF, 12, 13, 14];
 const validPiece = (v: number) => PAINTABLE.includes(v & 15) && (shapeOf(v) === 0 || (v & 15) < 8 && shapeOf(v) <= 7) && v < 128;
+const isColour = (v: number) => v !== EMPTY && (v & 15) < 8;
+/** Freeplay: a colour painted over a colour keeps its token, so pieces and tokens paint separately. */
+export const repaint = (old: number, piece: number) => piece < 8 && isColour(old) ? piece | shapeOf(old) << 4 : piece;
+/** Freeplay: a colour with its token changed (0 takes it off). Other pieces carry no token. */
+export const reshape = (old: number, shape: number) => isColour(old) ? (old & 15) | shape << 4 : old;
 /** A board as text: the active pulley (0–5), each piece as two hex digits row by row, then the turns since the last clear when there are any. */
 export function boardCode(board: RiggingBoard): string {
   return 'R' + board.nextPulley + board.cells().map(v => v.toString(16).padStart(2, '0')).join('') + (board.skipped ? board.skipped : '');

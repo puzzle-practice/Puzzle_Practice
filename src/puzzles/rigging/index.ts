@@ -13,7 +13,7 @@ import type { InputEvent, Point } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
 import { BONUS_NAMES, BONUS_SETS, SKIPS_FOR_PENALTY } from './board';
 import {
-  DEFAULT_SETTINGS, DRAG_START, PAINTABLE, RiggingGame, boardCode, cellAt, dragAxis, indicatorStep, projection, readBoardCode, readSettings,
+  DEFAULT_SETTINGS, DRAG_START, PAINTABLE, RiggingGame, boardCode, cellAt, dragAxis, indicatorStep, projection, readBoardCode, readSettings, repaint, reshape,
   settingsKey, slideFor, type Mode, type RiggingSettings, type Scene,
 } from './game';
 import { PIECE, drawActivated, drawBoard, drawCoils, drawPiece } from './render';
@@ -28,7 +28,7 @@ const PIECE_NAMES=['Orange','Yellow','Black','Purple','Cyan','White','Blue','Tan
 const PAINT_KEYS=['1','2','3','4','5','6','7','8','9','0'].map((key,i)=>({id:`paint${i+1}`,label:`Paint ${PIECE_NAMES[i].toLowerCase()} (Freeplay)`,defaultKey:key,piece:PAINTABLE[i]}));
 const PULLEY_NAMES=['Top','Upper right','Lower right','Bottom','Lower left','Upper left'];
 const BOOCHING=Array.from({length:SKIPS_FOR_PENALTY},(_,value)=>({value,label:String(value)}));
-const SHAPES=[{value:0,label:'None'},...[1,2,3,4,7].map(value=>({value,label:BONUS_NAMES[value]}))];
+const SHAPES=[{value:0,label:'No token'},...[1,2,3,4,7].map(value=>({value,label:BONUS_NAMES[value]}))];
 /** The game's keys: W E A D Z X move the cursor (or nudge a selected rope), S selects and lets go, Space cancels. */
 const KEYS=[{id:'nw',label:'Up-left',defaultKey:'w'},{id:'ne',label:'Up-right',defaultKey:'e'},{id:'w',label:'Left',defaultKey:'a'},
   {id:'e',label:'Right',defaultKey:'d'},{id:'sw',label:'Down-left',defaultKey:'z'},{id:'se',label:'Down-right',defaultKey:'x'},
@@ -49,8 +49,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   let commands:string[]=[], held=new Set<string>(), repeats=new Map<string,number>();
   let drag:{at:{x:number,y:number},from:Point,axis:number}|null=null, lastMouse:Point=[-1,-1];
   let lastScene:Scene|null=null, callouts:{text:string,size:number,at:[number,number],from:number}[]=[];
-  /** Freeplay mode: the palette piece a left click places, the piece a held key paints, and the shape added to colours. */
-  let palettePiece:number|null=null, paintWith:number|null=null, paintShape=0, painting=false, pasteNote='';
+  /** Freeplay mode: the palette piece or token a left click paints, and the piece a held key paints. */
+  let palettePiece:number|null=null, paletteShape:number|null=null, paintWith:number|null=null, painting=false, pasteNote='';
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'rigging','Rigging',[]);
   const busy=()=>running||(replays?.isPlaying??false);
@@ -63,9 +63,10 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const play=(name:string)=>sounds.play(name);
   const creating=()=>running&&liveSettings.mode==='create';
   const timerMs=()=>liveSettings.mode==='create'?0:liveSettings.timerMs;
-  const withShape=(piece:number)=>piece<8&&paintShape?piece|paintShape<<4:piece;
-  /** Paints the space under the pointer, recording only real changes. */
-  const paintAt=(pos:Point,piece:number)=>{const c=cellAt(pos[0],pos[1]);if(c&&game.board.get(c)!==piece)queue(`paint:${c.x},${c.y},${piece}`);};
+  /** Paints the space under the pointer, recording only real changes. Pieces keep their token; tokens keep their piece. */
+  const paintAt=(pos:Point,next:(old:number)=>number)=>{const c=cellAt(pos[0],pos[1]);if(!c)return;const old=game.board.get(c),piece=next(old);if(old!==piece)queue(`paint:${c.x},${c.y},${piece}`);};
+  const pieceBrush=(piece:number)=>(old:number)=>repaint(old,piece);
+  const paletteBrush=()=>palettePiece!==null?pieceBrush(palettePiece):paletteShape!==null?(old:number)=>reshape(old,paletteShape!):null;
   const rope=()=>{play(ROPE_SOUNDS[Math.floor(Math.random()*ROPE_SOUNDS.length)]);nextRope=ticks()+1000+Math.random()*1000;};
 
   const seedMode = seedControls(panel, store, () => running || !!replays?.isPlaying);
@@ -166,19 +167,20 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
         const mouse=routed.mouse;
         const moved=mouse[0]!==lastMouse[0]||mouse[1]!==lastMouse[1];
         if(creating()&&moved){
-          if(paintWith!==null)paintAt(mouse,withShape(paintWith));
-          else if(painting&&palettePiece!==null)paintAt(mouse,withShape(palettePiece));
+          const brush=paletteBrush();
+          if(paintWith!==null)paintAt(mouse,pieceBrush(paintWith));
+          else if(painting&&brush)paintAt(mouse,brush);
         }
         if(drag)updateDrag(mouse);
         else if((mouse[0]!==lastMouse[0]||mouse[1]!==lastMouse[1])&&!game.selecting){const c=cellAt(mouse[0],mouse[1]);if(c&&(c.x!==game.cursor.x||c.y!==game.cursor.y))queue(`at:${c.x},${c.y}`);}
         lastMouse=[mouse[0],mouse[1]];
         for(const event of routed.events){
-          if(creating()&&event.type==='mousedown'&&event.button===1&&palettePiece!==null){paintAt(event.pos,withShape(palettePiece));painting=true;continue;}
+          if(creating()&&event.type==='mousedown'&&event.button===1&&paletteBrush()){paintAt(event.pos,paletteBrush()!);painting=true;continue;}
           if(creating()&&event.type==='mouseup'&&event.button===1&&painting){painting=false;continue;}
           if(creating()&&event.type==='mousedown'&&(event.button===4||event.button===5)){
             // The wheel cycles the piece under the pointer.
             const c=cellAt(event.pos[0],event.pos[1]);
-            if(c){const i=PAINTABLE.indexOf(game.board.get(c)&15),step=event.button===4?1:-1;queue(`paint:${c.x},${c.y},${PAINTABLE[(i+step+PAINTABLE.length)%PAINTABLE.length]}`);}
+            if(c){const old=game.board.get(c),i=PAINTABLE.indexOf(old&15),step=event.button===4?1:-1;queue(`paint:${c.x},${c.y},${repaint(old,PAINTABLE[(i+step+PAINTABLE.length)%PAINTABLE.length])}`);}
             continue;
           }
           if(event.type==='mousedown'&&event.button===1){
@@ -197,7 +199,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
           const paint=PAINT_KEYS.find(p=>key(event.key,p.id,p.defaultKey));
           if(paint){
             if(!creating())continue;
-            if(event.type==='keydown'){paintWith=paint.piece;paintAt(mouse,withShape(paint.piece));}
+            if(event.type==='keydown'){paintWith=paint.piece;paintAt(mouse,pieceBrush(paint.piece));}
             else if(paintWith===paint.piece)paintWith=null;
             continue;
           }
@@ -252,13 +254,27 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     icon.width=icon.height=PIECE;icon.setAttribute('aria-hidden','true');
     drawPiece(icon.getContext('2d')!,images,piece,PIECE/2,PIECE/2);
     button.append(icon,document.createTextNode(i<10?`${(i+1)%10} · ${PIECE_NAMES[i]}`:PIECE_NAMES[i]));
-    button.addEventListener('click',()=>{palettePiece=palettePiece===piece?null:piece;panel.used();});
+    button.addEventListener('click',()=>{palettePiece=palettePiece===piece?null:piece;paletteShape=null;panel.used();});
     panel.addSync(()=>{button.disabled=!creating();button.setAttribute('aria-pressed',String(palettePiece===piece));});
     palette.append(button);
   });
   boardGroup.append(palette,{hidden:createOnly});
-  boardGroup.select('Shape on colours',SHAPES,()=>paintShape,value=>{paintShape=value;},{hidden:createOnly});
-  boardGroup.button('Fill board',()=>queue(`fill:${withShape(palettePiece??0)}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
+  // Tokens are their own palette, painted onto colours without changing them.
+  const tokenPalette=document.createElement('div');
+  tokenPalette.className='piece-palette';
+  SHAPES.forEach(({value,label})=>{
+    const button=document.createElement('button');
+    button.type='button';button.className='panel-button';
+    const icon=document.createElement('canvas');
+    icon.width=icon.height=PIECE;icon.setAttribute('aria-hidden','true');
+    if(value)icon.getContext('2d')!.drawImage(images.get('bonus'),value*PIECE,0,PIECE,PIECE,0,0,PIECE,PIECE);
+    button.append(icon,document.createTextNode(label));
+    button.addEventListener('click',()=>{paletteShape=paletteShape===value?null:value;palettePiece=null;panel.used();});
+    panel.addSync(()=>{button.disabled=!creating();button.setAttribute('aria-pressed',String(paletteShape===value));});
+    tokenPalette.append(button);
+  });
+  boardGroup.append(tokenPalette,{hidden:createOnly});
+  boardGroup.button('Fill board',()=>queue(`fill:${palettePiece??0}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
   boardGroup.note(()=>pasteNote,{hidden:createOnly});
   const options=panel.settings.group('Game');
   options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();},{disabled:busy});

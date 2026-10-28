@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BilgeBoard, CRAB, EMPTY, JELLY, LEVEL_POINTS, PUFFER, WIDTH, HEIGHT } from './board';
 import {
-  BilgingGame, DEFAULT_SETTINGS, Performance, SWAP_DRY_MS, SWAP_WET_MS, boardCode, boardIssues, indicatorStep, readBoardCode, readSettings, riseDuration, withToken,
+  BilgingGame, DEFAULT_SETTINGS, Performance, SWAP_DRY_MS, SWAP_WET_MS, boardCode, boardIssues, indicatorStep, readBoardCode, readSettings, repaint, retoken, riseDuration, withToken,
 } from './game';
 
 /** A board with no runs anywhere: colours cycle so no three neighbours match. */
@@ -112,6 +112,15 @@ describe('Bilging Create mode', () => {
     g.fill(JELLY);
     expect(new Set(g.board.cells)).toEqual(new Set([JELLY]));
     expect(g.moves).toBe(0);
+  });
+  it('paints pieces and token halves separately', () => {
+    const half = withToken(3, 2, 1);
+    expect(repaint(half, 5)).toBe(withToken(5, 2, 1));
+    expect(repaint(half, CRAB)).toBe(CRAB);
+    expect(repaint(CRAB, 5)).toBe(5);
+    expect(retoken(half, 4 * 2)).toBe(withToken(3, 4, 0));
+    expect(retoken(half, 0)).toBe(3);
+    expect(retoken(PUFFER, 3)).toBe(PUFFER);
   });
   it('refuses to paint outside Create', () => {
     const g = new BilgingGame(DEFAULT_SETTINGS, 21), before = [...g.board.cells];

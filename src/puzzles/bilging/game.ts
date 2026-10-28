@@ -35,6 +35,10 @@ export const settingsKey = (s: BilgingSettings) => `d${s.difficulty}-t${s.tokens
 export const PAINTABLE = [0, 1, 2, 3, 4, 5, 6, PUFFER, CRAB, JELLY];
 /** A colour with a token half: half 0 is the lower half, 1 the upper. */
 export const withToken = (piece: number, shape: number, upper: number) => piece < PUFFER && shape ? piece | upper << 4 | shape << 5 : piece;
+/** Freeplay: a colour painted over a colour keeps its token half, so pieces and tokens paint separately. */
+export const repaint = (old: number, piece: number) => piece < PUFFER && type(old) < PUFFER ? piece | old & 240 : piece;
+/** Freeplay: a colour with its token half changed (shape * 2 + upper; 0 takes it off). Other pieces carry no token. */
+export const retoken = (old: number, half: number) => type(old) < PUFFER ? withToken(old & 15, half >> 1, half & 1) : old;
 const validPiece = (v: number) => PAINTABLE.includes(type(v)) && (v < 16 || type(v) < PUFFER && BONUS_SETS[2].includes(token(v)) && v < 256);
 /** A board as text: B, then each piece as two hex digits, bottom row first. */
 export function boardCode(board: BilgeBoard): string {

@@ -13,7 +13,7 @@ import type { InputEvent, Point } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
 import { BONUS_NAMES, BONUS_SETS, HEIGHT, LEVEL_POINTS, WIDTH } from './board';
 import {
-  BilgingGame, DEFAULT_SETTINGS, PAINTABLE, WATER_LEVELS, boardCode, boardIssues, indicatorStep, readBoardCode, readSettings, settingsKey, withToken,
+  BilgingGame, DEFAULT_SETTINGS, PAINTABLE, WATER_LEVELS, boardCode, boardIssues, indicatorStep, readBoardCode, readSettings, repaint, retoken, settingsKey,
   type BilgingSettings, type Mode, type Scene,
 } from './game';
 import { drawBoard, drawPiece, drawToken, CELL, LEFT, TOP } from './render';
@@ -26,8 +26,8 @@ const MODES:{value:Mode,label:string}[]=[{value:'normal',label:'Normal'},{value:
 const PIECE_NAMES=['Colour 1','Colour 2','Colour 3','Colour 4','Colour 5','Colour 6','Colour 7','Puffer','Crab','Jellyfish'];
 /** Freeplay mode paints with keys 1–7 (the colours), 8 (puffer), 9 (crab) and 0 (jellyfish) held over the board. */
 const PAINT_KEYS=['1','2','3','4','5','6','7','8','9','0'].map((key,i)=>({id:`paint${i+1}`,label:`Paint ${PIECE_NAMES[i].toLowerCase()} (Freeplay)`,defaultKey:key,piece:PAINTABLE[i]}));
-/** Token halves Freeplay can add to a colour: each shape's lower and upper half. */
-const TOKEN_HALVES=[{value:0,label:'None'},...BONUS_SETS[2].flatMap(shape=>[0,1].map(upper=>({value:shape*2+upper,label:`${BONUS_NAMES[shape]}, ${upper?'upper':'lower'} half`})))];
+/** Token halves Freeplay paints onto colours: none, then each shape's lower and upper half. */
+const TOKEN_HALVES=[{value:0,label:'No token'},...BONUS_SETS[2].flatMap(shape=>[0,1].map(upper=>({value:shape*2+upper,label:`${BONUS_NAMES[shape]} ${upper?'top':'bottom'}`})))];
 const KEYS=[{id:'left',label:'Cursor left',defaultKey:'arrowleft'},{id:'right',label:'Cursor right',defaultKey:'arrowright'},
   {id:'up',label:'Cursor up',defaultKey:'arrowup'},{id:'down',label:'Cursor down',defaultKey:'arrowdown'},
   {id:'swap',label:'Swap pieces',defaultKey:'space'},{id:'pause',label:'Pause',defaultKey:'escape'},
@@ -59,8 +59,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   let commands:string[]=[], held=new Set<string>(), repeats=new Map<string,number>();
   let altArt=store.get('altArt',false), lastMouse:Point=[-1,-1];
   let lastScene:Scene|null=null, callout:{label:string,points?:number,at:number}|null=null;
-  /** Freeplay mode: the palette piece a left click places, the piece a held key paints, and the token half added to colours. */
-  let palettePiece:number|null=null, paintWith:number|null=null, paintToken=0, painting=false, pasteNote='';
+  /** Freeplay mode: the palette piece or token half a left click paints, and the piece a held key paints. */
+  let palettePiece:number|null=null, paletteToken:number|null=null, paintWith:number|null=null, painting=false, pasteNote='';
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'bilging','Bilging',[]);
   const busy=()=>running||(replays?.isPlaying??false);
@@ -73,9 +73,10 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const play=(name:string)=>{const files=SOUNDS[name]??[name];sounds.play(files[soundTurn++%files.length]);};
   const creating=()=>running&&liveSettings.mode==='create';
   const timerMs=()=>liveSettings.mode==='create'?0:liveSettings.timerMs;
-  const withHalf=(piece:number)=>withToken(piece,paintToken>>1,paintToken&1);
-  /** Paints the space under the pointer, recording only real changes. */
-  const paintAt=(pos:Point,piece:number)=>{if(!onBoard(pos))return;const c=paintCell(pos);if(game.board.get(c.x,c.y)!==piece)queue(`paint:${c.x},${c.y},${piece}`);};
+  /** Paints the space under the pointer, recording only real changes. Pieces keep their token; tokens keep their piece. */
+  const paintAt=(pos:Point,next:(old:number)=>number)=>{if(!onBoard(pos))return;const c=paintCell(pos),old=game.board.get(c.x,c.y),piece=next(old);if(old!==piece)queue(`paint:${c.x},${c.y},${piece}`);};
+  const pieceBrush=(piece:number)=>(old:number)=>repaint(old,piece);
+  const paletteBrush=()=>palettePiece!==null?pieceBrush(palettePiece):paletteToken!==null?(old:number)=>retoken(old,paletteToken!):null;
   /** Freeplay records every move as a command, so painting and swapping replay in order; Normal replays its input. */
   const live=(id:string)=>{if(liveSettings.mode==='create')queue(id);else action(id);};
 
@@ -176,19 +177,20 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   function handleInput(events:InputEvent[],mouse:Point,now:number):void {
     const moved=mouse[0]!==lastMouse[0]||mouse[1]!==lastMouse[1];
     if(creating()&&moved){
-      if(paintWith!==null)paintAt(mouse,withHalf(paintWith));
-      else if(painting&&palettePiece!==null)paintAt(mouse,withHalf(palettePiece));
+      const brush=paletteBrush();
+      if(paintWith!==null)paintAt(mouse,pieceBrush(paintWith));
+      else if(painting&&brush)paintAt(mouse,brush);
     }
     if(moved&&onBoard(mouse)){const c=boardCell(mouse);if(c.x!==game.cursor.x||c.y!==game.cursor.y)live(`at:${c.x},${c.y}`);}
     lastMouse=[mouse[0],mouse[1]];
     for(const event of events){
-      if(creating()&&event.type==='mousedown'&&event.button===1&&palettePiece!==null){paintAt(event.pos,withHalf(palettePiece));painting=true;continue;}
+      if(creating()&&event.type==='mousedown'&&event.button===1&&paletteBrush()){paintAt(event.pos,paletteBrush()!);painting=true;continue;}
       if(creating()&&event.type==='mouseup'&&event.button===1&&painting){painting=false;continue;}
       if(creating()&&event.type==='mousedown'&&(event.button===4||event.button===5)){
         // The wheel cycles the piece under the pointer.
         if(onBoard(event.pos)){
-          const c=paintCell(event.pos),i=PAINTABLE.indexOf(game.board.get(c.x,c.y)&15),step=event.button===4?1:-1;
-          queue(`paint:${c.x},${c.y},${PAINTABLE[(i+step+PAINTABLE.length)%PAINTABLE.length]}`);
+          const c=paintCell(event.pos),old=game.board.get(c.x,c.y),i=PAINTABLE.indexOf(old&15),step=event.button===4?1:-1;
+          queue(`paint:${c.x},${c.y},${repaint(old,PAINTABLE[(i+step+PAINTABLE.length)%PAINTABLE.length])}`);
         }
         continue;
       }
@@ -199,7 +201,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       const paint=PAINT_KEYS.find(p=>key(event.key,p.id,p.defaultKey));
       if(paint){
         if(!creating())continue;
-        if(event.type==='keydown'){paintWith=paint.piece;paintAt(mouse,withHalf(paint.piece));}
+        if(event.type==='keydown'){paintWith=paint.piece;paintAt(mouse,pieceBrush(paint.piece));}
         else if(paintWith===paint.piece)paintWith=null;
         continue;
       }
@@ -246,7 +248,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     const iconCtx=icon.getContext('2d')!;
     let iconArt:boolean|null=null;
     button.append(icon,document.createTextNode(`${(i+1)%10} · ${PIECE_NAMES[i]}`));
-    button.addEventListener('click',()=>{palettePiece=palettePiece===piece?null:piece;panel.used();});
+    button.addEventListener('click',()=>{palettePiece=palettePiece===piece?null:piece;paletteToken=null;panel.used();});
     panel.addSync(()=>{
       button.disabled=!creating();button.setAttribute('aria-pressed',String(palettePiece===piece));
       if(iconArt!==altArt){iconArt=altArt;iconCtx.clearRect(0,0,CELL,CELL);drawPiece(iconCtx,images,piece,0,0,1,altArt);}
@@ -259,8 +261,24 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     settings.water=value;save();
     if(creating())queue(`water:${value}`);else preview();
   },{hidden:createOnly,disabled:()=>!!replays?.isPlaying||running&&pause.paused});
-  boardGroup.select('Token on colours',TOKEN_HALVES,()=>paintToken,value=>{paintToken=value;},{hidden:createOnly});
-  boardGroup.button('Fill board',()=>queue(`fill:${withHalf(palettePiece??0)}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
+  // Tokens are their own palette, painted onto colours without changing them.
+  const tokenPalette=document.createElement('div');
+  tokenPalette.className='piece-palette';
+  TOKEN_HALVES.forEach(({value,label})=>{
+    const button=document.createElement('button');
+    button.type='button';button.className='panel-button';
+    const icon=document.createElement('canvas');
+    icon.width=icon.height=CELL;icon.setAttribute('aria-hidden','true');
+    const iconCtx=icon.getContext('2d')!;
+    // A half's value is also its frame on the token sheet, as drawPiece reads it.
+    if(value)iconCtx.drawImage(images.get('bonus'),value*CELL,0,CELL,CELL,0,0,CELL,CELL);
+    button.append(icon,document.createTextNode(label));
+    button.addEventListener('click',()=>{paletteToken=paletteToken===value?null:value;palettePiece=null;panel.used();});
+    panel.addSync(()=>{button.disabled=!creating();button.setAttribute('aria-pressed',String(paletteToken===value));});
+    tokenPalette.append(button);
+  });
+  boardGroup.append(tokenPalette,{hidden:createOnly});
+  boardGroup.button('Fill board',()=>queue(`fill:${palettePiece??0}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
   boardGroup.note(()=>pasteNote,{hidden:createOnly});
   boardGroup.note(()=>{const issues=boardIssues(game.board,liveSettings);return issues.length?`Not a board the game could deal: ${issues.join(' ')}`:'';},{hidden:()=>createOnly()||!running});
   const options=panel.settings.group('Game');
