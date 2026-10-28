@@ -26,10 +26,23 @@ describe('navigation create', () => {
     expect(game.board.get(2, 0)).toBe(4);
     expect(game.board.get(2, 2)).toBe(EMPTY);
     expect(paintStar(game, 2, 0, 4)).toBe(false);
-    expect(boardIssues(game, false, false)).toContain('Some stars are floating. They settle inward when the next star drops.');
+    expect(boardIssues(game, false, false)).toContain('Some stars are floating. They settle inward when you press Drop.');
     expect(paintStar(game, 2, 0, CLEAR)).toBe(true);
     expect(game.board.get(2, 0)).toBe(EMPTY);
-    expect(boardIssues(game, false, false)).not.toContain('Some stars are floating. They settle inward when the next star drops.');
+    expect(boardIssues(game, false, false)).not.toContain('Some stars are floating. They settle inward when you press Drop.');
+  });
+
+  it('settles a painted board on the first Drop without dropping the incoming star', () => {
+    const game = new NavigationGame(normal, 3);
+    game.board.cells.fill(EMPTY);
+    const entry = { ...game.entry };
+    paintStar(game, 2, 0, 4);
+    expect(game.unsettled).toBe(true);
+    game.settle();
+    expect(game.board.get(2, 2)).toBe(4);
+    expect(game.board.get(2, 0)).toBe(EMPTY);
+    expect(game.unsettled).toBe(false);
+    expect(game.entry).toEqual(entry); expect(game.stars).toBe(0);
   });
 
   it('keeps a pasted board’s floating stars', () => {

@@ -185,6 +185,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
           }
           if(event.type==='mousedown'&&event.button===1){
             const c=cellAt(event.pos[0],event.pos[1]);
+            // A Freeplay board just painted is pulled as it stands by the next click, before any slide.
+            if(c&&!game.busy&&!game.selecting&&creating()&&game.built){queue('select');continue;}
             if(c&&!game.busy&&!game.selecting){queue(`at:${c.x},${c.y}`);drag={at:c,from:[...event.pos],axis:-1};rope();}
             continue;
           }
@@ -275,7 +277,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   });
   boardGroup.append(tokenPalette,{hidden:createOnly});
   boardGroup.button('Fill board',()=>queue(`fill:${palettePiece??0}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
-  boardGroup.note(()=>pasteNote,{hidden:createOnly});
+  boardGroup.note(()=>pasteNote||'After you paint, the next click or S pulls the board as it stands at the active pulley.',{hidden:createOnly});
   const options=panel.settings.group('Game');
   options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();},{disabled:busy});
   options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();},{disabled:busy});

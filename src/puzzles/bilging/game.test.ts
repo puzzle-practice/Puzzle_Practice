@@ -130,6 +130,16 @@ describe('Bilging Create mode', () => {
     g.generate();
     expect(g.board.cells).toEqual(before);
   });
+  it('plays out a painted board on the first click instead of swapping', () => {
+    const g = create(); quiet(g);
+    for (let x = 0; x < 3; x++) g.paint(x, 0, 1);
+    expect(g.unsettled).toBe(true);
+    expect(g.swap(4, 3)).toBe(true);
+    expect(g.moves).toBe(0); expect(g.lastMove!.points).toBeGreaterThan(0);
+    g.settle();
+    expect(g.unsettled).toBe(false);
+    g.swap(0, 5); expect(g.moves).toBe(1);
+  });
   it('changes the water level in Freeplay only', () => {
     const g = create(), normal = new BilgingGame({ ...DEFAULT_SETTINGS }, 21);
     expect(g.setWater(7)).toBe(true);

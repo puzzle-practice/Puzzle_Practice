@@ -1,4 +1,4 @@
-import { NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, LEVEL_TARGETS, type Clear, type Fall, type Target } from './logic';
+import { EMPTY, NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, LEVEL_TARGETS, type Clear, type Fall, type Target } from './logic';
 
 /**
  * `clears` is the untimed run that ends at the difficulty's constellation quota, counted across
@@ -104,6 +104,18 @@ export class NavigationGame {
     if (!this.finished) this.entry = this.board.nextEntry();
     return steps;
   }
+  /** Whether a star sits above an empty cell, so it falls when gravity next runs. */
+  get floating(): boolean {
+    const board = this.board;
+    for (let octant = 0; octant < 8; octant++) for (let ring = 0; ring + 1 < board.rings; ring++) {
+      if (board.get(octant, ring) !== EMPTY && board.get(octant, ring + 1) === EMPTY) return true;
+    }
+    return false;
+  }
+  /** Whether a painted board would still change on its own: a floating star, a run of three or a charted constellation. */
+  get unsettled(): boolean { return this.floating || this.board.findRuns().length > 0 || this.board.matches(this.targets); }
+  /** Freeplay: turns gravity back on for a painted board, playing out the falls and clears with no star dropped. */
+  settle(): Scene[] { return this.finished ? [] : this.resolve(); }
   private resolve(): Scene[] {
     const scenes: Scene[] = [];
     let chain = 1;

@@ -176,13 +176,15 @@ export class BilgingGame {
   /** Swaps the pieces at the cursor and plays out the cascade. Returns false when the game refuses the swap. */
   swap(x = this.cursor.x, y = this.cursor.y): boolean | 'crab' {
     if (this.busy) return false;
+    const score = new BilgeScore(), result: MoveResult = { points: 0, chain: 0, crabs: 0, tokens: [] };
+    // A painted Freeplay board that would still clear, rise or score plays that out on the first click, without a swap.
+    if (this.creating && this.unsettled) { this.resolve(score, result); this.finish(score, result); return true; }
     const b = this.board, water = this.settings.water, a = b.get(x, y), c = b.get(x + 1, y);
     if (a === CRAB || c === CRAB) return 'crab';
     if (a === EMPTY && c === EMPTY) return false;
     const duration = y >= water ? SWAP_DRY_MS : SWAP_WET_MS;
     if (a === c) { this.push({ kind: 'swap', swap: { x, y }, duration, sound: 'piece_swap' }); return true; }
     this.moves++; this.performance.add(0, 1);
-    const score = new BilgeScore(), result: MoveResult = { points: 0, chain: 0, crabs: 0, tokens: [] };
     if (a === PUFFER || c === PUFFER) {
       const px = c === PUFFER ? x + 1 : x;
       this.push({ kind: 'puffer', at: { x: px, y }, duration: PUFFER_BURST_MS, sound: 'pufferfish_destroy' });
@@ -207,6 +209,11 @@ export class BilgingGame {
       this.jellies++;
     }
     this.resolve(score, result);
+    this.finish(score, result);
+    return true;
+  }
+  /** Banks a move's score once its cascade is queued. */
+  private finish(score: BilgeScore, result: MoveResult): void {
     result.points = score.points; result.chain = score.chain;
     this.lastMove = result;
     this.longestChain = Math.max(this.longestChain, score.chain);
@@ -219,7 +226,13 @@ export class BilgingGame {
       }
     }
     if (!this.scenes.length) this.finishMove();
-    return true;
+  }
+  /** Whether the board would change on its own: a gap to rise into, a complete token, a crab above water or a line of three. */
+  get unsettled(): boolean {
+    const b = this.board;
+    if (b.cells.includes(EMPTY) || b.completedToken() || b.runs(false).length) return true;
+    for (let y = this.settings.water; y < HEIGHT; y++) for (let x = 0; x < WIDTH; x++) if (type(b.get(x, y)) === CRAB) return true;
+    return false;
   }
 
   /** Tokens, rising pieces, crabs above water, then runs; each successful step starts the loop again. */

@@ -108,6 +108,14 @@ export class SailingGame {
   snapshot(): Scene { return {cells:[...this.board.cells],targets:this.board.targets.map(t=>({...t})),duration:0}; }
   private spawn(): void { this.active={x:3,y:-1,orient:5,pieces:this.board.nextPair(),fraction:0}; }
   get isLanding():boolean{return this.contactMs!==null;}
+  /** Freeplay: a built board waits with gravity off and no pair until the first Fall faster. */
+  held=false;
+  hold():void{this.active=null;this.held=true;this.message='Fall faster (Space) turns gravity on';}
+  /** Freeplay's first Fall faster: the built board falls and clears as it stands, then the first pair spawns. */
+  release():boolean{
+    if(!this.held||this.scenes.length)return false;
+    this.held=false;this.message='';this.resolve();return true;
+  }
   private syncClock(p:Pair):void {
     if(this.clockPair===p)return;
     this.clockPair=p;this.fallClock=new FallingClock();this.fallClock.rebase(p.fraction);this.contactMs=null;

@@ -2,7 +2,7 @@
 // is N and the ring count, then, separated by colons: a character a cell, ring by ring from the
 // outside and octant by octant from the east (. empty, 0-4 a star's colour); the targets, each its
 // ring, octant and colour (* for wild); and the incoming star's colour and octant.
-import { DENSE_DISTRIBUTION, FIRST_TEST_DISTRIBUTION, DISTRIBUTIONS, EMPTY, MAX_TARGETS, type NaviBoard, type Target } from './logic';
+import { DENSE_DISTRIBUTION, FIRST_TEST_DISTRIBUTION, DISTRIBUTIONS, EMPTY, MAX_TARGETS, type Target } from './logic';
 import type { NavigationGame } from './game';
 
 export const COLOUR_NAMES = ['Blue', 'Orange', 'Red', 'White', 'Yellow'];
@@ -10,7 +10,7 @@ export const COLOUR_NAMES = ['Blue', 'Orange', 'Red', 'White', 'Yellow'];
 export const CLEAR = -1, WILD = 5;
 export const OCTANT_NAMES = ['East', 'North-east', 'North', 'North-west', 'West', 'South-west', 'South', 'South-east'];
 
-/** Paints a star, or clears one, in the cell given. Stars can float: they settle inward when the next star drops. Returns false when nothing changed. */
+/** Paints a star, or clears one, in the cell given. Stars can float: they settle inward at the next Drop. Returns false when nothing changed. */
 export function paintStar(game: NavigationGame, octant: number, ring: number, colour: number): boolean {
   const board = game.board;
   if (ring < 0 || ring >= board.rings || colour < CLEAR || colour > 4) return false;
@@ -18,14 +18,6 @@ export function paintStar(game: NavigationGame, octant: number, ring: number, co
   if (board.get(octant, ring) === cell) return false;
   board.set(octant, ring, cell);
   return true;
-}
-
-/** Whether a star sits above an empty cell, so it falls when the next star drops. */
-function floating(board: NaviBoard): boolean {
-  for (let octant = 0; octant < 8; octant++) for (let ring = 0; ring + 1 < board.rings; ring++) {
-    if (board.get(octant, ring) !== EMPTY && board.get(octant, ring + 1) === EMPTY) return true;
-  }
-  return false;
 }
 
 /** Paints a target in one of the three innermost rings, makes it wild, or takes it away. */
@@ -75,7 +67,7 @@ export function load(game: NavigationGame, read: BoardText): void {
 /** Ways a painted board differs from one the game could deal. `ww` deals dense constellations; `wild` turns wild targets on. */
 export function boardIssues(game: NavigationGame, ww: boolean, wild: boolean): string[] {
   const issues: string[] = [], board = game.board, rings = board.rings;
-  if (floating(board)) issues.push('Some stars are floating. They settle inward when the next star drops.');
+  if (game.floating) issues.push('Some stars are floating. They settle inward when you press Drop.');
   if (board.findRuns().length) issues.push('Three or more stars in a row would already have cleared.');
   if (board.matches(game.targets)) issues.push('The constellation is already charted.');
   if (!game.targets.length) issues.push('There’s no constellation to chart.');

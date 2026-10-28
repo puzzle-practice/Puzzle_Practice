@@ -82,7 +82,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     if(id==='right')game.move(1);
     if(id==='cw')game.rotate(true);
     if(id==='ccw')game.rotate(false);
-    if(id==='drop')fastUntil=ticks()+250;
+    if(id==='drop'&&!game.release())fastUntil=ticks()+250;
   }
   function showDraft():void {
     if(!liveCreate)return;
@@ -92,7 +92,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   function playDraft():void {
     if(!editable())return;
     game=new SailingGame(liveSettings,crypto.getRandomValues(new Uint32Array(1))[0],true);
-    game.board.loadLayout(editor.board.cells,editor.board.targets);
+    game.board.loadLayout(editor.board.cells,editor.board.targets);game.hold();
     editing=false;lastAt=startAt=ticks();resetInput();commands=[];message='';
     lastScene=null;lastMoves=lastBoards=lastBooches=0;
   }
@@ -200,7 +200,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
           if(!key(event.key,binding.id,binding.defaultKey))continue;
           if(event.type==='keydown'){
             held.add(binding.id);repeats.set(binding.id,now+REPEAT_DELAY_MS);
-            if(binding.id==='drop')fast=true;else action(binding.id);
+            if(binding.id==='drop'){if(!game.release())fast=true;}else action(binding.id);
           }else{held.delete(binding.id);repeats.delete(binding.id);if(binding.id==='drop')fast=false;}
         }
       }

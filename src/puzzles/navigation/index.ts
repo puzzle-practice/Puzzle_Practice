@@ -162,7 +162,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     queue(game.rotate(selected, clockwise));
   }
   function drop(): void {
-    if (running && !scenes.length && !pause.paused && !dealing()) fastDrop = true;
+    if (!running || scenes.length || pause.paused || dealing()) return;
+    // A painted Freeplay board waits with gravity off: the first Drop lets it settle and clear, keeping the incoming star.
+    if (liveSettings.create && game?.unsettled) { queue(game.settle()); return; }
+    fastDrop = true;
   }
   /** The ring and octant under a point on the board, or null. */
   function cellAt([x, y]: [number, number]): { ring: number; octant: number } | null {

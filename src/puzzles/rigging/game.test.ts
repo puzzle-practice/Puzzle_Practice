@@ -198,6 +198,20 @@ describe('Rigging Create mode', () => {
     normal.setPulley(3); normal.setBooching(1);
     expect([normal.board.nextPulley, normal.board.skipped]).toEqual([0, 0]);
   });
+  it('pulls a painted board as it stands on the next click, without a slide', () => {
+    const g = create(), pulley = g.board.nextPulley;
+    expect(g.built).toBe(false);
+    g.paint({ x: 0, y: 0 }, TAR);
+    expect(g.built).toBe(true);
+    expect(g.select()).toBe(true);
+    expect(g.selecting).toBe(false); expect(g.moves).toBe(0); expect(g.built).toBe(false);
+    expect(g.board.nextPulley).toBe((pulley + 1) % PULLEYS.length);
+    g.settle();
+    expect(g.select()).toBe(false); expect(g.selecting).toBe(true);
+    g.select();
+    g.setPulley(2); g.generate();
+    expect(g.built).toBe(false);
+  });
   it('deals the next board on Generate and never levels up by itself', () => {
     const g = create(13), first = g.board.cells();
     g.generate();

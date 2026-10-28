@@ -156,6 +156,8 @@ export class RiggingGame {
   performance = new Performance();
   private boardNumber = 0;
   private pendingLevel = false;
+  /** Freeplay mode: the board has been painted since the last pull, so the next click pulls it as it stands. */
+  built = false;
 
   constructor(readonly settings: RiggingSettings, readonly seed: number) { this.board = this.deal(); }
   private deal(): RiggingBoard {
@@ -186,6 +188,7 @@ export class RiggingGame {
   select(): boolean {
     if (!this.selecting) {
       if (this.busy) return false;
+      if (this.built) return this.pull(false);
       this.selecting = true; this.preview = null;
       return false;
     }
@@ -205,10 +208,16 @@ export class RiggingGame {
     if (!b.slide(x, y, dir, amount)) return false;
     this.cursor = { x, y };
     this.moves++;
+    return this.pull(true);
+  }
+  /** Pulls at the active pulley. `move` is false for Freeplay's first click on a painted board, which pulls without a slide. */
+  private pull(move: boolean): boolean {
+    this.built = false;
+    const b = this.board, moves = move ? 1 : 0;
     const pulley = b.nextPulley, coilsBefore = b.cache, cells = b.pieces.map(r => [...r]);
     const pull = b.pullNext();
     if (!pull) {
-      this.performance.add(0, 1);
+      this.performance.add(0, moves);
       this.lastMove = { pieces: 0, points: 0, skipped: true, specials: [], maneuvers: [] };
       return true;
     }
@@ -220,7 +229,7 @@ export class RiggingGame {
     const specials = this.newSpecials(gone);
     // Each wild the coils earn is worth 25 points without a move.
     const fills = Math.floor((coilsBefore + pieces) / 20);
-    this.performance.add(points, 1);
+    this.performance.add(points, moves);
     for (let i = 0; i < fills; i++) this.performance.add(25, 0);
     points += 25 * fills;
     this.points += points;
@@ -288,6 +297,7 @@ export class RiggingGame {
     if (this.board.get(p) === piece) return false;
     this.preview = null; this.selecting = false;
     this.board.set(p, piece);
+    this.built = true;
     return true;
   }
   /** Freeplay mode: the whole board one piece. */
@@ -295,6 +305,7 @@ export class RiggingGame {
     if (!this.creating || this.busy || !validPiece(piece)) return;
     this.preview = null; this.selecting = false;
     this.board.pieces = this.board.pieces.map(r => r.map(() => piece));
+    this.built = true;
   }
   /** Freeplay mode: a board from its text, with its active pulley. */
   load(code: string): boolean {
@@ -305,6 +316,7 @@ export class RiggingGame {
     this.board.pieces = this.board.pieces.map(r => r.map(() => read.cells[i++]));
     this.board.nextPulley = read.pulley;
     this.board.skipped = read.skipped;
+    this.built = true;
     return true;
   }
   /** Freeplay mode: makes the next pulley the active one. */
@@ -313,17 +325,19 @@ export class RiggingGame {
   setPulley(i: number): void {
     if (!this.creating || this.busy || !Number.isInteger(i) || i < 0 || i >= PULLEYS.length) return;
     this.board.nextPulley = i;
+    this.built = true;
   }
   /** Freeplay mode: the turns since the last clear; at the last one a missed pull costs coils. */
   setBooching(turns: number): void {
     if (!this.creating || this.busy || !Number.isInteger(turns) || turns < 0 || turns >= SKIPS_FOR_PENALTY) return;
     this.board.skipped = turns;
+    this.built = true;
   }
   /** Freeplay mode: a fresh random board (the next in this session's seed sequence). */
   generate(): void {
     if (!this.creating || this.busy) return;
     this.preview = null; this.selecting = false;
-    this.boardNumber++; this.board = this.deal();
+    this.boardNumber++; this.board = this.deal(); this.built = false;
   }
   private newBoard(): void {
     this.levels++; this.levelPieces = 0; this.pendingLevel = false;
