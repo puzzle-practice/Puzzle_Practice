@@ -49,6 +49,7 @@ import { type Cell, CELL, type Effect, Forage, looks, type SoundName, type Sprit
 import { CHEST_WEIGHTINGS, fillPuzzle, type Mode, parseBoard, randomizeColours, scramblePuzzle, type Settings } from './logic';
 import type { Moon, MoonBlast } from './werewolf';
 import { PUZZLES } from './puzzles';
+import { EndHold } from '../../core/end-hold';
 
 const soundUrls = import.meta.glob<string>(['./sounds/*.mp3', '!./sounds/forage_night.mp3'], { eager: true, query: '?url', import: 'default' });
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -277,6 +278,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * on the same times so playback produces the same board.
    */
   const clock = () => ticks();
+  const hold = new EndHold(clock);
   game = newGame();
 
   const ciKey = () => {
@@ -363,6 +365,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     settledAt = 0;
     pendingNextBoard = false;
     ended = false;
+    hold.clear();
     createStarted = settings.mode === 'create';
     paintWith = null;
     painting = false;
@@ -883,10 +886,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     { hidden: createOnly, title: 'Pieces already cleared inside a painted moon: the fourth fires it' });
   boardGroup.button('Fill board', () => edit({ type: 'forage-create-fill', data: { paint: palettePaint !== null && !CRATE_PAINT.includes(palettePaint) && palettePaint !== MOON_PAINT ? palettePaint : 0 } }),
     { hidden: createOnly, disabled: editing, title: 'Make every cell the selected colour or special, or empty' });
-  boardGroup.note(() => pasteNote || 'Hold 1–5 for a colour, 6–9 for the shovel, machete, monkey or earthquake, 0 for ants or - to empty a cell, or select a piece above (crates and moons too) and left-click to place it. A crate or moon goes in with its top-left cell under the pointer; click the same moon again to take it away. Empty cells fill from above once a move plays out. Select it again to deselect and turn blocks. Scroll to cycle the piece under the pointer. Freeplay drops in no crates of its own, has no timer and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = boardIssues(game.cells, game.moons?.active);
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !boardActive || ended });
 
   panel.score().stats(['', 'Now', 'Best'], () => [[
@@ -897,7 +900,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const duty = dutyDesk(panel, store, 'forage', 'Foraging', RATING_SCALES, {
     shown: (id) => (id === 'normal' ? settings.mode === 'normal' : settings.mode === 'ci' || settings.mode === 'chaos'),
   });
-  panel.results(() => ended && !flight ? {
+  panel.results(() => ended && !flight && !hold.holding ? {
     title: 'Foraging results',
     report: duty.last,
     rows: [
@@ -1439,7 +1442,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     timePassed = Math.max(0, now - startTime);
     if (now >= startTime) warning.update(!isPuzzle() && roundSeconds() > 0 ? roundDuration() - timePassed : null);
     if (playing.length || flight || now < settledAt) return;
-    if (!isPuzzle() && roundSeconds() > 0 && timePassed >= roundDuration()) finishScored();
+    // Time's up once the last move has played out; the board stays in view a moment before the results.
+    if (!isPuzzle() && roundSeconds() > 0 && timePassed >= roundDuration()) { finishScored(); hold.start(); }
     else if (pendingNextBoard) newBoard();
     else if (isPuzzle() && game.crateCount() === 0) { finishPuzzle(); outro(); }
     else if (normalMode() && boardDone()) finishScored();

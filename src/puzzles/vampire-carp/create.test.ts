@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
-import { BoardRandom, CarpentryBoard, MAX_HOLE, PUTTY_TOOL } from './board';
-import { boardCode, boardIssues, clearHoles, holeGrid, load, paintHole, readBoardCode, setTool, shapeHole, toolFor } from './create';
+import { BoardRandom, CarpentryBoard, MAX_HOLE, Piece, PUTTY_TOOL } from './board';
+import { boardCode, boardIssues, clearHoles, holeGrid, holePlanks, load, paintHole, readBoardCode, setTool, shapeHole, toolFor } from './create';
 import { Game, newStats } from './game';
 
 const count = (grid: boolean[][]) => grid.flat().filter(Boolean).length;
@@ -36,6 +36,46 @@ describe('carpentry create', () => {
     expect(paintHole(board, 0, [10, 0], true)).toBeNull();
     clearHoles(board);
     expect(board.holes.every((h) => h.size === 0)).toBe(true);
+  });
+
+  it('keeps planks in a hole while it is painted, and takes out the one painted over', () => {
+    const board = new CarpentryBoard(5);
+    const hole = board.holes[0];
+    // An I down the hole's middle column, which every dealt hole has open top to bottom.
+    const x = Math.trunc(hole.width / 2);
+    expect(hole.placePiece(new Piece(3, 0), [x, 2])).toBeGreaterThan(0);
+    const [ox, oy] = hole.offset;
+    const planked = holePlanks(hole);
+    // Opening a wood square elsewhere keeps the plank where it sat in the box.
+    const grid = holeGrid(hole);
+    const spot = [...Array(100).keys()].map((n) => [Math.floor(n / 10), n % 10] as [number, number]).find(([sx, sy]) => !grid[sx][sy])!;
+    const reshaped = paintHole(board, 0, spot, true)!;
+    expect(holePlanks(reshaped)).toEqual(planked);
+    expect(reshaped.holeSquares).toBe(hole.holeSquares + 1);
+    // Cutting the plank's square takes it out and leaves the square open.
+    const cut = paintHole(board, 0, [x + ox, 2 + oy], true)!;
+    expect(cut.tools).toHaveLength(0);
+    expect(cut.holeSquares).toBe(cut.origSquares);
+    // Filling a square under a plank takes it out too and makes the square wood.
+    expect(cut.placePiece(new Piece(3, 0), [x + ox - cut.offset[0], 2 + oy - cut.offset[1]])).toBeGreaterThan(0);
+    const filled = paintHole(board, 0, [x + ox, 2 + oy], false)!;
+    expect(filled.tools).toHaveLength(0);
+    expect(holeGrid(filled)[x + ox][2 + oy]).toBe(false);
+  });
+
+  it('shares planks in the holes as text', () => {
+    const board = new CarpentryBoard(9);
+    const hole = board.holes[3];
+    hole.placePiece(new Piece(3, 0), [Math.trunc(hole.width / 2), 2]);
+    const code = boardCode(board);
+    expect(code).toMatch(/;3i10/);
+    const copy = new CarpentryBoard(1);
+    load(copy, readBoardCode(code)!);
+    expect(boardCode(copy)).toBe(code);
+    expect(copy.holes[3].holeSquares).toBe(hole.holeSquares);
+    expect(copy.holes[3].piecesUsed).toBe(1);
+    // Boards copied before planks were shared still read.
+    expect(readBoardCode(code.split(';')[0])!.planks!.flat()).toEqual([]);
   });
 
   it('sizes painted holes by their squares', () => {

@@ -6,19 +6,20 @@ import { SessionPause } from '../../core/pause';
 import { ReplayRecorder, stateText, type ReplaySettingsCodec } from '../../core/replay';
 import { historyGroup } from '../../core/history';
 import { dutyDesk } from '../../core/duty/desk';
+import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
 import { keyMatches } from '../../core/controls';
 import { copyText, pasteText } from '../../core/clipboard';
 import type { InputEvent, Point } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
-import { BONUS_NAMES, BONUS_SETS } from './board';
+import { BONUS_NAMES, BONUS_SETS, SKIPS_FOR_PENALTY } from './board';
 import {
-  DEFAULT_SETTINGS, DRAG_START, PAINTABLE, RiggingGame, boardCode, cellAt, dragAxis, indicatorStep, projection, readBoardCode, readSettings,
+  DEFAULT_SETTINGS, DRAG_START, PAINTABLE, RiggingGame, boardCode, cellAt, dragAxis, indicatorStep, projection, readBoardCode, readSettings, repaint, reshape,
   settingsKey, slideFor, type Mode, type RiggingSettings, type Scene,
 } from './game';
 import { PIECE, drawActivated, drawBoard, drawCoils, drawPiece } from './render';
 
-const TOKENS=[{value:0,label:'Off'},{value:1,label:'Normal shapes'},{value:2,label:'Normal shapes + blades'}];
+const TOKENS=[{value:0,label:'Off'},{value:1,label:'4 Tokens'},{value:2,label:'5 Tokens'}];
 const DIFFICULTIES=Array.from({length:10},(_,value)=>({value,label:`${value} · ${value+1} ${value?'stars':'star'}`}));
 const TIMER=[{value:0,label:'No timer'},{value:120000,label:'2 minutes'},{value:300000,label:'5 minutes'},{value:600000,label:'10 minutes'}];
 const DIR:Record<string,number>={nw:2,ne:4,w:1,e:5,sw:0,se:6};
@@ -26,7 +27,9 @@ const MODES:{value:Mode,label:string}[]=[{value:'normal',label:'Normal'},{value:
 const PIECE_NAMES=['Orange','Yellow','Black','Purple','Cyan','White','Blue','Tan','Wild','Tar','Gaff','Splice ↔','Splice ↗','Splice ↘'];
 /** Freeplay mode paints with keys 1–8 (the colours), 9 (wild) and 0 (tar) held over the board. */
 const PAINT_KEYS=['1','2','3','4','5','6','7','8','9','0'].map((key,i)=>({id:`paint${i+1}`,label:`Paint ${PIECE_NAMES[i].toLowerCase()} (Freeplay)`,defaultKey:key,piece:PAINTABLE[i]}));
-const SHAPES=[{value:0,label:'None'},...[1,2,3,4,7].map(value=>({value,label:BONUS_NAMES[value]}))];
+const PULLEY_NAMES=['Top','Upper right','Lower right','Bottom','Lower left','Upper left'];
+const BOOCHING=Array.from({length:SKIPS_FOR_PENALTY},(_,value)=>({value,label:String(value)}));
+const SHAPES=[{value:0,label:'No token'},...[1,2,3,4,7].map(value=>({value,label:BONUS_NAMES[value]}))];
 /** The game's keys: W E A D Z X move the cursor (or nudge a selected rope), S selects and lets go, Space cancels. */
 const KEYS=[{id:'nw',label:'Up-left',defaultKey:'w'},{id:'ne',label:'Up-right',defaultKey:'e'},{id:'w',label:'Left',defaultKey:'a'},
   {id:'e',label:'Right',defaultKey:'d'},{id:'sw',label:'Down-left',defaultKey:'z'},{id:'se',label:'Down-right',defaultKey:'x'},
@@ -42,42 +45,45 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const sounds=new SoundBank(import.meta.glob<string>('./sounds/*.mp3',{eager:true,query:'?url',import:'default'}),()=>replays?.isSeeking??false);
   let settings=readSettings(store.get('settings',DEFAULT_SETTINGS))??{...DEFAULT_SETTINGS};
   let liveSettings={...settings}, savedSettings:RiggingSettings|null=null;
-  let game=new RiggingGame(settings,42), running=false, finished=false;
+  let game=new RiggingGame(settings,42), running=false, finished=false, timeUp=false;
   let startAt=0,endAt=0,lastAt=0,glowSince=0,lastPulley=-1,nextRope=0;
   let commands:string[]=[], held=new Set<string>(), repeats=new Map<string,number>();
   let drag:{at:{x:number,y:number},from:Point,axis:number}|null=null, lastMouse:Point=[-1,-1];
   let lastScene:Scene|null=null, callouts:{text:string,size:number,at:[number,number],from:number}[]=[];
-  /** Freeplay mode: the palette piece a left click places, the piece a held key paints, and the shape added to colours. */
-  let palettePiece:number|null=null, paintWith:number|null=null, paintShape=0, painting=false, pasteNote='';
+  /** Freeplay mode: the palette piece or token a left click paints, and the piece a held key paints. */
+  let palettePiece:number|null=null, paletteShape:number|null=null, paintWith:number|null=null, painting=false, pasteNote='';
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'rigging','Rigging',[]);
   const busy=()=>running||(replays?.isPlaying??false);
-  const elapsed=()=>Math.max(0,(running?ticks():endAt)-startAt);
+  const elapsed=()=>Math.min(timerMs()||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
+  const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
   const history=()=>store.history(settingsKey(settings));
-  const queue=(action:string)=>{if(running&&!pause.paused&&!replays.isPlaying)commands.push(action);};
+  const queue=(action:string)=>{if(running&&!timeUp&&!pause.paused&&!replays.isPlaying)commands.push(action);};
   const resetInput=()=>{held.clear();repeats.clear();drag=null;};
   const key=(name:string,id:string,fallback:string)=>keyMatches(name,'rigging',id,fallback);
   const play=(name:string)=>sounds.play(name);
   const creating=()=>running&&liveSettings.mode==='create';
   const timerMs=()=>liveSettings.mode==='create'?0:liveSettings.timerMs;
-  const withShape=(piece:number)=>piece<8&&paintShape?piece|paintShape<<4:piece;
-  /** Paints the space under the pointer, recording only real changes. */
-  const paintAt=(pos:Point,piece:number)=>{const c=cellAt(pos[0],pos[1]);if(c&&game.board.get(c)!==piece)queue(`paint:${c.x},${c.y},${piece}`);};
+  /** Paints the space under the pointer, recording only real changes. Pieces keep their token; tokens keep their piece. */
+  const paintAt=(pos:Point,next:(old:number)=>number)=>{const c=cellAt(pos[0],pos[1]);if(!c)return;const old=game.board.get(c),piece=next(old);if(old!==piece)queue(`paint:${c.x},${c.y},${piece}`);};
+  const pieceBrush=(piece:number)=>(old:number)=>repaint(old,piece);
+  const paletteBrush=()=>palettePiece!==null?pieceBrush(palettePiece):paletteShape!==null?(old:number)=>reshape(old,paletteShape!):null;
   const rope=()=>{play(ROPE_SOUNDS[Math.floor(Math.random()*ROPE_SOUNDS.length)]);nextRope=ticks()+1000+Math.random()*1000;};
 
   const seedMode = seedControls(panel, store, () => running || !!replays?.isPlaying);
 
   function start(seed=seedMode.next()):void { seedMode.remember(seed);
     pause.resume(); liveSettings={...settings}; game=new RiggingGame(liveSettings,seed);
-    running=true;finished=false;startAt=endAt=lastAt=glowSince=ticks(); duty.clear(); resetInput();commands=[];
+    running=true;finished=false;timeUp=false;hold.clear();startAt=endAt=lastAt=glowSince=ticks(); duty.clear(); resetInput();commands=[];
     lastScene=null;callouts=[];lastPulley=-1;paintWith=null;painting=false;pasteNote='';
     replays.begin(liveSettings,seed); play('intro');
   }
   function end(reason:string):void {
     if(!running)return;
     game.settle();
-    running=false;finished=true;endAt=ticks();resetInput();commands=[];
+    running=false;finished=true;timeUp=false;endAt=ticks();resetInput();commands=[];
+    if(reason==='Time up')hold.start();
     const report=duty.end({mode:liveSettings.mode==='create'?'Freeplay':liveSettings.tokens?'Token practice':'Normal',performance:LEARNING,
       score:{label:'Points / slide',value:game.efficiency.toFixed(2)}});
     const tape=replays.finish(`${reason} · ${game.efficiency.toFixed(2)} points/slide`,report);
@@ -89,7 +95,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   }
   /** Every change to the game goes through a recorded command, so replays repeat it exactly. */
   function action(id:string):void {
-    if(!running||pause.paused)return;
+    if(!running||timeUp||pause.paused)return;
     const before=game.moves, coils=game.board.cache, skips=game.board.skipsRemaining;
     if(id in DIR)game.key(DIR[id]);
     else if(id==='select'){if(!game.selecting&&!game.busy)rope();game.select();}
@@ -101,6 +107,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     else if(id.startsWith('load:'))game.load(id.slice(5));
     else if(id==='generate')game.generate();
     else if(id==='pulley')game.nextPulley();
+    else if(id.startsWith('pulley:'))game.setPulley(Number(id.slice(7)));
+    else if(id.startsWith('booch:'))game.setBooching(Number(id.slice(6)));
     if(game.moves>before&&game.lastMove?.skipped){
       if(game.board.cache<coils)play('cache_penalty');
       else if(game.board.skipsRemaining<=1&&skips>1&&game.board.cache>0)play('cache_penalty_warning');
@@ -112,7 +120,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   }
   function draw(now:number):void {
     screen.blit(images.get('background'),0,0);
-    const live=running&&!pause.paused;
+    const live=running&&!timeUp&&!pause.paused;
     if(!game.busy&&game.board.nextPulley!==lastPulley){lastPulley=game.board.nextPulley;glowSince=now;}
     drawBoard(ctx,images,game,live,now,glowSince);
     if(!game.busy&&game.board.potential.size)drawActivated(ctx,images,[...game.board.potential].sort(),game.board.nextPulley);
@@ -162,23 +170,26 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
         const mouse=routed.mouse;
         const moved=mouse[0]!==lastMouse[0]||mouse[1]!==lastMouse[1];
         if(creating()&&moved){
-          if(paintWith!==null)paintAt(mouse,withShape(paintWith));
-          else if(painting&&palettePiece!==null)paintAt(mouse,withShape(palettePiece));
+          const brush=paletteBrush();
+          if(paintWith!==null)paintAt(mouse,pieceBrush(paintWith));
+          else if(painting&&brush)paintAt(mouse,brush);
         }
         if(drag)updateDrag(mouse);
         else if((mouse[0]!==lastMouse[0]||mouse[1]!==lastMouse[1])&&!game.selecting){const c=cellAt(mouse[0],mouse[1]);if(c&&(c.x!==game.cursor.x||c.y!==game.cursor.y))queue(`at:${c.x},${c.y}`);}
         lastMouse=[mouse[0],mouse[1]];
         for(const event of routed.events){
-          if(creating()&&event.type==='mousedown'&&event.button===1&&palettePiece!==null){paintAt(event.pos,withShape(palettePiece));painting=true;continue;}
+          if(creating()&&event.type==='mousedown'&&event.button===1&&paletteBrush()){paintAt(event.pos,paletteBrush()!);painting=true;continue;}
           if(creating()&&event.type==='mouseup'&&event.button===1&&painting){painting=false;continue;}
           if(creating()&&event.type==='mousedown'&&(event.button===4||event.button===5)){
             // The wheel cycles the piece under the pointer.
             const c=cellAt(event.pos[0],event.pos[1]);
-            if(c){const i=PAINTABLE.indexOf(game.board.get(c)&15),step=event.button===4?1:-1;queue(`paint:${c.x},${c.y},${PAINTABLE[(i+step+PAINTABLE.length)%PAINTABLE.length]}`);}
+            if(c){const old=game.board.get(c),i=PAINTABLE.indexOf(old&15),step=event.button===4?1:-1;queue(`paint:${c.x},${c.y},${repaint(old,PAINTABLE[(i+step+PAINTABLE.length)%PAINTABLE.length])}`);}
             continue;
           }
           if(event.type==='mousedown'&&event.button===1){
             const c=cellAt(event.pos[0],event.pos[1]);
+            // A Freeplay board just painted is pulled as it stands by the next click, before any slide.
+            if(c&&!game.busy&&!game.selecting&&creating()&&game.built){queue('select');continue;}
             if(c&&!game.busy&&!game.selecting){queue(`at:${c.x},${c.y}`);drag={at:c,from:[...event.pos],axis:-1};rope();}
             continue;
           }
@@ -193,7 +204,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
           const paint=PAINT_KEYS.find(p=>key(event.key,p.id,p.defaultKey));
           if(paint){
             if(!creating())continue;
-            if(event.type==='keydown'){paintWith=paint.piece;paintAt(mouse,withShape(paint.piece));}
+            if(event.type==='keydown'){paintWith=paint.piece;paintAt(mouse,pieceBrush(paint.piece));}
             else if(paintWith===paint.piece)paintWith=null;
             continue;
           }
@@ -209,7 +220,9 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       if((game.preview||game.selecting)&&now>=nextRope&&!replays.isPlaying)rope();
       const scene=game.scenes[0]??null;
       if(scene!==lastScene){if(scene)sceneStarted(scene,now);lastScene=scene;}
-      if(timerMs()&&elapsed()>=timerMs())end('Time up');
+      // Time's up: no more moves, and the session ends once the board has settled.
+      if(timerMs()&&elapsed()>=timerMs()&&!timeUp){timeUp=true;drag=null;game.preview=null;}
+      if(timeUp&&!game.busy)end('Time up');
     }
     if(!replays.isSeeking&&!replays.isAdvancing)draw(now);
   }
@@ -228,8 +241,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   // The board's text can be copied in any mode, and pasted, dealt anew or painted while playing in Freeplay.
   const createOnly=()=>settings.mode!=='create';
   const editing=()=>!creating()||pause.paused||replays.isPlaying||game.busy;
-  const boardGroup=panel.controlSettings.group('Board');
-  boardGroup.button('Copy',()=>copyText(boardCode(game.board),'Copy this board:'),{title:'Copy the board, with its active pulley'});
+  const boardGroup=panel.group('Board');
+  boardGroup.button('Copy',()=>copyText(boardCode(game.board),'Copy this board:'),{title:'Copy the board, with its active pulley and turns since the last clear'});
   boardGroup.button('Paste',()=>void pasteText('Paste a board:').then(text=>{
     if(text===null)return;
     if(readBoardCode(text)){pasteNote='';queue(`load:${text.trim()}`);}
@@ -237,7 +250,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   }),{hidden:createOnly,disabled:editing,title:'Play a board from a pasted copy'});
   boardGroup.button('Generate',()=>{queue('generate');window.setTimeout(()=>copyText(boardCode(game.board),'Copy this board:'),50);},
     {hidden:createOnly,disabled:editing,title:'Deal a new board and copy it'});
-  boardGroup.button('Next pulley',()=>queue('pulley'),{hidden:createOnly,disabled:editing,title:'Make the next pulley the active one'});
+  boardGroup.select('Active pulley',PULLEY_NAMES.map((label,value)=>({value,label})),()=>game.board.nextPulley,value=>queue(`pulley:${value}`),{hidden:createOnly,disabled:editing});
+  boardGroup.select('Turns since last clear',BOOCHING,()=>game.board.skipped,value=>queue(`booch:${value}`),{hidden:createOnly,disabled:editing,title:'Pulls in a row that cleared nothing. A third costs 5 coils and starts the count again.'});
   const palette=document.createElement('div');
   palette.className='piece-palette';
   PAINTABLE.forEach((piece,i)=>{
@@ -247,14 +261,28 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     icon.width=icon.height=PIECE;icon.setAttribute('aria-hidden','true');
     drawPiece(icon.getContext('2d')!,images,piece,PIECE/2,PIECE/2);
     button.append(icon,document.createTextNode(i<10?`${(i+1)%10} · ${PIECE_NAMES[i]}`:PIECE_NAMES[i]));
-    button.addEventListener('click',()=>{palettePiece=palettePiece===piece?null:piece;panel.used();});
+    button.addEventListener('click',()=>{palettePiece=palettePiece===piece?null:piece;paletteShape=null;panel.used();});
     panel.addSync(()=>{button.disabled=!creating();button.setAttribute('aria-pressed',String(palettePiece===piece));});
     palette.append(button);
   });
   boardGroup.append(palette,{hidden:createOnly});
-  boardGroup.select('Shape on colours',SHAPES,()=>paintShape,value=>{paintShape=value;},{hidden:createOnly});
-  boardGroup.button('Fill board',()=>queue(`fill:${withShape(palettePiece??0)}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
-  boardGroup.note(()=>pasteNote||'Hold 1–8 for a colour, 9 for wild or 0 for tar to paint, or select a piece above and left-click to place it. Select it again to deselect and slide ropes. Scroll to cycle the piece under the pointer. Freeplay never deals a new board or ends by itself, and keeps no history.',{hidden:createOnly});
+  // Tokens are their own palette, painted onto colours without changing them.
+  const tokenPalette=document.createElement('div');
+  tokenPalette.className='piece-palette';
+  SHAPES.forEach(({value,label})=>{
+    const button=document.createElement('button');
+    button.type='button';button.className='panel-button';
+    const icon=document.createElement('canvas');
+    icon.width=icon.height=PIECE;icon.setAttribute('aria-hidden','true');
+    if(value)icon.getContext('2d')!.drawImage(images.get('bonus'),value*PIECE,0,PIECE,PIECE,0,0,PIECE,PIECE);
+    button.append(icon,document.createTextNode(label));
+    button.addEventListener('click',()=>{paletteShape=paletteShape===value?null:value;palettePiece=null;panel.used();});
+    panel.addSync(()=>{button.disabled=!creating();button.setAttribute('aria-pressed',String(paletteShape===value));});
+    tokenPalette.append(button);
+  });
+  boardGroup.append(tokenPalette,{hidden:createOnly});
+  boardGroup.button('Fill board',()=>queue(`fill:${palettePiece??0}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
+  boardGroup.note(()=>pasteNote||'After you paint, the next click or S pulls the board as it stands at the active pulley.',{hidden:createOnly});
   const options=panel.settings.group('Game');
   options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();},{disabled:busy});
   options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();},{disabled:busy});
@@ -268,7 +296,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     available:g=>typeof g.replayAt==='number'&&(replays?.hasPlayableAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined)??false),
     play:g=>{if(typeof g.replayAt==='number')void replays.playAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined);},
   });
-  panel.results(()=>finished&&!running?{title:'Rigging results',report:duty.last,rows:[
+  panel.results(()=>finished&&!running&&!hold.holding?{title:'Rigging results',report:duty.last,rows:[
     ['Points / slide',game.efficiency.toFixed(2)],['Points',String(game.points)],['Slides',String(game.moves)],
     ['Pieces pulled',String(game.pieces)],['Biggest pull',String(game.biggestPull)],['Levels',String(game.levels)],['Maneuvers',String(game.maneuvers)],
   ]}:null);
@@ -276,7 +304,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   replays=new ReplayRecorder('rigging',store,panel,ticks,tape=>{
     savedSettings??={...settings};settings=readSettings(tape.settings)!;start(tape.seed as number);
   },()=>{
-    running=false;finished=false;resetInput();commands=[];duty.clear();
+    running=false;finished=false;timeUp=false;resetInput();commands=[];duty.clear();
     if(savedSettings){settings=savedSettings;savedSettings=null;}preview();
   },validSeed,setReplayTime,()=>frame([]),codec,()=>!running||replays.isPlaying);
   replays.setStopLive(()=>{if(running)end('Stopped');});

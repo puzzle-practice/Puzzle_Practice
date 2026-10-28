@@ -37,6 +37,7 @@ import {
   WILD,
   WILD_REVEALED,
 } from './logic';
+import { EndHold } from '../../core/end-hold';
 import { HEATS, PAINTABLE, boardCode, boardIssues, fill as fillBoard, load as loadBoard, markLast, paint as paintSquare, readBoardCode } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -218,11 +219,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** A perfect-board run: boards dealt one after another, with the points they've scored. */
   const run = { active: false, start: 0, end: 0, points: 0, boards: 0, perfect: 0, oneOff: 0, farOff: 0, timeUp: false };
   const timeLeft = () => (timerMs ? Math.max(0, timerMs - ((run.active ? ticks() : run.end) - run.start)) : null);
+  const hold = new EndHold(ticks);
 
   let board: IronBoard | null = null;
   /** Each square as drawn: it changes when the hammer lands, a little after the strike. */
   let shown: { type: number; condition: number }[][] = [];
   let hammerable = false;
+  /** A strike's hammer is still swinging; when time runs out, the run waits for it to land. */
+  let swinging = false;
   let running = false;
   let finished = false;
   let doneness = 0;
@@ -372,6 +376,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     running = true;
     finished = false;
     hammerable = false;
+    swinging = false;
     doneness = 0;
     tally = emptyTally();
     anims = [];
@@ -400,10 +405,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
 
   function strike(x: number, y: number): void {
-    if (!hammerable || !board) return;
+    if (!hammerable || !board || (run.active && timeLeft() === 0)) return;
     const hit = board.hit(x, y);
     if (!hit) return;
     hammerable = false;
+    swinging = true;
     if (mode !== 'perfect') announce(hit);
     // Freeplay never finishes the sword: the board stays to be painted.
     if (hit.finished && mode === 'classic') {
@@ -479,6 +485,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       onEnd: () => {
         refresh();
         hammerable = true;
+        swinging = false;
         if (board && board.findHittable().length === 0 && mode !== 'create') endSword();
       },
     });
@@ -602,10 +609,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
 
   /** Clears the board and everything animating on it, with nothing scored. */
-  function abortBoard(): void {
+  /** Ends the board where it is; `keepBoard` leaves it in view, as time running out does. */
+  function abortBoard(keepBoard = false): void {
     running = false;
     finished = true;
-    board = null;
+    if (!keepBoard) board = null;
+    swinging = false;
+    cursor = null;
     anims = [];
     timers = [];
     messages = [];
@@ -621,6 +631,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     duty.clear();
     if (!replays.isPlaying) rng.beginSession(seedMode.next());
     replays.begin({ mode, difficulty, perfectSize, timerMs, scoringRules }, rng.snapshot());
+    hold.clear();
     Object.assign(run, { active: true, start: ticks(), end: ticks(), points: 0, boards: 0, perfect: 0, oneOff: 0, farOff: 0, timeUp: false });
     newSword();
   }
@@ -641,7 +652,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ] }],
     });
     const finishedReplay = replays.finish(`Points ${run.points}`, report);
-    abortBoard();
+    abortBoard(timeUp);
+    if (timeUp) hold.start();
     if (replays.isPlaying) return;
     const key = perfectKey();
     // A manually ended untimed run is a session; timed averages only include full rounds.
@@ -890,7 +902,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
       if (run.active) {
         warning.update(timeLeft());
-        if (timeLeft() === 0) endRun(true);
+        // Time's up once the last strike's hammer has landed; the board stays in view a moment.
+        if (timeLeft() === 0 && !swinging) endRun(true);
       }
 
       for (const timer of timers.filter((t) => now >= t.at)) {
@@ -1076,10 +1089,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   });
   boardGroup.button('Fill board', () => queue(`fill:${palettePiece ?? 0},${paintHeat}`), { hidden: createOnly, disabled: editing, title: 'Make every square the selected piece and heat' });
   boardGroup.button('Clear last strike', () => queue('unmark'), { hidden: createOnly, disabled: () => editing() || !board?.selected, title: 'Forget the last square struck, so any square can be struck' });
-  boardGroup.note(() => pasteNote || 'Hold a piece’s key (1–4, B, K, R, Q, or W for the rum jug) to paint it at the chosen heat, or select a piece above and left-click to place it. Right-click a square to mark it as struck last, as the piece chosen above; the squares you can strike next glow. Select a piece again to deselect and strike. Scroll to cycle the piece under the pointer. Freeplay never finishes the sword and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = board ? boardIssues(board) : [];
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
 
   const replayAction = {
@@ -1111,7 +1124,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const duty = dutyDesk(panel, store, 'blacksmithing', 'Blacksmithing', RATING_SCALES, {
     shown: (id) => (id === 'perfect') === (mode === 'perfect'),
   });
-  panel.results(() => finished && !busy() && mode !== 'create' ? {
+  panel.results(() => finished && !busy() && !hold.holding && mode !== 'create' ? {
     title: mode === 'perfect' ? 'Perfect board results' : 'Sword results',
     report: duty.last,
     averages: mode === 'classic'

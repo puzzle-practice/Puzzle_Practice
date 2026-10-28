@@ -198,6 +198,11 @@ describe('Rumble aim trainer', () => {
     t.fighter.aim(t.current.fist, t.current.angles[0]);
     expect(t.fire(t.current.fist, 2000 + AIM_MS - 1)).toBe(true);
     expect(t.fire(t.current.fist, 2000 + AIM_MS - 0.5)).toBe(false);
+    // The ball still in the air flies on to where it rests, uncounted, before the board settles.
+    t.update(2000 + AIM_MS);
+    expect(t.result).toBe('Time up');
+    expect(t.fighter.flight).not.toBeNull();
+    expect(t.settledAt).toBe(t.fighter.flight!.end);
     t.update(2000 + AIM_MS + 10000);
     expect(t.score).toBe(1);
     expect(t.result).toBe('Time up');

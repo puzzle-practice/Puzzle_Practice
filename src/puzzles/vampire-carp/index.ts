@@ -26,7 +26,7 @@ import type { InputEvent } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { GameRecord } from '../../core/storage';
 import { Random } from '../../core/random';
-import { BONUS_SETS, BoardRandom, type Cell, Piece, PIECE_LETTERS, TOKEN_NAMES } from './board';
+import { BONUS_SETS, BoardRandom, type Cell, Piece, PIECE_LETTERS, PUTTY, TOKEN_NAMES } from './board';
 import {
   CELL,
   Game,
@@ -45,6 +45,7 @@ import {
 } from './game';
 import { PIECES_NO_PUTTY } from './shapes';
 import { piecesDrawn } from './report';
+import { EndHold } from '../../core/end-hold';
 import { boardCode, boardIssues, clearHoles, FIXED_GRAIN, load as loadBoard, paintHole, pieceLetter, readBoardCode, setTool, toolFor } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -73,8 +74,8 @@ const LOOKS: Record<Look, { suffix: string; outlines: string[]; putty: string }>
 const TOKEN_TILE = CELL;
 const TOKENS = [
   { value: 0, label: 'Off' },
-  { value: 1, label: 'Normal shapes' },
-  { value: 2, label: 'Normal shapes + blades' },
+  { value: 1, label: '4 Tokens' },
+  { value: 2, label: '5 Tokens' },
 ];
 const DIFFICULTIES = Array.from({ length: 10 }, (_, value) => ({ value, label: `${value} · ${value + 1} ${value ? 'stars' : 'star'}` }));
 /** The star meter  at (5, 185) in the view: 9 stars of 21px, 19px apart. */
@@ -264,6 +265,9 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let startTime = 0;
   let pauseTime = 0;
   let timePassed = 0;
+  /** Time's up: no more moves, and the session ends once the board has settled. */
+  let timeUp = false;
+  const hold = new EndHold(ticks);
   let boardIndex = 0;
   let seeded = store.get<boolean>('seeded', false);
   let seed = store.get<number>('sessionSeed', Math.floor(Math.random() * MAX_SEED));
@@ -288,9 +292,10 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let meterShown = 0;
   let meterAt = 0;
   let lastMouse: Cell = [-1, -1];
-  // Replays through simulator version 2 applied the final pointer position before queued releases.
+  // Replays through simulator version 2 applied the final pointer position before queued releases;
+  // Freeplay replays before version 6 still had neglect and a toolbox that dealt new planks.
   let legacyPointerOrder = false;
-  let inputVersion = 5;
+  let inputVersion = 6;
   const sessionTime = () => (config.unlimited || config.create ? SESSION_LONG : SESSION_SHORT);
   /** Freeplay mode: the palette choice a left click paints (recorded, so replays click the same way), the key held, and pasted-text errors. */
   let paletteOpen: boolean | null = null, paintWith: boolean | null = null, painting = false, pasteNote = '';
@@ -323,14 +328,14 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       speed,
       speedRng,
       timePassed,
-      { ship: config.ship, difficulty: config.difficulty, tokens: config.tokens, independentStreams: true },
+      { ship: config.ship, difficulty: config.difficulty, tokens: config.tokens, independentStreams: true, freeplay: config.create && inputVersion >= 6 },
       inputVersion,
     );
     meterShown = 0;
     meterAt = timePassed;
   }
 
-  function startSession(version = 5): void {
+  function startSession(version = 6): void {
     inputVersion = version;
     legacyPointerOrder = version <= 2;
     stats = newStats();
@@ -354,6 +359,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     startTime = ticks();
     timePassed = 0;
     pauseTime = 0;
+    timeUp = false;
+    hold.clear();
     warning.reset();
     endProcedureComplete = false;
     sessionScoresComputed = false;
@@ -455,7 +462,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       if (event.type === 'keydown' && keyMatches(event.key, 'vampire-carp', 'pause', 'escape')) { toggleSessionPause(); return false; }
       return true;
     });
-    if (!game || !boardActive) return;
+    if (!game || !boardActive || timeUp) return;
     const [mx, my] = input.mouse;
     const movePointer = (x: number, y: number) => {
       if ((x !== lastMouse[0] || y !== lastMouse[1]) && inView(x, y)) {
@@ -521,6 +528,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     if (name === 'palette') paletteOpen = value === 'cut' ? true : value === 'wood' ? false : null;
     else if (name === 'tool') { const [slot, tool] = value.split(',').map(Number); game!.edit(() => setTool(game!.board, slot, tool)); }
     else if (name === 'clear') game!.edit(() => { clearHoles(game!.board); return true; });
+    else if (name === 'hold') { paletteOpen = null; game!.holdCheat(Number(value)); }
     else if (name === 'load') { const read = readBoardCode(command.slice(5)); if (read) game!.edit(() => { loadBoard(game!.board, read); return true; }); }
   }
   const record = (command: string) => {
@@ -737,12 +745,12 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
 
   /** The simulator's end-of-session table. */
   const duty = dutyDesk(panel, store, 'vampire-carp', 'Carpentry', RATING_SCALES);
-  panel.results(() => endProcedureComplete && !boardActive && endProcedureKey === bestScoresKey ? {
+  panel.results(() => endProcedureComplete && !boardActive && !hold.holding && endProcedureKey === bestScoresKey ? {
     title: 'Carpentry results',
     report: duty.last,
     rows: [
       ['Score', String(score())],
-      ['Time', `${(timePassed / 1000).toFixed(1)}s`],
+      ['Time', `${(Math.min(timePassed, sessionTime()) / 1000).toFixed(1)}s`],
       ...(config.ship
         ? [
             ['Points', String(stats.points)],
@@ -812,7 +820,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   panel.clock(() =>
     config.unlimited || config.create
       ? { label: 'Time', ms: timePassed }
-      : { label: 'Time left', ms: sessionTime() - timePassed, countdown: true, warn: boardActive && sessionTime() - timePassed < 10000 },
+      : { label: 'Time left', ms: Math.max(0, sessionTime() - timePassed), countdown: true, warn: boardActive && sessionTime() - timePassed < 10000 },
   );
 
   const session = panel.session();
@@ -852,7 +860,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     () => (config.ship ? SHIP_MODES : LAIR_MODES),
     mode,
     setMode,
-    { title: 'Ghost hides placed pieces; Speed deals small holes with the pieces to fill them; Freeplay lets you paint the board' },
+    { title: 'Ghost hides placed pieces; Speed deals small holes with the pieces to fill them; Freeplay lets you build any board' },
   );
   const actions = panel.group();
 
@@ -925,14 +933,29 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     palette.append(button);
   }
   boardGroup.append(palette);
+  // Any plank to lay straight into a hole, on top of the toolbox's three.
+  const planks = document.createElement('div');
+  planks.className = 'piece-palette';
+  PIECE_LETTERS.forEach((letter, kind) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'panel-button';
+    button.style.minWidth = kind === PUTTY ? '64px' : '36px';
+    button.textContent = kind === PUTTY ? 'Putty' : letter.toUpperCase();
+    button.title = kind === PUTTY ? 'Pick up a bucket of putty' : `Pick up the ${letter.toUpperCase()} plank`;
+    button.addEventListener('click', () => { record(`hold:${kind}`); panel.used(); });
+    panel.addSync(() => { button.disabled = !creating() || replays.isPlaying; });
+    planks.append(button);
+  });
+  boardGroup.append(planks);
   boardGroup.button('Clear holes', () => record('clear'), { disabled: editing, title: 'Fill every hole with wood' });
   for (let slot = 0; slot < 3; slot++) {
     boardGroup.select(`Toolbox ${slot + 1}`, TOOL_OPTIONS, () => game?.board.toolbox[slot] ?? TOOL_OPTIONS[0].value, (tool) => record(`tool:${slot},${tool}`), { disabled: editing });
   }
-  boardGroup.note(() => pasteNote || 'Hold Q over a hole’s box to cut squares open, or W to fill them with wood, or select Cut or Wood and drag. Select it again to deselect and place planks. Put down the plank in hand first. A painted hole counts as freshly dealt: its size is its squares ÷ 5, planks already in it become wood. Toolbox planks are set without tokens. Freeplay has no clock and keeps no PB or history.');
+  boardGroup.note(() => pasteNote);
   boardGroup.note(() => {
     const issues = game ? boardIssues(game.board, config.ship) : [];
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => !creating() });
 
   const settings = panel.settings.group('Game');
@@ -942,7 +965,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   });
   settings.select('Tokens', TOKENS, () => config.tokens, (n) => restartOption(() => (config.tokens = n))(), {
     hidden: () => !config.ship,
-    title: 'Maneuver tokens on every plank, from the game’s normal pool or the one with blades',
+    title: 'Maneuver tokens on every plank, from the game’s 4-token or 5-token pool',
   });
   const speedHidden = () => !config.speed;
   settings.select(
@@ -1104,7 +1127,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   // Version 2 added ship carpentry; version 1 replays are all the Vampire Lair's.
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 2,
-    simulatorVersion: 5,
+    simulatorVersion: 6,
     migrate: (version, value) => {
       if ((version !== 1 && version !== 2) || !value || typeof value !== 'object') return null;
       const wrapper = value as Record<string, unknown>;
@@ -1187,13 +1210,14 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       if (boardActive) timePassed = ticks() - startTime + pauseTime;
       handleEvents(events);
       if (game && boardActive) {
-        game.update(timePassed, !replays.isSeeking);
+        game.update(timePassed, !replays.isSeeking, !timeUp);
         const due = pendingSounds.filter((s) => s.at <= timePassed);
         pendingSounds = pendingSounds.filter((s) => s.at > timePassed);
         for (const s of due) play(s.name);
       }
       if (boardActive) warning.update(config.unlimited || config.create ? null : sessionTime() - timePassed);
-      if (boardActive && timePassed > sessionTime()) endSession();
+      if (boardActive && timePassed > sessionTime()) timeUp = true;
+      if (boardActive && timeUp && !game?.settling) { endSession(); hold.start(); }
 
     }
 

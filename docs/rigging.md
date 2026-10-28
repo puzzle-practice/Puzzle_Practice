@@ -1,6 +1,6 @@
 # Rigging
 
-Open `#/rigging`. Choose difficulty **0–9** (one through ten stars) and tokens **Off**, **Normal shapes** or **Normal shapes + blades**, then Start. Settings > Game has an optional timer.
+Open `#/rigging`. Choose difficulty **0–9** (one through ten stars) and tokens **Off**, **4 Tokens** or **5 Tokens**, then Start. Settings > Game has an optional timer.
 
 Drag a piece along any of its three ropes and let go to slide the whole rope; a right click puts it back. With the keyboard, **W E A D Z X** move the cursor in the six directions, **S** selects the piece under it, the same keys slide its rope one place at a time, and **S** again lets go. **Space** cancels a selected slide. Escape pauses. Keys are configurable. There are also saved results and portable replays.
 

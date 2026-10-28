@@ -70,7 +70,8 @@ MP3 for browser compatibility. The measured animation values include:
 | Finished label | 3,000 ms |
 
 The mouse and gears animate with the conveyor. Clicking bottles shows their value gleams.
-Quicksilver tubes pulse in sequence. Fills animate one connected group at a time.
+Three seconds after the last turn the game shows the bottle gleams, or one time in five pulses the
+quicksilver tubes instead, each fading up over 250 ms, 15 ms after the one before. Fills animate one connected group at a time.
 Pause freezes the simulation clock. Sessions keep difficulty-specific history and saved replays.
 
 ## Assumptions and remaining differences

@@ -21,6 +21,20 @@ export function fill(board: ShipBoard, material: number): boolean {
   return true;
 }
 
+/** The piece size (tier) the game deals on a card: cards are dealt smallest first, in the style's counts. */
+export function slotTier(difficulty: number, slot: number): number {
+  const counts = STYLES[difficulty].counts;
+  for (let tier = 0, end = 0; tier < counts.length; tier++) if (slot < (end += counts[tier])) return tier;
+  return counts.length - 1;
+}
+
+/** Patterns the game can deal on a card at this difficulty: the tutorial's three, otherwise every pattern of the card's size. */
+export function cardChoices(difficulty: number, slot: number): Pattern[] {
+  if (STYLES[difficulty].intro) return PATTERNS.filter((p) => ['cannon', 'rigging', 'sail'].includes(p.id));
+  const tier = slotTier(difficulty, slot);
+  return PATTERNS.filter((p) => p.tier === tier);
+}
+
 /** Puts a pattern on a card. Patterns already on another card can't be chosen, as the game never deals two alike. */
 export function setCard(board: ShipBoard, slot: number, id: string): boolean {
   const pattern = PATTERNS.find((p) => p.id === id);

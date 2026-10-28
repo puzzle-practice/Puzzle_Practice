@@ -99,6 +99,18 @@ describe('Playing a Sailing draft', () => {
     expect(game.points).toBe(4); expect(game.boards).toBe(0);
     expect(game.board.targets).toEqual([]); expect(game.active).not.toBeNull();
   });
+  it('holds a built board with gravity off until the first Fall faster', () => {
+    const game = new SailingGame(DEFAULT_SETTINGS, 42, true), editor = new SailingEditor();
+    editor.place(brush({ tool: 'single' }), 2, 5);
+    game.board.loadLayout(editor.board.cells, []); game.hold();
+    for (let i = 0; i < 20; i++) game.step(100, true);
+    expect(game.board.get(2, 5)).not.toBe(EMPTY); expect(game.active).toBeNull();
+    expect(game.release()).toBe(true);
+    for (let i = 0; i < 100 && game.scenes.length; i++) game.step(100, false);
+    expect(game.board.get(2, 5)).toBe(EMPTY); expect(game.board.get(2, HEIGHT - 1)).not.toBe(EMPTY);
+    expect(game.moves).toBe(0); expect(game.active).not.toBeNull();
+    expect(game.release()).toBe(false);
+  });
   it('keeps a blocked custom board instead of dealing over it', () => {
     const game = new SailingGame(DEFAULT_SETTINGS, 42, true), editor = new SailingEditor();
     editor.place(brush({ tool: 'blocker' }), 3, 0);

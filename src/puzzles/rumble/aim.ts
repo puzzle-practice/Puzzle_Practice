@@ -205,6 +205,8 @@ export class AimTrainer {
   boardNumber = 1;
   result: AimResult | null = null;
   endedAt: number | null = null;
+  /** When the board came to rest after the end: a ball in the air when time ran out still flies on, uncounted. */
+  settledAt?: number;
   feedback = 'Connect the ball to target 1.';
   feedbackAt: number;
   landing: { piece: number; cell: Point; hit: boolean; at: number; until: number } | null = null;
@@ -271,7 +273,7 @@ export class AimTrainer {
   }
 
   update(now: number): void {
-    if (this.result) return;
+    if (this.result) { this.flyOn(now); return; }
     const deadline = this.startedAt + AIM_MS;
     const f = this.fighter;
     const flight = f.flight;
@@ -311,16 +313,29 @@ export class AimTrainer {
       this.next = this.queueNext(previous);
       this.showTargets();
     }
-    if (now >= deadline) this.finish('Time up', deadline);
+    if (now >= deadline) { this.finish('Time up', deadline, true); this.flyOn(now); }
   }
 
-  finish(result: AimResult, now: number): void {
+  /** `flyOn` keeps a ball that's still in the air on screen until it comes to rest; it doesn't count. */
+  finish(result: AimResult, now: number, flyOn = false): void {
     if (this.result) return;
     this.result = result;
     this.endedAt = Math.min(now, this.startedAt + AIM_MS);
-    this.fighter.flight = null;
+    if (!flyOn) this.fighter.flight = null;
+    this.settledAt = this.fighter.flight?.end ?? this.endedAt;
     this.fighter.halted = true;
     this.fighter.charging = -1;
+  }
+
+  /** After the end: the ball in the air bounces on to where it rests, then goes. */
+  private flyOn(now: number): void {
+    const flight = this.fighter.flight;
+    if (!flight) return;
+    while (this.bounceIndex < flight.times.length - 1 && flight.times[this.bounceIndex] <= now) {
+      this.sound('ricochet');
+      this.bounceIndex++;
+    }
+    if (flight.end <= now) this.fighter.flight = null;
   }
 
   private connects(shot: Shot, target: Candidate): boolean {

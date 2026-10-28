@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PULLEYS, ROWS, TAR, WILD, rowSize } from './board';
-import { DEFAULT_SETTINGS, RiggingGame, STEP, boardCode, cellAt, cellPos, dragAxis, indicatorStep, piecesForLevel, projection, readBoardCode, readSettings, slideFor } from './game';
+import { DEFAULT_SETTINGS, RiggingGame, STEP, boardCode, cellAt, cellPos, dragAxis, indicatorStep, piecesForLevel, projection, readBoardCode, readSettings, repaint, reshape, slideFor } from './game';
 
 const settings = (difficulty = 6, tokens = 0) => ({ ...DEFAULT_SETTINGS, difficulty, tokens });
 /** A slide that pulls at least three pieces from the current board, found by trying each one on a copy. */
@@ -149,6 +149,14 @@ describe('Rigging Create mode', () => {
     expect(new Set(g.board.cells())).toEqual(new Set([4]));
     expect(g.moves).toBe(0);
   });
+  it('paints pieces and tokens separately', () => {
+    expect(repaint(3 | 2 << 4, 5)).toBe(5 | 2 << 4);
+    expect(repaint(3 | 2 << 4, TAR)).toBe(TAR);
+    expect(repaint(WILD, 5)).toBe(5);
+    expect(reshape(3 | 2 << 4, 7)).toBe(3 | 7 << 4);
+    expect(reshape(3 | 2 << 4, 0)).toBe(3);
+    expect(reshape(WILD, 2)).toBe(WILD);
+  });
   it('refuses to paint outside Create', () => {
     const g = new RiggingGame(settings(), 21), before = g.board.cells();
     expect(g.paint({ x: 0, y: 0 }, TAR)).toBe(false);
@@ -167,6 +175,42 @@ describe('Rigging Create mode', () => {
     const b = create(4);
     expect(b.load(`  ${code}\n`)).toBe(true);
     expect([b.board.cells(), b.board.nextPulley]).toEqual([a.board.cells(), 2]);
+  });
+  it('picks the active pulley and the turns since the last clear', () => {
+    const g = create(5);
+    g.setPulley(4);
+    g.setBooching(2);
+    expect([g.board.nextPulley, g.board.skipped]).toEqual([4, 2]);
+    g.setPulley(6); g.setBooching(3); g.setBooching(-1);
+    expect([g.board.nextPulley, g.board.skipped]).toEqual([4, 2]);
+    const code = boardCode(g.board);
+    expect(code).toMatch(/^R4[0-9a-f]{122}2$/);
+    const b = create(6);
+    expect(b.load(code)).toBe(true);
+    expect([b.board.nextPulley, b.board.skipped]).toEqual([4, 2]);
+    // A miss on the last turn costs coils and starts the count again.
+    b.board.cache = 10;
+    b.paint(PULLEYS[4], WILD);
+    b.board.pullNext();
+    expect([b.board.cache, b.board.skipped]).toEqual([5, 0]);
+    expect(boardCode(b.board)).toMatch(/^R5[0-9a-f]{122}$/);
+    const normal = new RiggingGame(settings(), 7);
+    normal.setPulley(3); normal.setBooching(1);
+    expect([normal.board.nextPulley, normal.board.skipped]).toEqual([0, 0]);
+  });
+  it('pulls a painted board as it stands on the next click, without a slide', () => {
+    const g = create(), pulley = g.board.nextPulley;
+    expect(g.built).toBe(false);
+    g.paint({ x: 0, y: 0 }, TAR);
+    expect(g.built).toBe(true);
+    expect(g.select()).toBe(true);
+    expect(g.selecting).toBe(false); expect(g.moves).toBe(0); expect(g.built).toBe(false);
+    expect(g.board.nextPulley).toBe((pulley + 1) % PULLEYS.length);
+    g.settle();
+    expect(g.select()).toBe(false); expect(g.selecting).toBe(true);
+    g.select();
+    g.setPulley(2); g.generate();
+    expect(g.built).toBe(false);
   });
   it('deals the next board on Generate and never levels up by itself', () => {
     const g = create(13), first = g.board.cells();

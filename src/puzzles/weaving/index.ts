@@ -258,11 +258,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       { hidden: createOnly, disabled: editing });
   }
   loom.button('Before last batten', () => record('setup'), { hidden: createOnly, disabled: () => editing() || !setup, title: 'Put the loom back as it was before the last batten' });
-  loom.note(() => pasteNote || 'Hold 1–4 for red, yellow, blue or green to paint the thread under the pointer, or 0 to clear it, or select a colour above and left-click the loom. Shuttle slots count from the left. Freeplay has no goal, carries on after a booch and keeps no history.', { hidden: createOnly });
+  loom.note(() => pasteNote, { hidden: createOnly });
   loom.note(() => {
     if (!board) return '';
     const issues = boardIssues(board);
-    return issues.length ? `Not a loom the game could deal: ${issues.join(' ')}` : 'This loom could come up in the game.';
+    return issues.length ? `Not a loom the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
   const settings = panel.settings.group('Difficulty');
   settings.select('Difficulty', options, () => difficulty, value => { difficulty = value; store.set('difficulty', value); }, { disabled: busy });

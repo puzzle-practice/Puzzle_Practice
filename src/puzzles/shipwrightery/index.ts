@@ -15,8 +15,8 @@ import {
 } from './logic';
 import { keyMatches } from '../../core/controls';
 import { copyText, pasteText } from '../../core/clipboard';
-import { MATERIAL_NAMES, SLOTS, boardCode, boardIssues, fill as fillBoard, load as loadBoard, paint as paintSquare, readBoardCode, setCard } from './create';
-import { PATTERNS } from './logic';
+import { EndHold } from '../../core/end-hold';
+import { MATERIAL_NAMES, SLOTS, boardCode, boardIssues, cardChoices, slotTier, fill as fillBoard, load as loadBoard, paint as paintSquare, readBoardCode, setCard } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
@@ -43,7 +43,6 @@ type Mode = 'normal' | 'create';
 const MODES: { value: Mode; label: string }[] = [{ value: 'normal', label: 'Normal' }, { value: 'create', label: 'Freeplay' }];
 /** Freeplay mode paints with keys 1-5 held over the board: wood, iron, rope, cloth, gold. */
 const PAINT_KEYS = MATERIAL_NAMES.map((name, material) => ({ id: `paint${material + 1}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: String(material + 1), material }));
-const PATTERN_OPTIONS = PATTERNS.map((p) => ({ value: p.id, label: `${p.id[0].toUpperCase()}${p.id.slice(1)} (${p.tier + 3} pieces, ${p.points} points)` }));
 const codec: ReplaySettingsCodec = {
   currentVersion: 1, simulatorVersion: 2,
   migrate(version, value) {
@@ -69,6 +68,8 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
   let replays!: ReplayRecorder;
   const sounds = new SoundBank(soundUrls, () => !!replays && (replays.isSeeking || replays.isAdvancing));
   let difficulty = Math.max(0, Math.min(8, Math.trunc(store.get('difficulty', 8))));
+  /** Freeplay: the piece the panel's picker changes. */
+  let pieceSlot = 0;
   let mode: Mode = store.get<Mode>('mode', 'normal') === 'create' ? 'create' : 'normal';
   let savedSettings: { difficulty: number; mode: Mode } | null = null;
   /** Freeplay mode: the palette material a left click places (recorded, so replays click the same way), the key held, and pasted-text errors. */
@@ -82,6 +83,7 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
   let lastPointer: Point = [-1, -1];
   let moves: MoveAnim[] = [], placements: PlacementAnim[] = [], falling: Falling[] = [], messages: Message[] = [];
   let finishAt = Infinity, saved = false, outcome = '';
+  const hold = new EndHold(ticks);
   let flagFrom = 249, flagTarget = 249, flagAt = 0, flagMs = 0;
   const historyKey = () => `difficulty:${difficulty}`;
   const creating = () => running() && !!session?.create;
@@ -101,7 +103,7 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
     selected = null; held = -1; dragging = dragged = false;
     paletteMaterial = null; paintWith = null; pasteNote = '';
     moves = []; placements = []; falling = []; messages = [];
-    finishAt = Infinity; saved = false; outcome = '';
+    finishAt = Infinity; saved = false; outcome = ''; hold.clear();
     flagFrom = flagTarget = 249; flagAt = ticks(); flagMs = 0;
     replays?.begin({ difficulty, mode }, seed);
   }
@@ -252,7 +254,8 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
         sounds.play(event.failed ? 'booched' : 'finished_puzzle');
       }
     }
-    if (session.finished && now >= finishAt) saveResult(session.failed ? 'Washed out' : 'Finished');
+    // The tide or overtime ran out: the cards have retreated, and the board stays in view a moment before the results.
+    if (session.finished && now >= finishAt && !saved) { saveResult(session.failed ? 'Washed out' : 'Finished'); hold.start(); }
     moves = moves.filter(s => now < s.start + s.ms);
     placements = placements.filter(p => now < p.start + FLASH_MS + GROW_MS + 600);
     falling = falling.filter(p => now < p.start + p.ms);
@@ -322,6 +325,12 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
       const sample = Math.floor(now / 100) + i * 37;
       const shake: Cell = jitter ? [(sample * 13 + i) % 3 - 1, (sample * 7 + i * 2) % 3 - 1] : [0, 0];
       card(b.available[i], i, scale, 0, scale === 1, shake);
+    }
+    if (creating() && held < 0 && pieceSlot < b.numAvailable) {
+      // Freeplay outlines the piece the panel's picker changes.
+      ctx.save(); ctx.strokeStyle = '#f5e663'; ctx.lineWidth = 2;
+      ctx.strokeRect(PX + (pieceSlot % 3) * CARD + 3, PY + Math.floor(pieceSlot / 3) * CARD + 3, CARD - 6, CARD - 6);
+      ctx.restore();
     }
     for (const p of falling) card(p.pattern, p.slot, 1, (now - p.start) / p.ms * (600 - (PY + Math.floor(p.slot / 3) * CARD)), false);
     screen.blit(images.get('flag'), 0, flagY(now), { area: [(Math.floor(now / 100) % 10) * 70, 0, 70, 58] });
@@ -457,15 +466,80 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
   });
   boardGroup.append(palette, { hidden: createOnly });
   boardGroup.button('Fill board', () => record(`fill:${paletteMaterial ?? 0}`), { hidden: createOnly, disabled: editing, title: 'Make every square the selected material' });
-  for (let slot = 0; slot < SLOTS; slot++) {
-    boardGroup.select(`Card ${slot + 1}`, PATTERN_OPTIONS, () => board().available[slot]?.id ?? PATTERN_OPTIONS[0].value, (id) => record(`card:${slot},${id}`), {
-      hidden: () => createOnly() || slot >= board().numAvailable, disabled: editing,
-    });
+  /** A pattern's pieces, centred in a square just big enough for them, for the card picker. */
+  function patternIcon(pattern: Pattern | undefined): HTMLCanvasElement {
+    const icon = document.createElement('canvas');
+    icon.setAttribute('aria-hidden', 'true');
+    const xs = pattern?.cells.map(([, x]) => x) ?? [0], ys = pattern?.cells.map(([, , y]) => y) ?? [0];
+    const w = Math.max(...xs) - Math.min(...xs) + 1, h = Math.max(...ys) - Math.min(...ys) + 1, side = Math.max(w, h, 3);
+    icon.width = icon.height = side * 24;
+    const left = (side - w) * 12 - Math.min(...xs) * 24, top = (side - h) * 12 - Math.min(...ys) * 24;
+    const g = icon.getContext('2d')!;
+    for (const [t, x, y] of pattern?.cells ?? []) g.drawImage(images.get('pieces_small'), TILE[t] * 24, 0, 24, 24, left + x * 24, top + y * 24, 24, 24);
+    return icon;
   }
-  boardGroup.note(() => pasteNote || 'Hold 1–5 for wood, iron, rope, cloth or gold to paint, or select a material above and left-click to place it. Select it again to deselect and swap. Scroll to cycle the material under the pointer. Each card can be any pattern not already on another card. Freeplay has no tide or goal and keeps no history.', { hidden: createOnly });
+  const patternName = (p: Pattern) => p.id[0].toUpperCase() + p.id.slice(1);
+  /** Freeplay's piece picker: the six pieces laid out as on the board, then every piece the selected one can become. */
+  const pieceButton = (content: Node[], onClick: () => void) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'panel-button';
+    button.append(...content);
+    button.addEventListener('click', () => { onClick(); panel.used(); });
+    return button;
+  };
+  const slotRow = document.createElement('div');
+  slotRow.className = 'piece-slots';
+  for (let slot = 0; slot < SLOTS; slot++) {
+    const button = pieceButton([], () => { pieceSlot = slot; });
+    let shown: Pattern | undefined | null = null;
+    panel.addSync(() => {
+      const pattern = board().available[slot];
+      if (pattern !== shown) {
+        shown = pattern;
+        button.replaceChildren(patternIcon(pattern), document.createTextNode(pattern ? patternName(pattern) : ''));
+      }
+      button.hidden = slot >= board().numAvailable;
+      button.title = `Change piece ${slot + 1}`;
+      button.setAttribute('aria-pressed', String(pieceSlot === slot));
+    });
+    slotRow.append(button);
+  }
+  boardGroup.note(() => 'Pieces: pick one here or on the board to change it.', { hidden: createOnly });
+  boardGroup.append(slotRow, { hidden: createOnly });
+  boardGroup.note(() => {
+    const pattern = board().available[pieceSlot];
+    const tiles = STYLES[difficulty].intro ? '' : ` with another ${slotTier(difficulty, pieceSlot) + 3}-tile piece`;
+    return pattern ? `Replace ${patternName(pattern)}${tiles}:` : '';
+  }, { hidden: createOnly });
+  const patternGrid = document.createElement('div');
+  patternGrid.className = 'piece-choices';
+  let gridKey = '';
+  let gridButtons: { pattern: Pattern; button: HTMLButtonElement }[] = [];
+  panel.addSync(() => {
+    const b = board();
+    // Picking a piece up on the board selects it here too.
+    if (held >= 0 && held < b.numAvailable) pieceSlot = held;
+    if (pieceSlot >= b.numAvailable) pieceSlot = 0;
+    const key = `${difficulty}:${pieceSlot}`;
+    if (key !== gridKey) {
+      gridKey = key;
+      gridButtons = cardChoices(difficulty, pieceSlot).map((pattern) => ({
+        pattern, button: pieceButton([patternIcon(pattern), document.createTextNode(patternName(pattern))], () => record(`card:${pieceSlot},${pattern.id}`)),
+      }));
+      patternGrid.replaceChildren(...gridButtons.map(({ button }) => button));
+    }
+    for (const { pattern, button } of gridButtons) {
+      button.hidden = b.available.some((p, i) => i !== pieceSlot && i < b.numAvailable && p === pattern);
+      button.disabled = editing();
+      button.setAttribute('aria-pressed', String(b.available[pieceSlot] === pattern));
+    }
+  });
+  boardGroup.append(patternGrid, { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = boardIssues(board(), difficulty);
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running() });
   panel.controls('shipwrightery', PAINT_KEYS.map(({ id, label, defaultKey }) => ({ id, label, defaultKey })));
   panel.settings.group('Rules').hint(() => 'The tide takes 75 seconds. Each placement resets it; at 20 patterns, finish your combo during 15 seconds of overtime. Tutorial: three patterns, no tide and two seconds of overtime. Gold is fixed and matches any material.');
@@ -474,7 +548,7 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
     { label: 'Points', value: g => String(g.score) }, { label: '/ pattern', value: g => format(Number(g.average)) },
     { label: 'Combo', value: g => String(g.combo) }, { label: 'Result', value: g => String(g.result) },
   ], 'Past games', undefined, false);
-  panel.results(() => !saved ? null : { title: outcome, rows: [
+  panel.results(() => !saved || hold.holding ? null : { title: outcome, rows: [
     ['Points', String(session?.score ?? 0)], ['Points / pattern', format(average())],
     ['Patterns placed', String(board().completed)], ['Best combo', String(session?.bestCombo ?? 0)], ['Swaps', String(session?.swaps ?? 0)],
   ] });

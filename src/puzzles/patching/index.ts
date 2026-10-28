@@ -262,10 +262,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.append(palette, { hidden: createOnly });
   boardGroup.button('Fill board', () => record(`fill:${paletteType !== null && FILLABLE.includes(paletteType) ? paletteType : FILLABLE[0]}`),
     { hidden: createOnly, disabled: editing, title: 'Make every square but the spool and tie-offs the selected piece' });
-  boardGroup.note(() => pasteNote || 'Hold 1–8 over a square to paint it, or select a piece above and left-click to place it. Select it again to deselect and swap. The wheel or Q/E also turns the spool and tie-offs. Painting the spool moves it. Freeplay has no wind and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = boardIssues(board);
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
   panel.controlSettings.group('Controls').hint(() => 'Drag to swap. Wheel or Q/E to rotate. WASD or arrows to move; Space to select/swap. Enter or click the spool for a safe gust. Escape pauses.');
   const gameSettings = panel.settings.group('Game');
@@ -273,7 +273,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   gameSettings.select('Wind', [{ value: 'level', label: 'By difficulty (YPPedia mapping)' }, { value: 'custom', label: 'Custom interval' }, { value: 'off', label: 'No wind' }],
     () => settings.wind === null ? 'level' : settings.wind === 0 ? 'off' : 'custom', value => { settings.wind = value === 'level' ? null : value === 'off' ? 0 : 60; save(); }, { disabled: busy });
   gameSettings.number('Custom seconds', () => settings.wind || 60, value => { settings.wind = Math.max(1, Math.min(300, Math.round(value))); save(); }, { min: 1, max: 300, step: 1, disabled: () => busy() || settings.wind === null || settings.wind === 0 });
-  gameSettings.select('Maneuvers', [{ value: 0, label: 'None' }, { value: 1, label: 'Four maneuver types' }, { value: 2, label: 'Include blade maneuver' }], () => settings.bonusMode, value => { settings.bonusMode = value; save(); }, { disabled: busy });
+  gameSettings.select('Maneuvers', [{ value: 0, label: 'None' }, { value: 1, label: '4 Tokens' }, { value: 2, label: '5 Tokens' }], () => settings.bonusMode, value => { settings.bonusMode = value; save(); }, { disabled: busy });
   gameSettings.hint(() => 'Difficulty stays fixed during practice. Each completed or torn board is followed by a new one.');
   panel.settings.group('Accuracy notes').hint(() => 'Board generation, connections, grommets and raw points follow the game rules. Wind intervals use YPPedia aligned highest to highest, with 75 s for the remaining lower levels. Live rating thresholds and supplied board seeds are unavailable. See docs/PATCHING.md for assumptions and open questions.');
   panel.controls('patching', [...keyBindings, ...PAINT_KEYS.map(({ id, label, defaultKey }) => ({ id, label, defaultKey }))]);

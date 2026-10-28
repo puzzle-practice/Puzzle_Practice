@@ -222,6 +222,14 @@ a {
 .piece-palette { display: flex; flex-wrap: wrap; gap: 6px; }
 .piece-palette button { flex: 1; min-width: 70px; }
 .piece-palette canvas { width: 28px; height: 28px; display: block; margin: auto; }
+/* Shipwrightery Freeplay's piece picker: the six pieces as laid out on the board, then the pieces one can become. */
+.piece-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.piece-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 4px; }
+.piece-slots button, .piece-choices button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; font-size: 12px; min-width: 0; }
+.piece-slots canvas { width: 44px; height: 44px; }
+.piece-choices canvas { width: 32px; height: 32px; }
+.piece-slots button[aria-pressed="true"], .piece-choices button[aria-pressed="true"] { outline: 2px solid var(--accent); background: var(--surface-2); }
+.piece-slots button[hidden], .piece-choices button[hidden] { display: none; }
 .piece-palette button[aria-pressed="true"] { outline: 2px solid var(--accent); background: var(--surface-2); }
 
 .panel-tabs {

@@ -6,6 +6,7 @@ import { SessionPause } from '../../core/pause';
 import { ReplayRecorder, stateText, type ReplaySettingsCodec } from '../../core/replay';
 import { historyGroup } from '../../core/history';
 import { dutyDesk } from '../../core/duty/desk';
+import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
 import { keyMatches } from '../../core/controls';
 import { copyText, pasteText } from '../../core/clipboard';
@@ -13,12 +14,12 @@ import type { InputEvent, Point } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
 import { BONUS_NAMES, BONUS_SETS, HEIGHT, LEVEL_POINTS, WIDTH } from './board';
 import {
-  BilgingGame, DEFAULT_SETTINGS, PAINTABLE, WATER_LEVELS, boardCode, boardIssues, indicatorStep, readBoardCode, readSettings, settingsKey, withToken,
+  BilgingGame, DEFAULT_SETTINGS, PAINTABLE, WATER_LEVELS, boardCode, boardIssues, indicatorStep, readBoardCode, readSettings, repaint, retoken, settingsKey,
   type BilgingSettings, type Mode, type Scene,
 } from './game';
 import { drawBoard, drawPiece, drawToken, CELL, LEFT, TOP } from './render';
 
-const TOKENS=[{value:0,label:'Off'},{value:1,label:'Normal shapes'},{value:2,label:'Normal shapes + blades'}];
+const TOKENS=[{value:0,label:'Off'},{value:1,label:'4 Tokens'},{value:2,label:'5 Tokens'}];
 const DIFFICULTIES=Array.from({length:10},(_,value)=>({value,label:`${value} · ${value+1} ${value?'stars':'star'}`}));
 const WATER=WATER_LEVELS.map(value=>({value,label:`${value} rows`}));
 const TIMER=[{value:0,label:'No timer'},{value:120000,label:'2 minutes'},{value:300000,label:'5 minutes'},{value:600000,label:'10 minutes'}];
@@ -26,8 +27,8 @@ const MODES:{value:Mode,label:string}[]=[{value:'normal',label:'Normal'},{value:
 const PIECE_NAMES=['Colour 1','Colour 2','Colour 3','Colour 4','Colour 5','Colour 6','Colour 7','Puffer','Crab','Jellyfish'];
 /** Freeplay mode paints with keys 1–7 (the colours), 8 (puffer), 9 (crab) and 0 (jellyfish) held over the board. */
 const PAINT_KEYS=['1','2','3','4','5','6','7','8','9','0'].map((key,i)=>({id:`paint${i+1}`,label:`Paint ${PIECE_NAMES[i].toLowerCase()} (Freeplay)`,defaultKey:key,piece:PAINTABLE[i]}));
-/** Token halves Freeplay can add to a colour: each shape's lower and upper half. */
-const TOKEN_HALVES=[{value:0,label:'None'},...BONUS_SETS[2].flatMap(shape=>[0,1].map(upper=>({value:shape*2+upper,label:`${BONUS_NAMES[shape]}, ${upper?'upper':'lower'} half`})))];
+/** Token halves Freeplay paints onto colours: none, then each shape's lower and upper half. */
+const TOKEN_HALVES=[{value:0,label:'No token'},...BONUS_SETS[2].flatMap(shape=>[0,1].map(upper=>({value:shape*2+upper,label:`${BONUS_NAMES[shape]} ${upper?'top':'bottom'}`})))];
 const KEYS=[{id:'left',label:'Cursor left',defaultKey:'arrowleft'},{id:'right',label:'Cursor right',defaultKey:'arrowright'},
   {id:'up',label:'Cursor up',defaultKey:'arrowup'},{id:'down',label:'Cursor down',defaultKey:'arrowdown'},
   {id:'swap',label:'Swap pieces',defaultKey:'space'},{id:'pause',label:'Pause',defaultKey:'escape'},
@@ -54,28 +55,30 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const sounds=new SoundBank(import.meta.glob<string>('./sounds/*.mp3',{eager:true,query:'?url',import:'default'}),()=>replays?.isSeeking??false);
   let settings=readSettings(store.get('settings',DEFAULT_SETTINGS))??{...DEFAULT_SETTINGS};
   let liveSettings={...settings}, savedSettings:BilgingSettings|null=null;
-  let game=new BilgingGame(settings,42), running=false, finished=false;
+  let game=new BilgingGame(settings,42), running=false, finished=false, timeUp=false;
   let startAt=0,endAt=0,lastAt=0,soundTurn=0;
   let commands:string[]=[], held=new Set<string>(), repeats=new Map<string,number>();
   let altArt=store.get('altArt',false), lastMouse:Point=[-1,-1];
   let lastScene:Scene|null=null, callout:{label:string,points?:number,at:number}|null=null;
-  /** Freeplay mode: the palette piece a left click places, the piece a held key paints, and the token half added to colours. */
-  let palettePiece:number|null=null, paintWith:number|null=null, paintToken=0, painting=false, pasteNote='';
+  /** Freeplay mode: the palette piece or token half a left click paints, and the piece a held key paints. */
+  let palettePiece:number|null=null, paletteToken:number|null=null, paintWith:number|null=null, painting=false, pasteNote='';
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'bilging','Bilging',[]);
   const busy=()=>running||(replays?.isPlaying??false);
-  const elapsed=()=>Math.max(0,(running?ticks():endAt)-startAt);
+  const elapsed=()=>Math.min(timerMs()||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
+  const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
   const history=()=>store.history(settingsKey(settings));
-  const queue=(action:string)=>{if(running&&!pause.paused&&!replays.isPlaying)commands.push(action);};
+  const queue=(action:string)=>{if(running&&!timeUp&&!pause.paused&&!replays.isPlaying)commands.push(action);};
   const resetInput=()=>{held.clear();repeats.clear();};
   const key=(name:string,id:string,fallback:string)=>keyMatches(name,'bilging',id,fallback);
   const play=(name:string)=>{const files=SOUNDS[name]??[name];sounds.play(files[soundTurn++%files.length]);};
   const creating=()=>running&&liveSettings.mode==='create';
   const timerMs=()=>liveSettings.mode==='create'?0:liveSettings.timerMs;
-  const withHalf=(piece:number)=>withToken(piece,paintToken>>1,paintToken&1);
-  /** Paints the space under the pointer, recording only real changes. */
-  const paintAt=(pos:Point,piece:number)=>{if(!onBoard(pos))return;const c=paintCell(pos);if(game.board.get(c.x,c.y)!==piece)queue(`paint:${c.x},${c.y},${piece}`);};
+  /** Paints the space under the pointer, recording only real changes. Pieces keep their token; tokens keep their piece. */
+  const paintAt=(pos:Point,next:(old:number)=>number)=>{if(!onBoard(pos))return;const c=paintCell(pos),old=game.board.get(c.x,c.y),piece=next(old);if(old!==piece)queue(`paint:${c.x},${c.y},${piece}`);};
+  const pieceBrush=(piece:number)=>(old:number)=>repaint(old,piece);
+  const paletteBrush=()=>palettePiece!==null?pieceBrush(palettePiece):paletteToken!==null?(old:number)=>retoken(old,paletteToken!):null;
   /** Freeplay records every move as a command, so painting and swapping replay in order; Normal replays its input. */
   const live=(id:string)=>{if(liveSettings.mode==='create')queue(id);else action(id);};
 
@@ -83,14 +86,15 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
 
   function start(seed=seedMode.next()):void { seedMode.remember(seed);
     pause.resume(); liveSettings={...settings}; game=new BilgingGame(liveSettings,seed);
-    running=true;finished=false;startAt=endAt=lastAt=ticks(); duty.clear(); resetInput();commands=[];
+    running=true;finished=false;timeUp=false;hold.clear();startAt=endAt=lastAt=ticks(); duty.clear(); resetInput();commands=[];
     lastScene=null;callout=null;paintWith=null;painting=false;pasteNote='';
     replays.begin(liveSettings,seed); play('fanfare');
   }
   function end(reason:string):void {
     if(!running)return;
     game.settle();
-    running=false;finished=true;endAt=ticks();resetInput();commands=[];
+    running=false;finished=true;timeUp=false;endAt=ticks();resetInput();commands=[];
+    if(reason==='Time up')hold.start();
     const report=duty.end({mode:liveSettings.mode==='create'?'Freeplay':liveSettings.tokens?'Token practice':'Normal',performance:LEARNING,
       score:{label:'Points / swap',value:game.efficiency.toFixed(2)}});
     const tape=replays.finish(`${reason} · ${game.efficiency.toFixed(2)} points/swap`,report);
@@ -101,7 +105,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       ...(tape?{replayAt:tape.at,replayId:tape.runId??''}:{})});
   }
   function action(id:string):void {
-    if(!running||pause.paused)return;
+    if(!running||timeUp||pause.paused)return;
     const move=MOVES[id];
     if(move)game.moveCursor(...move);
     if(id==='swap'){const result=game.swap();if(result==='crab')play('crab_angry');}
@@ -110,6 +114,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     if(id.startsWith('fill:'))game.fill(Number(id.slice(5)));
     if(id.startsWith('load:'))game.load(id.slice(5));
     if(id==='generate')game.generate();
+    if(id.startsWith('water:'))game.setWater(Number(id.slice(6)));
   }
   /** Outlined text from its top: the game font at 24px and up, bold Dialog below. */
   function text(value:string,x:number,y:number,size=14,fill='#fff6d4',center=false,alpha?:number):void {
@@ -117,7 +122,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   }
   function draw(now:number):void {
     screen.blit(images.get('background'),0,0);
-    drawBoard(ctx,images,game,running&&!pause.paused,altArt);
+    drawBoard(ctx,images,game,running&&!timeUp&&!pause.paused,altArt);
     const performance=indicatorStep(game.performance.value,liveSettings.indicatorMax);
     const level=Math.round(performance/20*6);
     const frame=performance?Math.floor(now/(1000/(20*performance/20)))%7:0;
@@ -167,7 +172,9 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       if(!(liveSettings.mode==='create'&&replays.isPlaying))handleInput(routed.events,routed.mouse,now);
       const scene=game.scenes[0]??null;
       if(scene!==lastScene){if(scene)sceneStarted(scene,now);lastScene=scene;}
-      if(timerMs()&&elapsed()>=timerMs())end('Time up');
+      // Time's up: no more moves, and the session ends once the board has settled.
+      if(timerMs()&&elapsed()>=timerMs())timeUp=true;
+      if(timeUp&&!game.busy)end('Time up');
     }
     if(!replays.isSeeking&&!replays.isAdvancing)draw(now);
   }
@@ -175,19 +182,20 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   function handleInput(events:InputEvent[],mouse:Point,now:number):void {
     const moved=mouse[0]!==lastMouse[0]||mouse[1]!==lastMouse[1];
     if(creating()&&moved){
-      if(paintWith!==null)paintAt(mouse,withHalf(paintWith));
-      else if(painting&&palettePiece!==null)paintAt(mouse,withHalf(palettePiece));
+      const brush=paletteBrush();
+      if(paintWith!==null)paintAt(mouse,pieceBrush(paintWith));
+      else if(painting&&brush)paintAt(mouse,brush);
     }
     if(moved&&onBoard(mouse)){const c=boardCell(mouse);if(c.x!==game.cursor.x||c.y!==game.cursor.y)live(`at:${c.x},${c.y}`);}
     lastMouse=[mouse[0],mouse[1]];
     for(const event of events){
-      if(creating()&&event.type==='mousedown'&&event.button===1&&palettePiece!==null){paintAt(event.pos,withHalf(palettePiece));painting=true;continue;}
+      if(creating()&&event.type==='mousedown'&&event.button===1&&paletteBrush()){paintAt(event.pos,paletteBrush()!);painting=true;continue;}
       if(creating()&&event.type==='mouseup'&&event.button===1&&painting){painting=false;continue;}
       if(creating()&&event.type==='mousedown'&&(event.button===4||event.button===5)){
         // The wheel cycles the piece under the pointer.
         if(onBoard(event.pos)){
-          const c=paintCell(event.pos),i=PAINTABLE.indexOf(game.board.get(c.x,c.y)&15),step=event.button===4?1:-1;
-          queue(`paint:${c.x},${c.y},${PAINTABLE[(i+step+PAINTABLE.length)%PAINTABLE.length]}`);
+          const c=paintCell(event.pos),old=game.board.get(c.x,c.y),i=PAINTABLE.indexOf(old&15),step=event.button===4?1:-1;
+          queue(`paint:${c.x},${c.y},${repaint(old,PAINTABLE[(i+step+PAINTABLE.length)%PAINTABLE.length])}`);
         }
         continue;
       }
@@ -198,7 +206,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       const paint=PAINT_KEYS.find(p=>key(event.key,p.id,p.defaultKey));
       if(paint){
         if(!creating())continue;
-        if(event.type==='keydown'){paintWith=paint.piece;paintAt(mouse,withHalf(paint.piece));}
+        if(event.type==='keydown'){paintWith=paint.piece;paintAt(mouse,pieceBrush(paint.piece));}
         else if(paintWith===paint.piece)paintWith=null;
         continue;
       }
@@ -245,7 +253,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     const iconCtx=icon.getContext('2d')!;
     let iconArt:boolean|null=null;
     button.append(icon,document.createTextNode(`${(i+1)%10} · ${PIECE_NAMES[i]}`));
-    button.addEventListener('click',()=>{palettePiece=palettePiece===piece?null:piece;panel.used();});
+    button.addEventListener('click',()=>{palettePiece=palettePiece===piece?null:piece;paletteToken=null;panel.used();});
     panel.addSync(()=>{
       button.disabled=!creating();button.setAttribute('aria-pressed',String(palettePiece===piece));
       if(iconArt!==altArt){iconArt=altArt;iconCtx.clearRect(0,0,CELL,CELL);drawPiece(iconCtx,images,piece,0,0,1,altArt);}
@@ -253,10 +261,31 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     palette.append(button);
   });
   boardGroup.append(palette,{hidden:createOnly});
-  boardGroup.select('Token on colours',TOKEN_HALVES,()=>paintToken,value=>{paintToken=value;},{hidden:createOnly});
-  boardGroup.button('Fill board',()=>queue(`fill:${withHalf(palettePiece??0)}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
-  boardGroup.note(()=>pasteNote||'Hold 1–7 for a colour, 8 for a puffer, 9 for a crab or 0 for a jellyfish to paint, or select a piece above and left-click to place it. Select it again to deselect and swap. Scroll to cycle the piece under the pointer. Freeplay never levels up or ends by itself, and keeps no history.',{hidden:createOnly});
-  boardGroup.note(()=>{const issues=boardIssues(game.board,liveSettings);return issues.length?`Not a board the game could deal: ${issues.join(' ')}`:'This board could come up in the game at these settings.';},{hidden:()=>createOnly()||!running});
+  // Freeplay can flood or drain the hold while playing; the change is recorded so replays match.
+  boardGroup.select('Water level',WATER,()=>running?liveSettings.water:settings.water,value=>{
+    settings.water=value;save();
+    if(creating())queue(`water:${value}`);else preview();
+  },{hidden:createOnly,disabled:()=>!!replays?.isPlaying||running&&pause.paused});
+  // Tokens are their own palette, painted onto colours without changing them.
+  const tokenPalette=document.createElement('div');
+  tokenPalette.className='piece-palette';
+  TOKEN_HALVES.forEach(({value,label})=>{
+    const button=document.createElement('button');
+    button.type='button';button.className='panel-button';
+    const icon=document.createElement('canvas');
+    icon.width=icon.height=CELL;icon.setAttribute('aria-hidden','true');
+    const iconCtx=icon.getContext('2d')!;
+    // A half's value is also its frame on the token sheet, as drawPiece reads it.
+    if(value)iconCtx.drawImage(images.get('bonus'),value*CELL,0,CELL,CELL,0,0,CELL,CELL);
+    button.append(icon,document.createTextNode(label));
+    button.addEventListener('click',()=>{paletteToken=paletteToken===value?null:value;palettePiece=null;panel.used();});
+    panel.addSync(()=>{button.disabled=!creating();button.setAttribute('aria-pressed',String(paletteToken===value));});
+    tokenPalette.append(button);
+  });
+  boardGroup.append(tokenPalette,{hidden:createOnly});
+  boardGroup.button('Fill board',()=>queue(`fill:${palettePiece??0}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
+  boardGroup.note(()=>pasteNote,{hidden:createOnly});
+  boardGroup.note(()=>{const issues=boardIssues(game.board,liveSettings);return issues.length?`Not a board the game could deal: ${issues.join(' ')}`:'';},{hidden:()=>createOnly()||!running});
   const options=panel.settings.group('Game');
   options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();},{disabled:busy});
   options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();},{disabled:busy});
@@ -272,7 +301,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     available:g=>typeof g.replayAt==='number'&&(replays?.hasPlayableAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined)??false),
     play:g=>{if(typeof g.replayAt==='number')void replays.playAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined);},
   });
-  panel.results(()=>finished&&!running?{title:'Bilging results',report:duty.last,rows:[
+  panel.results(()=>finished&&!running&&!hold.holding?{title:'Bilging results',report:duty.last,rows:[
     ['Points / swap',game.efficiency.toFixed(2)],['Points',String(game.points)],['Swaps',String(game.moves)],
     ['Levels',String(game.levels)],['Crabs',String(game.crabs)],['Longest chain',String(game.longestChain)],['Tokens',String(game.tokens)],
   ]}:null);
@@ -280,7 +309,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   replays=new ReplayRecorder('bilging',store,panel,ticks,tape=>{
     savedSettings??={...settings};settings=readSettings(tape.settings)!;start(tape.seed as number);
   },()=>{
-    running=false;finished=false;resetInput();commands=[];duty.clear();
+    running=false;finished=false;timeUp=false;resetInput();commands=[];duty.clear();
     if(savedSettings){settings=savedSettings;savedSettings=null;}preview();
   },validSeed,setReplayTime,()=>frame([]),codec,()=>!running||replays.isPlaying);
   replays.setStopLive(()=>{if(running)end('Stopped');});

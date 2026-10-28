@@ -38,6 +38,7 @@ import {
 import { colourAboveChest } from './colour-training';
 import { PAINTABLE, boardCode, boardIssues, fill as fillBoard, paint as paintSquare, paintOf, readBoardCode } from './create';
 import { createDrill, createRubyBoard, rubySpawnScore, type ClearPack } from './training';
+import { EndHold } from '../../core/end-hold';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
@@ -348,6 +349,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let roundEnd = 0;
   /** When the game ended, so its clock stops there. */
   let stoppedAt = 0;
+  const hold = new EndHold(ticks);
   /** Spawn mode: a chest has come in, so the board is dealt again once it has finished moving. */
   let redeal = false;
   /** Spawn mode: the chest that came in, floating up until the board settles. */
@@ -594,6 +596,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     handsUp = true;
     running = true;
     finished = false;
+    hold.clear();
     active = false;
     cursor = [4, 6];
     lastMouse = [-1, -1];
@@ -1212,7 +1215,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         // Time's up: no more swaps, and the round ends once the board settles.
         if (running && roundEnd && now >= roundEnd) {
           active = false;
-          if (stable && actionCount() === 0) stop();
+          if (stable && actionCount() === 0) { stop(); hold.start(); }
         }
       }
       handsPose(now);
@@ -1344,10 +1347,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.append(palette, { hidden: createOnly });
   boardGroup.button('Fill board', () => queue(`fill:${palettePaint !== null && !'LMH'.includes(palettePaint) ? palettePaint : '0'}`),
     { hidden: createOnly, disabled: editing, title: 'Make every square the selected coin or gem' });
-  boardGroup.note(() => pasteNote || 'Hold 1–4 for a coin, 5 for a ruby, 6 for an emerald or 7–9 for a low, medium or high chest to paint, or select a piece above and left-click to place it. A chest goes in with its top-left square under the pointer. Select it again to deselect and swap. Scroll to cycle the coin or gem under the pointer. Freeplay sends no chests of its own, has no timer and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = board ? boardIssues(board) : [];
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
 
   const best = () => bests[bestKey()];
@@ -1362,7 +1365,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const duty = dutyDesk(panel, store, 'treasure-haul', 'Treasure Haul', RATING_SCALES, {
     shown: (id) => id === 'vampirateChests' ? (mode === '2' || mode === 'chests2') : mode === '0',
   });
-  panel.results(() => finished ? {
+  panel.results(() => finished && !hold.holding ? {
     title: 'Treasure Haul results',
     report: duty.last,
     averages: duty.averages(timed() ? store.sessionHistory(bestKey()) : null,

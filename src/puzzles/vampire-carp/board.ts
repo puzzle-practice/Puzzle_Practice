@@ -34,7 +34,7 @@ export const VAMPIRE_HOLE_SIZE = 5;
 /** The token pools by bonus mode (duty/data/b): off, the four normal shapes, and those with the blade. */
 export const BONUS_SETS: readonly (readonly number[])[] = [[], [1, 2, 3, 4], [1, 2, 3, 4, 7]];
 /** Token names by type (duty/data/b), 1 circle to 7 blade. */
-export const TOKEN_NAMES = ['', 'Circle', 'Diamond', 'Plus', 'Cross', 'Ring', 'Star', 'Blade'];
+export const TOKEN_NAMES = ['', 'Circle', 'Diamond', 'Plus', 'Cross', 'Ring', 'Star', 'Flower'];
 /** A hole fits in a 10x10 box (Hole.MAX_WIDTH, MAX_HEIGHT). */
 export const MAX_HOLE = 10;
 /** Moves elsewhere before a neglected hole loses a piece or grows (Hole.MAX_HOLE_NEGLECT). */
@@ -484,6 +484,23 @@ export class Hole {
     } else if (this.checkPiece(piece, at[0], at[1]) === 0) {
       return 0;
     }
+    this.piecesUsed++;
+    if (!piece.grainKept) this.badGrains++;
+    this.tools.push({ piece, at: [at[0], at[1]] });
+    return this.cover(piece, at);
+  }
+
+  /**
+   * Freeplay mode: puts a plank back where it was, with no check that it could go there. Putty
+   * pours again from where it was poured. Returns the cells it covered; a plank covering none is
+   * left out.
+   */
+  restorePiece(piece: Piece, at: Cell): number {
+    if (piece.isPutty) {
+      const list = this.puttyList(at[0], at[1]);
+      if (list.length === 0 || list.length > 5) return 0;
+      piece.puttyCells = list.map(([x, y]) => [x - at[0], y - at[1]]);
+    } else if (!piece.cells().some(([x, y]) => this.isEmpty(x + at[0], y + at[1]))) return 0;
     this.piecesUsed++;
     if (!piece.grainKept) this.badGrains++;
     this.tools.push({ piece, at: [at[0], at[1]] });

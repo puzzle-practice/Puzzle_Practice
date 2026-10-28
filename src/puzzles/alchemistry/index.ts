@@ -13,7 +13,7 @@ import { BoardRandom } from '../forage/board';
 import { AlchemyBoard, Bottle, colorOf, hasInlet, valid, withColor, MAX_LAYERS, MIN_LAYERS, OVERLAP, GOALS, type Cell, type Drop, type FillGroup } from './logic';
 import { Art, position, cellAt, bottleX, slotPosition, ROTATE_MS, DRAIN_STEP_MS, SQUIRT_MS, FADE_MS,
   BELT_MS, BOTTLE_FLIGHT_MS, TEXT_MS, type Drain } from './presentation';
-import { addLabel, boardCode, boardIssues, BULBS, bulbOrder, cycleBottle, fill as fillBoard, LABEL_COLORS, LABEL_NAMES, load as loadBoard, makePiece,
+import { addLabel, boardCode, boardIssues, cycleBottle, cycleBulb, fill as fillBoard, LABEL_COLORS, LABEL_NAMES, load as loadBoard, makePiece,
   paint as paintSquare, readBoardCode, removeLabel, setBulbs, SHAPE_NAMES, SHAPES, SPECIAL_NAMES } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -33,7 +33,14 @@ const codec: ReplaySettingsCodec = { currentVersion: 1, simulatorVersion: 2, mig
 /** Freeplay mode paints the single tubes with keys 1-9, 0 and - held over the board, and adds bottle labels with their colors' initials. */
 const SHAPE_KEYS = SHAPE_NAMES.slice(0, 11).map((name, shape) => ({ id: `paint${shape + 1}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: '1234567890-'[shape], shape }));
 const LABEL_KEYS = LABEL_COLORS.map(color => ({ id: `label${color}`, label: `Add ${LABEL_NAMES[color].toLowerCase()} label (Freeplay)`, defaultKey: LABEL_NAMES[color][0].toLowerCase(), color }));
+/** The game shows a bottle gleam or, one time in five, a quicksilver pulse once this long after the last turn. */
+const IDLE_MS = 3000;
 const bottleAt = ([px, py]: Point) => py >= 480 && py < 555 ? Array.from({ length: 11 }, (_, x) => x).find(x => px >= bottleX(x) && px < bottleX(x) + 36) ?? -1 : -1;
+/** The bulb under a point along the top, laid out as Art.bulbs draws them 48 wide with 26 between. */
+function bulbAt([px, py]: Point): number {
+  const bulb = Math.floor((px - 16) / 74);
+  return py >= 28 && py < 63 && bulb >= 0 && bulb < 6 && px - 16 - bulb * 74 < 48 ? bulb : -1;
+}
 interface Message { text: string; start: number; x: number; y: number; color: string; size: number; sound?: string; duration: number }
 interface Squirt { x: number; color: number; start: number }
 interface Flight { bottle: Bottle; x: number; slot: number; start: number }
@@ -63,7 +70,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let beltFrom: number[] = [], beltAt = -Infinity;
   let shownFinished: Bottle[] = [];
   let groupAnims: GroupAnimation[] = [], drains: Drain[] = [], squirts: Squirt[] = [], flights: Flight[] = [], breaks: Break[] = [], messages: Message[] = [];
-  let drops: Drop[] = [], dropAt = -Infinity, clearAt = Infinity, refillAt = Infinity, settledAt = Infinity, finishAt = Infinity, gleamAt = -Infinity;
+  let drops: Drop[] = [], dropAt = -Infinity, clearAt = Infinity, refillAt = Infinity, settledAt = Infinity, finishAt = Infinity, gleamAt = -Infinity, idleAt = Infinity, quickAt = -Infinity;
   let allConnected = new Set<number>();
   let fxRandom = new BoardRandom(42), sparks: Spark[] = [];
   const active = () => running;
@@ -79,7 +86,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     viewCells = [...board.cells]; viewColors = [...board.colors]; viewBottles = board.bottles.map(b => b.clone());
     groupAnims = []; drains = []; squirts = []; flights = []; breaks = []; messages = []; drops = [];
     shownFinished = []; allConnected.clear(); beltFrom = []; beltAt = -Infinity;
-    clearAt = refillAt = finishAt = Infinity; settledAt = ticks() + BELT_MS; gleamAt = -Infinity; dropAt = -Infinity;
+    clearAt = refillAt = finishAt = Infinity; settledAt = ticks() + BELT_MS; gleamAt = -Infinity; dropAt = -Infinity; idleAt = Infinity; quickAt = -Infinity;
     startAt = ticks(); endedAt = 0; fills = broken = labels = bestFill = 0; saved = false; outcome = '';
     beltFrom = viewBottles.map((_, x) => -bottleX(11 - x)); beltAt = ticks();
   }
@@ -114,6 +121,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const wasColored = [colorOf(piece), colorOf(piece, 1)];
     if (!board.rotate(x, y, clockwise)) return;
     rotation = { x, y, piece, start: now, clockwise };
+    idleAt = now + IDLE_MS;
     viewCells = [...board.cells];
     sounds.play(clockwise ? 'rotate_cw' : 'rotate_ccw');
     const next = board.get(x, y);
@@ -192,6 +200,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     shownFinished = board.finished.slice(0, oldFinished);
   }
   function update(now: number): void {
+    if (now >= idleAt) {
+      idleAt = Infinity;
+      if (!busy(now)) { if (fxRandom.nextInt(5) === 0) quickAt = now; else gleamAt = now; }
+    }
     if (rotation && now >= rotation.start + ROTATE_MS) rotation = null;
     for (const anim of groupAnims) {
       if (now >= anim.start && !anim.sounded) { anim.sounded = true; sounds.play('fill'); }
@@ -304,7 +316,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ctx.save();
       if (now >= clearAt && allConnected.has(y * 11 + x)) ctx.globalAlpha = Math.max(0, 1 - (now - clearAt) / FADE_MS);
       const quickIndex = quickNodes.findIndex(n => n.x === x && n.y === y);
-      const quickTime = quickIndex < 0 ? -1 : (now % (quickNodes.length * 15 + 250)) - quickIndex * 15;
+      const quickTime = quickIndex < 0 ? -1 : now - quickAt - quickIndex * 15;
       art.piece(piece, px, py, angle, drains.filter(d => d.node.x === x && d.node.y === y), now,
         !groupAnims.length && !drops.length && quickTime >= 0 && quickTime < 250 ? quickTime / 250 : 0);
       ctx.restore();
@@ -401,6 +413,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
             painting = true; paintAt(cellAt(event.pos), paletteShape, now); continue;
           }
           if (event.type === 'mouseup' && event.button === 1 && painting) { painting = false; continue; }
+          if (event.type === 'mouseup' && (event.button === 1 || event.button === 3) && bulbAt(event.pos) >= 0) {
+            if (!busy(now) && cycleBulb(board, bulbAt(event.pos), event.button === 3 ? -1 : 1)) edited();
+            continue;
+          }
           if (event.type === 'mouseup' && (event.button === 1 || event.button === 3) && bottleAt(event.pos) >= 0) {
             const x = bottleAt(event.pos);
             editBottle(x, event.button === 3 ? x => removeLabel(board, x) : paletteLabel !== null ? x => addLabel(board, x, paletteLabel!) : x => cycleBottle(board, x), now);
@@ -481,14 +497,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.append(palette, { hidden: createOnly });
   boardGroup.select('Special', SPECIAL_NAMES.map((label, value) => ({ value, label })), () => paintSpecial, value => record(`special:${value}`),
     { hidden: createOnly, disabled: () => !creating() || replays.isPlaying });
-  boardGroup.select('Bulbs', BULBS.map((order, value) => ({ value, label: order.slice(0, board.difficulty < 2 ? 2 : 3).map(c => LABEL_NAMES[c]).join(', ') })),
-    () => bulbOrder(board), value => record(`bulbs:${value}`), { hidden: createOnly, disabled: editing });
   boardGroup.button('Fill board', () => record('fill-board'), { hidden: createOnly, disabled: editing, title: 'Make every square the selected tube' });
   boardGroup.button('Before last fill', () => record('undo'), { hidden: createOnly, disabled: () => editing() || !setup, title: 'Put the board back as it was before the last fill' });
-  boardGroup.note(() => pasteNote || 'Hold 1–9, 0 or - over a square to paint a tube, or select one above and left-click to place it. Select it again to deselect and rotate. Painted tubes keep the turn of what was there and get the chosen special. Over a bottle, hold R, Y, B, O, P or G (or select a label and click) to add a label on top; right-click takes the top label off, and a left click steps through how many labels are filled, then broken. Freeplay never finishes and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = boardIssues(board);
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
   panel.settings.group('Rules').hint(() => `Difficulty ${difficulty}: ${OVERLAP[difficulty]}% overlapping tubes. Bonus unlocks at 3; multifill at 5; quicksilver at 6. Fill all ${board.goal} slots to finish. Broken bottles stay on the belt.`);
   panel.settings.group('Fidelity notes').hint(() => 'Tube and bottle probabilities, special-piece accumulation and raw scores follow the game. The independent bottle-color shuffle is seeded for replays. Online difficulty assignment and ocean-wide ratings are unavailable. Particle scatter and gleam positions are approximated. See docs/alchemistry.md for remaining questions.');

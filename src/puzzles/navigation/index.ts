@@ -7,6 +7,7 @@ import { TimerWarning } from '../../core/timer-warning';
 import { ReplayRecorder, stateText, type ReplaySettingsCodec } from '../../core/replay';
 import { historyGroup } from '../../core/history';
 import { dutyDesk } from '../../core/duty/desk';
+import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
@@ -21,8 +22,8 @@ const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, quer
 const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
 const CX = 225, CY = 300;
 const MODES = ['normal', 'ww-test', 'ww'] as const;
-const MODE_OPTIONS = [...MODES.map(value => ({ value, label: modeLabel(value) })),
-  ...MODES.map(mode => ({ value: `create-${mode}` as const, label: mode === 'normal' ? 'Freeplay' : `Freeplay (${modeLabel(mode)})` }))];
+const RULE_OPTIONS = MODES.map(value => ({ value, label: modeLabel(value) }));
+const MODE_OPTIONS = [...RULE_OPTIONS, { value: 'create' as const, label: 'Freeplay' }];
 /** Freeplay mode paints with each colour's initial held over a cell, X to clear and A for a wild target. */
 const PAINT_KEYS = [...COLOUR_NAMES.map((name, colour) => ({ id: `paint${name}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: name[0].toLowerCase(), colour })),
   { id: 'paintClear', label: 'Clear (Freeplay)', defaultKey: 'x', colour: CLEAR }, { id: 'paintWild', label: 'Wild target (Freeplay)', defaultKey: 'a', colour: WILD }];
@@ -71,7 +72,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const elapsed = () => Math.max(0, (running ? ticks() : endTime) - startTime);
   const timerElapsed = () => timerElapsedBeforeBoard + elapsed();
   const timeLeft = () => Math.max(0, liveSettings.timerMs - timerElapsed());
-  const dismissKeepsRun = () => isWerewolf(liveSettings.mode) || liveSettings.clears;
+  /** Time's up: no more moves, and the run ends once the board has settled. */
+  const timeUp = () => running && !!liveSettings.timerMs && !timeLeft();
+  const hold = new EndHold(ticks);
+    const dismissKeepsRun = () => isWerewolf(liveSettings.mode) || liveSettings.clears;
   const of = (goal: number) => goal === Infinity ? '' : ` / ${goal}`;
   const keepsTimer = () => isWerewolf(liveSettings.mode) && isWerewolf(settings.mode) && liveSettings.timerMs > 0 && settings.timerMs === liveSettings.timerMs;
   const saveSettings = () => store.set('settings', settings);
@@ -90,7 +94,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     dealAt = 0; pendingStart = null;
     game = new NavigationGame(liveSettings, seed);
     selected = game.board.rings - 1;
-    running = true; finished = false;
+    running = true; finished = false; hold.clear();
     startTime = endTime = sceneStart = ticks();
     timerElapsedBeforeBoard = timerElapsedMs;
     incomingRadius = 220; lastTick = ticks();
@@ -101,7 +105,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
   /** A fresh board in the same run (WW or quota-run Dismiss): what the run has scored stays. */
   function nextBoard(): void {
-    if (!running || !game || game.finished) return;
+    if (!running || !game || game.finished || timeUp()) return;
     banked = totals();
     board++;
     // A quota run's count carries on; a timed WW board has its own quota.
@@ -115,6 +119,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function end(reason: string): void {
     if (!running || !game) return;
     running = false; finished = true; endTime = ticks(); scenes = [];
+    if (reason === 'Time up') hold.start();
     if (reason === 'Booched!') sounds.play('booched');
     const run = totals();
     const report = duty.end({ mode: modeLabel(liveSettings.mode), performance: LEARNING,
@@ -158,11 +163,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     else if (game?.finished) end(game.booched ? 'Booched!' : 'Level complete');
   }
   function rotate(clockwise: boolean): void {
-    if (!running || !game || scenes.length || pause.paused || dealing()) return;
+    if (!running || !game || scenes.length || pause.paused || dealing() || timeUp()) return;
     queue(game.rotate(selected, clockwise));
   }
   function drop(): void {
-    if (running && !scenes.length && !pause.paused && !dealing()) fastDrop = true;
+    if (!running || scenes.length || pause.paused || dealing() || timeUp()) return;
+    // A painted Freeplay board waits with gravity off: the first Drop lets it settle and clear, keeping the incoming star.
+    if (liveSettings.create && game?.unsettled) { queue(game.settle()); return; }
+    fastDrop = true;
   }
   /** The ring and octant under a point on the board, or null. */
   function cellAt([x, y]: [number, number]): { ring: number; octant: number } | null {
@@ -272,7 +280,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     // The incoming star stays put while a dismissed board waits to be dealt.
     let delta = Math.max(0,ticks()-Math.max(lastTick,dealAt));
     lastTick = ticks();
-    if (running && liveSettings.timerMs && !timeLeft()) end('Time up');
+    if (timeUp() && !scenes.length) end('Time up');
     /** Plays out the time since the last step: finished clear animations, then the incoming star's fall. */
     function advance(delta: number): void {
       let now = ticks();
@@ -313,7 +321,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
     lastMouse = [mouse[0], mouse[1]];
     for (const event of routed.events) {
-      if (!running) continue;
+      if (!running || timeUp()) continue;
       if (creating()) {
         const paintKey = event.type === 'keydown' || event.type === 'keyup' ? PAINT_KEYS.find(k => key(event.key, k.id, k.defaultKey)) : undefined;
         if (paintKey) {
@@ -352,9 +360,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   panel.clock(() => game ? { label: liveSettings.timerMs ? 'Time left' : 'Time', ms: liveSettings.timerMs ? timeLeft() : elapsed(), countdown: !!liveSettings.timerMs } : null);
   const session = panel.session();
-  // Freeplay paints a board under any rule set, so each rule set has a Freeplay entry too.
-  session.select('Mode', MODE_OPTIONS, () => settings.create ? `create-${settings.mode}` as const : settings.mode, value => {
-    settings.create = value.startsWith('create-'); settings.mode = MODES.find(mode => value.endsWith(mode)) ?? 'normal'; saveSettings(); selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
+  // Freeplay keeps the last rule set chosen; the Rules setting changes it.
+  session.select('Mode', MODE_OPTIONS, () => settings.create ? 'create' : settings.mode, value => {
+    settings.create = value === 'create'; if (value !== 'create') settings.mode = value; saveSettings(); selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
   }, { disabled: busy, title: 'Freeplay lets you paint the stars, targets and incoming star' });
   session.button('Start', () => {
     if (replays.isPlaying) replays.stop();
@@ -416,12 +424,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.select('Next star', COLOUR_NAMES.map((label, value) => ({ value, label })), () => game?.entry.colour ?? 0, value => pendingCommands.push(`entry:${value},${game?.entry.octant ?? 0}`), { disabled: editing });
   boardGroup.select('Drops at', OCTANT_NAMES.map((label, value) => ({ value, label })), () => game?.entry.octant ?? 0, value => pendingCommands.push(`entry:${game?.entry.colour ?? 0},${value}`), { disabled: editing });
   boardGroup.button('Back to setup', () => pendingCommands.push('reset'), { disabled: () => editing() || !setup, title: 'Put the board back as it was last painted' });
-  boardGroup.note(() => pasteNote || 'Hold B, O, R, W or Y over a cell to paint that colour, X to clear, or select one above and left-click. Select it again to deselect and turn rings. Stars settle inward as they would fall. Paint → Targets paints the constellation instead (the three innermost rings), and A makes a target wild. Each star waits at the top until Drop. Freeplay has no timer or quota and keeps no history.');
+  boardGroup.note(() => pasteNote);
   boardGroup.note(() => {
     const issues = game ? boardIssues(game, isWerewolf(liveSettings.mode), isWerewolf(liveSettings.mode) && liveSettings.wildTargets) : [];
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => !creating() });
   const options = panel.settings.group('Game');
+  options.select('Rules', RULE_OPTIONS, () => settings.mode, mode => { settings.mode = mode; saveSettings(); selected = isWerewolf(mode) && settings.extraRing ? 3 : 2; },
+    { disabled: busy, hidden: () => !settings.create, title: 'The rules a Freeplay board is painted and played under' });
   options.select('Difficulty', Array.from({ length: 10 }, (_, value) => ({ value, label: String(value) })), () => settings.difficulty, difficulty => { settings.difficulty = difficulty; saveSettings(); }, { disabled: busy });
   // A quota run is untimed, so it sits with the timers: No timer loops, the quota run ends at the difficulty's quota.
   const timerOptions = LEVEL_TARGETS.map(goal => [{ value: 0, label: 'No timer' }, { value: 'clears' as const, label: `${goal} clears` },
@@ -456,7 +466,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     available: g => typeof g.replayAt === 'number' && (replays?.hasPlayableAt(g.replayAt, typeof g.replayId === 'string' ? g.replayId : undefined) ?? false),
     play: g => { if (typeof g.replayAt === 'number') void replays.playAt(g.replayAt, typeof g.replayId === 'string' ? g.replayId : undefined); },
   });
-  panel.results(() => finished && !running && game && !liveSettings.create ? {
+  panel.results(() => finished && !running && !hold.holding && game && !liveSettings.create ? {
     title: 'Navigation results', report: duty.last,
     averages: duty.averages(store.history(settingsKey(liveSettings)), { scoreLabel: 'Points' }),
     rows: [['Points', String(totals().points)],

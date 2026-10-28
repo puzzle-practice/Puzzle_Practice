@@ -1,6 +1,6 @@
 # Carpentry
 
-Open `#/vampire-carp`. Choose **Vampire Lair** or **Ship** carpentry. A ship takes a difficulty **0–9** (one through ten stars) and tokens **Off**, **Normal shapes** or **Normal shapes + blades**. Then press Start for a two-minute session. Mode, Unlimited, Seeded and Cheats work for both; Speed is the Vampire Lair's practice mode only.
+Open `#/vampire-carp`. Choose **Vampire Lair** or **Ship** carpentry. A ship takes a difficulty **0–9** (one through ten stars) and tokens **Off**, **4 Tokens** or **5 Tokens**. Then press Start for a two-minute session. Mode, Unlimited, Seeded and Cheats work for both; Speed is the Vampire Lair's practice mode only.
 
 ## Ship carpentry
 

@@ -6,6 +6,7 @@ import { SessionPause } from '../../core/pause';
 import { ReplayRecorder, stateText, type ReplaySettingsCodec } from '../../core/replay';
 import { historyGroup } from '../../core/history';
 import { dutyDesk } from '../../core/duty/desk';
+import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
 import { keyMatches } from '../../core/controls';
 import type { InputEvent } from '../../core/input';
@@ -15,7 +16,7 @@ import { SailingEditor, readLayout, type Brush, type CreateTool } from './create
 import { SailingGame, DEFAULT_SETTINGS, feedbackText, indicatorStep, readSettings, settingsKey, type SailingSettings } from './game';
 import { drawBoard, drawPiece, CELL, LEFT, TOP } from './render';
 
-const TOKENS=[{value:0,label:'Off'},{value:1,label:'Normal shapes'},{value:2,label:'Normal shapes + blades'}];
+const TOKENS=[{value:0,label:'Off'},{value:1,label:'4 Tokens'},{value:2,label:'5 Tokens'}];
 const DIFFICULTIES=Array.from({length:10},(_,value)=>({value,label:`${value} · ${value+1} ${value?'stars':'star'}`}));
 const TIMER=[{value:0,label:'No timer'},{value:120000,label:'2 minutes'},{value:300000,label:'5 minutes'},{value:600000,label:'10 minutes'}];
 const COLOURS=[{value:0,label:'Rope (yellow)'},{value:1,label:'Water (blue)'},{value:2,label:'Wind (white)'}];
@@ -39,7 +40,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const creating=()=>liveCreate&&!replays?.isPlaying;
   const editable=()=>creating()&&running&&editing;
   const saveDraft=()=>{store.set('createBoard',editor.snapshot());showDraft();};
-  let game=new SailingGame(settings,42), running=false, finished=false;
+  let game=new SailingGame(settings,42), running=false, finished=false, timeUp=false;
   let startAt=0,endAt=0,lastAt=0;
   let commands:string[]=[], held=new Set<string>(), repeats=new Map<string,number>();
   let fast=false, fastUntil=0, showLanding=store.get('landingPreview',false);
@@ -47,10 +48,11 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'sailing','Sailing',[]);
   const busy=()=>running||(replays?.isPlaying??false);
-  const elapsed=()=>Math.max(0,(running?ticks():endAt)-startAt);
+  const elapsed=()=>Math.min(!creating()&&liveSettings.timerMs||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
+  const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
   const history=()=>store.history(settingsKey(settings));
-  const queue=(action:string)=>{if(running&&!pause.paused&&!replays.isPlaying)commands.push(action);};
+  const queue=(action:string)=>{if(running&&!timeUp&&!pause.paused&&!replays.isPlaying)commands.push(action);};
   const resetInput=()=>{held.clear();repeats.clear();fast=false;fastUntil=0;};
   const key=(name:string,id:string,fallback:string)=>keyMatches(name,'sailing',id,fallback);
 
@@ -59,14 +61,15 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   function start(seed=seedMode.next(),asCreate=mode==='Create'):void { seedMode.remember(seed);
     liveCreate=asCreate;editing=asCreate;
     pause.resume(); liveSettings={...settings}; game=new SailingGame(liveSettings,seed);
-    running=true;finished=false;startAt=endAt=lastAt=ticks(); duty.clear(); resetInput();commands=[];
+    running=true;finished=false;timeUp=false;hold.clear();startAt=endAt=lastAt=ticks(); duty.clear(); resetInput();commands=[];
     lastScene=null;lastMoves=lastBoards=lastBooches=0;message='';messageUntil=0;
     if(asCreate)showDraft();else replays.begin(liveSettings,seed);
     sounds.play('fanfare');
   }
   function end(reason:string):void {
     if(!running)return;
-    running=false;finished=true;endAt=ticks();resetInput();commands=[];
+    running=false;finished=true;timeUp=false;endAt=ticks();resetInput();commands=[];
+    if(reason==='Time up')hold.start();
     if(liveCreate){finished=false;preview();return;}
     const report=duty.end({mode:liveSettings.tokens?'Token practice':'Normal',performance:LEARNING,
       score:{label:'Points / pair',value:game.efficiency.toFixed(2)}});
@@ -77,12 +80,12 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       ...(tape?{replayAt:tape.at,replayId:tape.runId??''}:{})});
   }
   function action(id:string):void {
-    if(!running||pause.paused)return;
+    if(!running||timeUp||pause.paused)return;
     if(id==='left')game.move(-1);
     if(id==='right')game.move(1);
     if(id==='cw')game.rotate(true);
     if(id==='ccw')game.rotate(false);
-    if(id==='drop')fastUntil=ticks()+250;
+    if(id==='drop'&&!game.release())fastUntil=ticks()+250;
   }
   function showDraft():void {
     if(!liveCreate)return;
@@ -92,7 +95,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   function playDraft():void {
     if(!editable())return;
     game=new SailingGame(liveSettings,crypto.getRandomValues(new Uint32Array(1))[0],true);
-    game.board.loadLayout(editor.board.cells,editor.board.targets);
+    game.board.loadLayout(editor.board.cells,editor.board.targets);game.hold();
     editing=false;lastAt=startAt=ticks();resetInput();commands=[];message='';
     lastScene=null;lastMoves=lastBoards=lastBooches=0;
   }
@@ -190,7 +193,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       game.performance.advance(elapsed());
       // Elapsed time belongs to the previous input state, before this frame's key changes.
       const previousPair=game.active;
-      game.step(delta,fast||now<fastUntil);
+      if(timeUp)game.playOut(delta);
+      else game.step(delta,fast||now<fastUntil);
       // The game starts every new pair at normal speed, even while Space remains held.
       if(game.active!==previousPair||game.isLanding){fast=false;fastUntil=0;}
       for(const command of [...liveCommands,...routed.commands])action(command);
@@ -200,14 +204,14 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
           if(!key(event.key,binding.id,binding.defaultKey))continue;
           if(event.type==='keydown'){
             held.add(binding.id);repeats.set(binding.id,now+REPEAT_DELAY_MS);
-            if(binding.id==='drop')fast=true;else action(binding.id);
+            if(binding.id==='drop'){if(!game.release())fast=true;}else action(binding.id);
           }else{held.delete(binding.id);repeats.delete(binding.id);if(binding.id==='drop')fast=false;}
         }
       }
       for(const id of ['left','right'])if(held.has(id)&&now>=(repeats.get(id)??Infinity)){
         action(id);repeats.set(id,now+REPEAT_INTERVAL_MS);
       }
-      game.step(0,fast||now<fastUntil);
+      if(!timeUp)game.step(0,fast||now<fastUntil);
       const scene=game.scenes[0];
       if(scene!==lastScene&&scene){
         if(scene.cleared)sounds.play(scene.kind==='platform'?'platform_destroy':'piece_destroy');
@@ -219,7 +223,9 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
         if(game.booches!==lastBooches){message=game.message;messageUntil=now+1800;sounds.play('booched');}
         lastBoards=game.boards;lastBooches=game.booches;
       }
-      if(!creating()&&liveSettings.timerMs&&elapsed()>=liveSettings.timerMs)end('Time up');
+      // Time's up: no more moves, and the session ends once the board has settled.
+      if(!creating()&&liveSettings.timerMs&&elapsed()>=liveSettings.timerMs)timeUp=true;
+      if(timeUp&&!game.busy)end('Time up');
     }
     if(!replays.isSeeking&&!replays.isAdvancing)draw(now);
   }
@@ -232,7 +238,6 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const create=panel.group('Freeplay board',{hidden:()=>!creating()});
   create.button('Play board',playDraft,{variant:'primary',disabled:()=>!editable()});
   create.button('Back to editor',editDraft,{disabled:()=>!creating()||!running||editing});
-  create.note(()=>editing?'Click to place; right-click to erase a piece or empty platform. Play board tests your draft; Back to editor restores it.':'Try your layout with the usual movement controls. Back to editor restores the draft.');
   const editorControls=panel.group('Board tools',{hidden:()=>!creating()||!editing});
   const editDisabled=()=>!editable();
   editorControls.select<CreateTool>('Tool',[{value:'platform',label:'Platform'},{value:'pair',label:'Joined pair'},{value:'single',label:'Single piece'},{value:'blocker',label:'Blocker (fixed piece)'},{value:'erase',label:'Eraser'}],()=>brush.tool,value=>{brush.tool=value;},{disabled:editDisabled});
@@ -244,7 +249,6 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   editorControls.button('Undo',()=>{if(editable()){editor.undo();saveDraft();}},{disabled:()=>!editable()||!editor.canUndo});
   editorControls.button('Redo',()=>{if(editable()){editor.redo();saveDraft();}},{disabled:()=>!editable()||!editor.canRedo});
   editorControls.button('Clear board',()=>{if(editable()){editor.clear();saveDraft();}},{disabled:editDisabled});
-  editorControls.note(()=>'Draft saved automatically. No timer, saved scores or replays. Platforms anchor at their top left.');
   panel.score('Score',{hidden:()=>creating()&&editing}).stats(['','Now'],()=>[['Points / pair',game.efficiency.toFixed(2)]]);
   const tokenStats=panel.group('Maneuver practice',{hidden:()=>!settings.tokens||(creating()&&editing)});
   tokenStats.stats(['Shape','Matches','Units'],()=>BONUS_SETS[liveSettings.tokens].map(token=>[BONUS_NAMES[token],String(game.tokenMatches[token]),String(game.tokenUnits[token])]));
@@ -269,7 +273,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     available:g=>typeof g.replayAt==='number'&&(replays?.hasPlayableAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined)??false),
     play:g=>{if(typeof g.replayAt==='number')void replays.playAt(g.replayAt,typeof g.replayId==='string'?g.replayId:undefined);},
   });
-  panel.results(()=>finished&&!running?{title:'Sailing results',report:duty.last,rows:[
+  panel.results(()=>finished&&!running&&!hold.holding?{title:'Sailing results',report:duty.last,rows:[
     ['Points / pair',game.efficiency.toFixed(2)],['Points',String(game.points)],['Pairs',String(game.moves)],
     ['Boards cleared',String(game.boards)],['Longest chain',String(game.longestChain)],['Token units',String(game.tokenUnits.reduce((a,b)=>a+b,0))],
   ]}:null);
@@ -277,7 +281,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   replays=new ReplayRecorder('sailing',store,panel,ticks,tape=>{
     savedSettings??={...settings};settings=readSettings(tape.settings)!;start(tape.seed as number,false);
   },()=>{
-    running=false;finished=false;resetInput();commands=[];duty.clear();
+    running=false;finished=false;timeUp=false;resetInput();commands=[];duty.clear();
     if(savedSettings){settings=savedSettings;savedSettings=null;}preview();
   },validSeed,setReplayTime,()=>frame([]),codec,()=>!running||replays.isPlaying);
   replays.setStopLive(()=>{if(running)end('Stopped');});

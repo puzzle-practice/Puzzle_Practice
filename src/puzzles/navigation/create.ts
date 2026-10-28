@@ -2,7 +2,7 @@
 // is N and the ring count, then, separated by colons: a character a cell, ring by ring from the
 // outside and octant by octant from the east (. empty, 0-4 a star's colour); the targets, each its
 // ring, octant and colour (* for wild); and the incoming star's colour and octant.
-import { DENSE_DISTRIBUTION, FIRST_TEST_DISTRIBUTION, DISTRIBUTIONS, EMPTY, MAX_TARGETS, type NaviBoard, type Target } from './logic';
+import { DENSE_DISTRIBUTION, FIRST_TEST_DISTRIBUTION, DISTRIBUTIONS, EMPTY, MAX_TARGETS, type Target } from './logic';
 import type { NavigationGame } from './game';
 
 export const COLOUR_NAMES = ['Blue', 'Orange', 'Red', 'White', 'Yellow'];
@@ -10,19 +10,13 @@ export const COLOUR_NAMES = ['Blue', 'Orange', 'Red', 'White', 'Yellow'];
 export const CLEAR = -1, WILD = 5;
 export const OCTANT_NAMES = ['East', 'North-east', 'North', 'North-west', 'West', 'South-west', 'South', 'South-east'];
 
-/** Stars settle inward, as they do in the game, without clearing anything. */
-function settle(board: NaviBoard): void { board.gravity(); }
-
-/** Paints a star, or clears one, then lets the stars settle. Returns false when nothing changed. */
+/** Paints a star, or clears one, in the cell given. Stars can float: they settle inward at the next Drop. Returns false when nothing changed. */
 export function paintStar(game: NavigationGame, octant: number, ring: number, colour: number): boolean {
   const board = game.board;
   if (ring < 0 || ring >= board.rings || colour < CLEAR || colour > 4) return false;
-  // A star painted above empty cells lands on the first one, as it would fall.
-  let at = ring;
-  if (colour !== CLEAR) while (at + 1 < board.rings && board.get(octant, at + 1) === EMPTY) at++;
-  if (board.get(octant, at) === colour) return false;
-  board.set(octant, at, colour);
-  settle(board);
+  const cell = colour === CLEAR ? EMPTY : colour;
+  if (board.get(octant, ring) === cell) return false;
+  board.set(octant, ring, cell);
   return true;
 }
 
@@ -66,7 +60,6 @@ export function readBoardCode(text: string): BoardText | null {
 /** Puts a board read from text onto a game with the same number of rings. */
 export function load(game: NavigationGame, read: BoardText): void {
   read.cells.forEach((c, i) => { game.board.cells[i] = c; });
-  settle(game.board);
   game.targets = read.targets.map((t) => ({ ...t }));
   game.entry = { ...read.entry };
 }
@@ -74,6 +67,7 @@ export function load(game: NavigationGame, read: BoardText): void {
 /** Ways a painted board differs from one the game could deal. `ww` deals dense constellations; `wild` turns wild targets on. */
 export function boardIssues(game: NavigationGame, ww: boolean, wild: boolean): string[] {
   const issues: string[] = [], board = game.board, rings = board.rings;
+  if (game.floating) issues.push('Some stars are floating. They settle inward when you press Drop.');
   if (board.findRuns().length) issues.push('Three or more stars in a row would already have cleared.');
   if (board.matches(game.targets)) issues.push('The constellation is already charted.');
   if (!game.targets.length) issues.push('There’s no constellation to chart.');

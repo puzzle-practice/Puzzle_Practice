@@ -35,6 +35,10 @@ export const settingsKey = (s: BilgingSettings) => `d${s.difficulty}-t${s.tokens
 export const PAINTABLE = [0, 1, 2, 3, 4, 5, 6, PUFFER, CRAB, JELLY];
 /** A colour with a token half: half 0 is the lower half, 1 the upper. */
 export const withToken = (piece: number, shape: number, upper: number) => piece < PUFFER && shape ? piece | upper << 4 | shape << 5 : piece;
+/** Freeplay: a colour painted over a colour keeps its token half, so pieces and tokens paint separately. */
+export const repaint = (old: number, piece: number) => piece < PUFFER && type(old) < PUFFER ? piece | old & 240 : piece;
+/** Freeplay: a colour with its token half changed (shape * 2 + upper; 0 takes it off). Other pieces carry no token. */
+export const retoken = (old: number, half: number) => type(old) < PUFFER ? withToken(old & 15, half >> 1, half & 1) : old;
 const validPiece = (v: number) => PAINTABLE.includes(type(v)) && (v < 16 || type(v) < PUFFER && BONUS_SETS[2].includes(token(v)) && v < 256);
 /** A board as text: B, then each piece as two hex digits, bottom row first. */
 export function boardCode(board: BilgeBoard): string {
@@ -57,7 +61,7 @@ export function boardIssues(board: BilgeBoard, s: BilgingSettings): string[] {
   if (cells.some((t, i) => t === CRAB && Math.floor(i / WIDTH) >= s.water)) issues.push('A crab is above the water; it would already have been pumped out.');
   const tokens = board.cells.map(token).filter(Boolean);
   if (tokens.length && !s.tokens) issues.push('Token pieces only appear with Tokens on.');
-  else if (tokens.some(t => !BONUS_SETS[s.tokens].includes(t))) issues.push('Blade tokens need Tokens set to include blades.');
+  else if (tokens.some(t => !BONUS_SETS[s.tokens].includes(t))) issues.push('Flower tokens need Tokens set to 5 Tokens.');
   if (board.completedToken()) issues.push('A token is already complete; the game would count it before you can swap.');
   return issues;
 }
@@ -172,13 +176,15 @@ export class BilgingGame {
   /** Swaps the pieces at the cursor and plays out the cascade. Returns false when the game refuses the swap. */
   swap(x = this.cursor.x, y = this.cursor.y): boolean | 'crab' {
     if (this.busy) return false;
+    const score = new BilgeScore(), result: MoveResult = { points: 0, chain: 0, crabs: 0, tokens: [] };
+    // A painted Freeplay board that would still clear, rise or score plays that out on the first click, without a swap.
+    if (this.creating && this.unsettled) { this.resolve(score, result); this.finish(score, result); return true; }
     const b = this.board, water = this.settings.water, a = b.get(x, y), c = b.get(x + 1, y);
     if (a === CRAB || c === CRAB) return 'crab';
     if (a === EMPTY && c === EMPTY) return false;
     const duration = y >= water ? SWAP_DRY_MS : SWAP_WET_MS;
     if (a === c) { this.push({ kind: 'swap', swap: { x, y }, duration, sound: 'piece_swap' }); return true; }
     this.moves++; this.performance.add(0, 1);
-    const score = new BilgeScore(), result: MoveResult = { points: 0, chain: 0, crabs: 0, tokens: [] };
     if (a === PUFFER || c === PUFFER) {
       const px = c === PUFFER ? x + 1 : x;
       this.push({ kind: 'puffer', at: { x: px, y }, duration: PUFFER_BURST_MS, sound: 'pufferfish_destroy' });
@@ -203,6 +209,11 @@ export class BilgingGame {
       this.jellies++;
     }
     this.resolve(score, result);
+    this.finish(score, result);
+    return true;
+  }
+  /** Banks a move's score once its cascade is queued. */
+  private finish(score: BilgeScore, result: MoveResult): void {
     result.points = score.points; result.chain = score.chain;
     this.lastMove = result;
     this.longestChain = Math.max(this.longestChain, score.chain);
@@ -215,7 +226,13 @@ export class BilgingGame {
       }
     }
     if (!this.scenes.length) this.finishMove();
-    return true;
+  }
+  /** Whether the board would change on its own: a gap to rise into, a complete token, a crab above water or a line of three. */
+  get unsettled(): boolean {
+    const b = this.board;
+    if (b.cells.includes(EMPTY) || b.completedToken() || b.runs(false).length) return true;
+    for (let y = this.settings.water; y < HEIGHT; y++) for (let x = 0; x < WIDTH; x++) if (type(b.get(x, y)) === CRAB) return true;
+    return false;
   }
 
   /** Tokens, rising pieces, crabs above water, then runs; each successful step starts the loop again. */
@@ -283,6 +300,12 @@ export class BilgingGame {
     const cells = readBoardCode(code);
     if (!this.creating || this.busy || !cells) return false;
     this.board.cells = cells;
+    return true;
+  }
+  /** Freeplay mode: floods the bottom rows to a new level. Returns false when nothing changed. */
+  setWater(level: number): boolean {
+    if (!this.creating || !WATER_LEVELS.includes(level) || this.settings.water === level) return false;
+    this.settings.water = level;
     return true;
   }
   /** Freeplay mode: a fresh random board (the next in this session's seed sequence). */

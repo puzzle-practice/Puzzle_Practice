@@ -77,6 +77,30 @@ describe('vampire carpentry play', () => {
     expect(stats.grades.reduce((a, b) => a + b, 0)).toBe(LEVEL_HOLES);
   });
 
+  it('Freeplay builds a board without neglect, keeping the toolbox as it is', () => {
+    const kind = { ship: false, difficulty: 8, tokens: 0, freeplay: true };
+    const game = new Game(4, new BoardRandom(4), newStats(), { sound: () => {}, levelDone: () => {} }, null, new Random(4), 0, kind);
+    const toolbox = [...game.board.toolbox];
+    const { game: played, stats, sounds } = play(null, 4, 40, kind);
+    expect(stats.placed).toBeGreaterThan(20);
+    expect(sounds).not.toContain('hole_grows');
+    expect(sounds).not.toContain('piece_fly_off');
+    expect(sounds.filter((s) => s.startsWith('piece_rattle'))).toEqual([]);
+    expect(played.board.toolbox).toEqual(toolbox);
+  });
+
+  it('lays out a hole with planks already in it', () => {
+    const { game } = play(null, 4, 6, { ship: false, difficulty: 8, tokens: 0, freeplay: true });
+    while (game.scrolling) game.update((game.now += 100));
+    const index = game.board.holes.findIndex((h) => h.tools.length > 0);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const hole = game.board.holes[index];
+    expect(game.edit(() => { game.board.holes[index] = Object.assign(Object.create(Object.getPrototypeOf(hole)), hole); return true; })).toBe(true);
+    const hs = game.spriteFor(game.board.holes[index])!;
+    expect(hs.pieces.map((p) => p.sprite.piece)).toEqual(hole.tools.map((t) => t.piece));
+    expect(hs.pieces.every((p) => p.sprite.state === 5)).toBe(true);
+  });
+
   it('speed mode keeps dealing small holes', () => {
     for (const size of [1, 2, 3]) {
       const { stats } = play({ holes: 2, size, letter: 12 }, 99 + size, 60);

@@ -1187,7 +1187,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     ];
   }
   const duty = dutyDesk(panel, store, 'distilling', 'Distilling', RATING_SCALES, { shown: () => mode === 'Standard' || mode === 'Seeded' });
-  panel.results(() => resultRows && !running && (startedMode === 'Standard' || startedMode === 'Seeded') ? {
+  // A full jug holds the board under "Finished!" while the last column burns in, then the results cover it.
+  panel.results(() => resultRows && !running && !active && (startedMode === 'Standard' || startedMode === 'Seeded') ? {
     title: 'Distilling results',
     report: duty.last,
     averages: duty.averages(historyKey(startedMode) ? store.sessionHistory(historyKey(startedMode)!) : null),
