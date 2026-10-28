@@ -883,10 +883,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     { hidden: createOnly, title: 'Pieces already cleared inside a painted moon: the fourth fires it' });
   boardGroup.button('Fill board', () => edit({ type: 'forage-create-fill', data: { paint: palettePaint !== null && !CRATE_PAINT.includes(palettePaint) && palettePaint !== MOON_PAINT ? palettePaint : 0 } }),
     { hidden: createOnly, disabled: editing, title: 'Make every cell the selected colour or special, or empty' });
-  boardGroup.note(() => pasteNote || 'Hold 1–5 for a colour, 6–9 for the shovel, machete, monkey or earthquake, 0 for ants or - to empty a cell, or select a piece above (crates and moons too) and left-click to place it. A crate or moon goes in with its top-left cell under the pointer; click the same moon again to take it away. Empty cells fill from above once a move plays out. Select it again to deselect and turn blocks. Scroll to cycle the piece under the pointer. Freeplay drops in no crates of its own, has no timer and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = boardIssues(game.cells, game.moons?.active);
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !boardActive || ended });
 
   panel.score().stats(['', 'Now', 'Best'], () => [[

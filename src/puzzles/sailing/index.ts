@@ -232,7 +232,6 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const create=panel.group('Freeplay board',{hidden:()=>!creating()});
   create.button('Play board',playDraft,{variant:'primary',disabled:()=>!editable()});
   create.button('Back to editor',editDraft,{disabled:()=>!creating()||!running||editing});
-  create.note(()=>editing?'Click to place; right-click to erase a piece or empty platform. Play board tests your draft; Back to editor restores it.':'Try your layout with the usual movement controls. Back to editor restores the draft.');
   const editorControls=panel.group('Board tools',{hidden:()=>!creating()||!editing});
   const editDisabled=()=>!editable();
   editorControls.select<CreateTool>('Tool',[{value:'platform',label:'Platform'},{value:'pair',label:'Joined pair'},{value:'single',label:'Single piece'},{value:'blocker',label:'Blocker (fixed piece)'},{value:'erase',label:'Eraser'}],()=>brush.tool,value=>{brush.tool=value;},{disabled:editDisabled});
@@ -244,7 +243,6 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   editorControls.button('Undo',()=>{if(editable()){editor.undo();saveDraft();}},{disabled:()=>!editable()||!editor.canUndo});
   editorControls.button('Redo',()=>{if(editable()){editor.redo();saveDraft();}},{disabled:()=>!editable()||!editor.canRedo});
   editorControls.button('Clear board',()=>{if(editable()){editor.clear();saveDraft();}},{disabled:editDisabled});
-  editorControls.note(()=>'Draft saved automatically. No timer, saved scores or replays. Platforms anchor at their top left.');
   panel.score('Score',{hidden:()=>creating()&&editing}).stats(['','Now'],()=>[['Points / pair',game.efficiency.toFixed(2)]]);
   const tokenStats=panel.group('Maneuver practice',{hidden:()=>!settings.tokens||(creating()&&editing)});
   tokenStats.stats(['Shape','Matches','Units'],()=>BONUS_SETS[liveSettings.tokens].map(token=>[BONUS_NAMES[token],String(game.tokenMatches[token]),String(game.tokenUnits[token])]));

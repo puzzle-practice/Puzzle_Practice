@@ -462,10 +462,10 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
       hidden: () => createOnly() || slot >= board().numAvailable, disabled: editing,
     });
   }
-  boardGroup.note(() => pasteNote || 'Hold 1–5 for wood, iron, rope, cloth or gold to paint, or select a material above and left-click to place it. Select it again to deselect and swap. Scroll to cycle the material under the pointer. Each card can be any pattern not already on another card. Freeplay has no tide or goal and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = boardIssues(board(), difficulty);
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running() });
   panel.controls('shipwrightery', PAINT_KEYS.map(({ id, label, defaultKey }) => ({ id, label, defaultKey })));
   panel.settings.group('Rules').hint(() => 'The tide takes 75 seconds. Each placement resets it; at 20 patterns, finish your combo during 15 seconds of overtime. Tutorial: three patterns, no tide and two seconds of overtime. Gold is fixed and matches any material.');

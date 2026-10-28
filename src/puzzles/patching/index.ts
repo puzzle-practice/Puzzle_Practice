@@ -262,10 +262,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.append(palette, { hidden: createOnly });
   boardGroup.button('Fill board', () => record(`fill:${paletteType !== null && FILLABLE.includes(paletteType) ? paletteType : FILLABLE[0]}`),
     { hidden: createOnly, disabled: editing, title: 'Make every square but the spool and tie-offs the selected piece' });
-  boardGroup.note(() => pasteNote || 'Hold 1–8 over a square to paint it, or select a piece above and left-click to place it. Select it again to deselect and swap. The wheel or Q/E also turns the spool and tie-offs. Painting the spool moves it. Freeplay has no wind and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = boardIssues(board);
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
   panel.controlSettings.group('Controls').hint(() => 'Drag to swap. Wheel or Q/E to rotate. WASD or arrows to move; Space to select/swap. Enter or click the spool for a safe gust. Escape pauses.');
   const gameSettings = panel.settings.group('Game');

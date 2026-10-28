@@ -255,8 +255,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   boardGroup.append(palette,{hidden:createOnly});
   boardGroup.select('Token on colours',TOKEN_HALVES,()=>paintToken,value=>{paintToken=value;},{hidden:createOnly});
   boardGroup.button('Fill board',()=>queue(`fill:${withHalf(palettePiece??0)}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
-  boardGroup.note(()=>pasteNote||'Hold 1–7 for a colour, 8 for a puffer, 9 for a crab or 0 for a jellyfish to paint, or select a piece above and left-click to place it. Select it again to deselect and swap. Scroll to cycle the piece under the pointer. Freeplay never levels up or ends by itself, and keeps no history.',{hidden:createOnly});
-  boardGroup.note(()=>{const issues=boardIssues(game.board,liveSettings);return issues.length?`Not a board the game could deal: ${issues.join(' ')}`:'This board could come up in the game at these settings.';},{hidden:()=>createOnly()||!running});
+  boardGroup.note(()=>pasteNote,{hidden:createOnly});
+  boardGroup.note(()=>{const issues=boardIssues(game.board,liveSettings);return issues.length?`Not a board the game could deal: ${issues.join(' ')}`:'';},{hidden:()=>createOnly()||!running});
   const options=panel.settings.group('Game');
   options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();},{disabled:busy});
   options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();},{disabled:busy});

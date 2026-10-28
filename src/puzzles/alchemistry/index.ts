@@ -485,10 +485,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     () => bulbOrder(board), value => record(`bulbs:${value}`), { hidden: createOnly, disabled: editing });
   boardGroup.button('Fill board', () => record('fill-board'), { hidden: createOnly, disabled: editing, title: 'Make every square the selected tube' });
   boardGroup.button('Before last fill', () => record('undo'), { hidden: createOnly, disabled: () => editing() || !setup, title: 'Put the board back as it was before the last fill' });
-  boardGroup.note(() => pasteNote || 'Hold 1–9, 0 or - over a square to paint a tube, or select one above and left-click to place it. Select it again to deselect and rotate. Painted tubes keep the turn of what was there and get the chosen special. Over a bottle, hold R, Y, B, O, P or G (or select a label and click) to add a label on top; right-click takes the top label off, and a left click steps through how many labels are filled, then broken. Freeplay never finishes and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = boardIssues(board);
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
   panel.settings.group('Rules').hint(() => `Difficulty ${difficulty}: ${OVERLAP[difficulty]}% overlapping tubes. Bonus unlocks at 3; multifill at 5; quicksilver at 6. Fill all ${board.goal} slots to finish. Broken bottles stay on the belt.`);
   panel.settings.group('Fidelity notes').hint(() => 'Tube and bottle probabilities, special-piece accumulation and raw scores follow the game. The independent bottle-color shuffle is seeded for replays. Online difficulty assignment and ocean-wide ratings are unavailable. Particle scatter and gleam positions are approximated. See docs/alchemistry.md for remaining questions.');

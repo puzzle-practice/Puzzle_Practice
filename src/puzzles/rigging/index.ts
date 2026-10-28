@@ -254,7 +254,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   boardGroup.append(palette,{hidden:createOnly});
   boardGroup.select('Shape on colours',SHAPES,()=>paintShape,value=>{paintShape=value;},{hidden:createOnly});
   boardGroup.button('Fill board',()=>queue(`fill:${withShape(palettePiece??0)}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
-  boardGroup.note(()=>pasteNote||'Hold 1–8 for a colour, 9 for wild or 0 for tar to paint, or select a piece above and left-click to place it. Select it again to deselect and slide ropes. Scroll to cycle the piece under the pointer. Freeplay never deals a new board or ends by itself, and keeps no history.',{hidden:createOnly});
+  boardGroup.note(()=>pasteNote,{hidden:createOnly});
   const options=panel.settings.group('Game');
   options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();},{disabled:busy});
   options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();},{disabled:busy});
