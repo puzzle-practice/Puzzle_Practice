@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardCode, boardIssues, fill, load, paint, readBoardCode, setCard } from './create';
+import { boardCode, boardIssues, cardChoices, fill, load, paint, readBoardCode, setCard } from './create';
 import { GOLD, PATTERNS, ShipBoard, ShipSession } from './logic';
 
 describe('shipwrightery create', () => {
@@ -52,6 +52,13 @@ describe('shipwrightery create', () => {
     const big = PATTERNS.filter((p) => p.tier === 2 && !board.available.includes(p));
     setCard(board, board.available.findIndex((p) => p.tier === 0), big[0].id);
     expect(boardIssues(board, 3).join(' ')).toContain('at most');
+  });
+
+  it('offers only the patterns a difficulty deals', () => {
+    expect(cardChoices(0).map((p) => p.id).sort()).toEqual(['cannon', 'rigging', 'sail']);
+    expect(cardChoices(1).every((p) => p.tier < 2)).toBe(true);
+    expect(cardChoices(1)).toHaveLength(PATTERNS.filter((p) => p.tier < 2).length);
+    expect(cardChoices(7)).toEqual(PATTERNS);
   });
 
   it('gives Create sessions no tide or goal', () => {

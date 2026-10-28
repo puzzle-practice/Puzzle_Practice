@@ -21,6 +21,13 @@ export function fill(board: ShipBoard, material: number): boolean {
   return true;
 }
 
+/** Patterns the game can deal at this difficulty: the tutorial's three, otherwise every pattern of a size it deals. */
+export function cardChoices(difficulty: number): Pattern[] {
+  const style = STYLES[difficulty];
+  if (style.intro) return PATTERNS.filter((p) => ['cannon', 'rigging', 'sail'].includes(p.id));
+  return PATTERNS.filter((p) => style.counts[p.tier] > 0);
+}
+
 /** Puts a pattern on a card. Patterns already on another card can't be chosen, as the game never deals two alike. */
 export function setCard(board: ShipBoard, slot: number, id: string): boolean {
   const pattern = PATTERNS.find((p) => p.id === id);

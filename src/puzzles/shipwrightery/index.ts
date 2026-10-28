@@ -15,7 +15,7 @@ import {
 } from './logic';
 import { keyMatches } from '../../core/controls';
 import { copyText, pasteText } from '../../core/clipboard';
-import { MATERIAL_NAMES, SLOTS, boardCode, boardIssues, fill as fillBoard, load as loadBoard, paint as paintSquare, readBoardCode, setCard } from './create';
+import { MATERIAL_NAMES, SLOTS, boardCode, boardIssues, cardChoices, fill as fillBoard, load as loadBoard, paint as paintSquare, readBoardCode, setCard } from './create';
 import { PATTERNS } from './logic';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -43,7 +43,17 @@ type Mode = 'normal' | 'create';
 const MODES: { value: Mode; label: string }[] = [{ value: 'normal', label: 'Normal' }, { value: 'create', label: 'Freeplay' }];
 /** Freeplay mode paints with keys 1-5 held over the board: wood, iron, rope, cloth, gold. */
 const PAINT_KEYS = MATERIAL_NAMES.map((name, material) => ({ id: `paint${material + 1}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: String(material + 1), material }));
-const PATTERN_OPTIONS = PATTERNS.map((p) => ({ value: p.id, label: `${p.id[0].toUpperCase()}${p.id.slice(1)} (${p.tier + 3} pieces, ${p.points} points)` }));
+const patternOption = (p: Pattern) => ({ value: p.id, label: `${p.id[0].toUpperCase()}${p.id.slice(1)}` });
+/** A card's choices: the patterns this difficulty deals, plus the card's own pattern if a pasted board put another there. */
+const cardOptions = new Map<string, { value: string; label: string }[]>();
+function patternOptions(difficulty: number, current?: Pattern): { value: string; label: string }[] {
+  const choices = cardChoices(difficulty);
+  const extra = current && !choices.includes(current) ? current : undefined;
+  const key = `${difficulty}:${extra?.id ?? ''}`;
+  let options = cardOptions.get(key);
+  if (!options) cardOptions.set(key, options = PATTERNS.filter((p) => choices.includes(p) || p === extra).map(patternOption));
+  return options;
+}
 const codec: ReplaySettingsCodec = {
   currentVersion: 1, simulatorVersion: 2,
   migrate(version, value) {
@@ -458,7 +468,7 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
   boardGroup.append(palette, { hidden: createOnly });
   boardGroup.button('Fill board', () => record(`fill:${paletteMaterial ?? 0}`), { hidden: createOnly, disabled: editing, title: 'Make every square the selected material' });
   for (let slot = 0; slot < SLOTS; slot++) {
-    boardGroup.select(`Card ${slot + 1}`, PATTERN_OPTIONS, () => board().available[slot]?.id ?? PATTERN_OPTIONS[0].value, (id) => record(`card:${slot},${id}`), {
+    boardGroup.select(`Card ${slot + 1}`, () => patternOptions(difficulty, board().available[slot]), () => board().available[slot]?.id ?? '', (id) => record(`card:${slot},${id}`), {
       hidden: () => createOnly() || slot >= board().numAvailable, disabled: editing,
     });
   }
