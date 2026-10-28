@@ -256,8 +256,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   deck.button('Freeze',()=>queue(frozen?'run':'freeze'),{label:()=>frozen&&creating()?'Run':'Freeze',disabled:editing,title:'Hold the deck still to set it up, or let it run'});
   deck.button('Back to setup',()=>queue('reset'),{disabled:()=>editing()||!setup,title:'Put the deck back as it was when it last ran'});
   deck.select('Barrel faces',FACINGS,()=>barrelFacing(game.board),value=>queue(`facing:${value}`),{disabled:editing});
-  deck.note(()=>pasteNote||'Hold 1–9 over a cell to paint it, or select a paint above and left-click. Select it again to deselect and lay arrows. Drag the barrel to an empty cell, or place it with 9. Pieces face the arrow selected under Arrow (W A S D). Painting a piece on a cannon loads it into the next slot; Clear empties a cannon and Fouled leaves it needing a swab. Freeplay starts frozen: Run sets the deck going and Back to setup puts it back. Freeplay has no timer and keeps no history.');
-  deck.note(()=>{const issues=boardIssues(game.board);return issues.length?`Not a deck the game could deal: ${issues.join(' ')}`:'This deck could come up in the game.';},{hidden:()=>!creating()});
+  deck.note(()=>pasteNote);
+  deck.note(()=>{const issues=boardIssues(game.board);return issues.length?`Not a deck the game could deal: ${issues.join(' ')}`:'';},{hidden:()=>!creating()});
   const options=panel.settings.group('Game');
   options.select('Broadside every',VOLLEY,()=>settings.volleyMs,value=>{settings.volleyMs=value;save();preview();},{disabled:busy,hidden:()=>hideInDrill()||settings.firing!=='volley'});
   options.select('Cannonballs',BALL,()=>settings.balls,value=>{settings.balls=value;save();preview();},{disabled:busy,hidden:hideInDrill});

@@ -1076,10 +1076,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   });
   boardGroup.button('Fill board', () => queue(`fill:${palettePiece ?? 0},${paintHeat}`), { hidden: createOnly, disabled: editing, title: 'Make every square the selected piece and heat' });
   boardGroup.button('Clear last strike', () => queue('unmark'), { hidden: createOnly, disabled: () => editing() || !board?.selected, title: 'Forget the last square struck, so any square can be struck' });
-  boardGroup.note(() => pasteNote || 'Hold a piece’s key (1–4, B, K, R, Q, or W for the rum jug) to paint it at the chosen heat, or select a piece above and left-click to place it. Right-click a square to mark it as struck last, as the piece chosen above; the squares you can strike next glow. Select a piece again to deselect and strike. Scroll to cycle the piece under the pointer. Freeplay never finishes the sword and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = board ? boardIssues(board) : [];
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
 
   const replayAction = {

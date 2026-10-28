@@ -929,10 +929,10 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   for (let slot = 0; slot < 3; slot++) {
     boardGroup.select(`Toolbox ${slot + 1}`, TOOL_OPTIONS, () => game?.board.toolbox[slot] ?? TOOL_OPTIONS[0].value, (tool) => record(`tool:${slot},${tool}`), { disabled: editing });
   }
-  boardGroup.note(() => pasteNote || 'Hold Q over a hole’s box to cut squares open, or W to fill them with wood, or select Cut or Wood and drag. Select it again to deselect and place planks. Put down the plank in hand first. A painted hole counts as freshly dealt: its size is its squares ÷ 5, planks already in it become wood. Toolbox planks are set without tokens. Freeplay has no clock and keeps no PB or history.');
+  boardGroup.note(() => pasteNote);
   boardGroup.note(() => {
     const issues = game ? boardIssues(game.board, config.ship) : [];
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => !creating() });
 
   const settings = panel.settings.group('Game');

@@ -1344,10 +1344,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.append(palette, { hidden: createOnly });
   boardGroup.button('Fill board', () => queue(`fill:${palettePaint !== null && !'LMH'.includes(palettePaint) ? palettePaint : '0'}`),
     { hidden: createOnly, disabled: editing, title: 'Make every square the selected coin or gem' });
-  boardGroup.note(() => pasteNote || 'Hold 1–4 for a coin, 5 for a ruby, 6 for an emerald or 7–9 for a low, medium or high chest to paint, or select a piece above and left-click to place it. A chest goes in with its top-left square under the pointer. Select it again to deselect and swap. Scroll to cycle the coin or gem under the pointer. Freeplay sends no chests of its own, has no timer and keeps no history.', { hidden: createOnly });
+  boardGroup.note(() => pasteNote, { hidden: createOnly });
   boardGroup.note(() => {
     const issues = board ? boardIssues(board) : [];
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
 
   const best = () => bests[bestKey()];

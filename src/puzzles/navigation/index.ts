@@ -416,10 +416,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.select('Next star', COLOUR_NAMES.map((label, value) => ({ value, label })), () => game?.entry.colour ?? 0, value => pendingCommands.push(`entry:${value},${game?.entry.octant ?? 0}`), { disabled: editing });
   boardGroup.select('Drops at', OCTANT_NAMES.map((label, value) => ({ value, label })), () => game?.entry.octant ?? 0, value => pendingCommands.push(`entry:${game?.entry.colour ?? 0},${value}`), { disabled: editing });
   boardGroup.button('Back to setup', () => pendingCommands.push('reset'), { disabled: () => editing() || !setup, title: 'Put the board back as it was last painted' });
-  boardGroup.note(() => pasteNote || 'Hold B, O, R, W or Y over a cell to paint that colour, X to clear, or select one above and left-click. Select it again to deselect and turn rings. Stars settle inward as they would fall. Paint → Targets paints the constellation instead (the three innermost rings), and A makes a target wild. Each star waits at the top until Drop. Freeplay has no timer or quota and keeps no history.');
+  boardGroup.note(() => pasteNote);
   boardGroup.note(() => {
     const issues = game ? boardIssues(game, isWerewolf(liveSettings.mode), isWerewolf(liveSettings.mode) && liveSettings.wildTargets) : [];
-    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
+    return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => !creating() });
   const options = panel.settings.group('Game');
   options.select('Difficulty', Array.from({ length: 10 }, (_, value) => ({ value, label: String(value) })), () => settings.difficulty, difficulty => { settings.difficulty = difficulty; saveSettings(); }, { disabled: busy });

@@ -1111,7 +1111,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.select('Pair falls', [{ value: 1, label: 'Only while drop is held' }, { value: 0, label: 'At the fight’s speed' }] as Option<number>[],
     () => (match?.player.hover ?? true) ? 1 : 0, (value) => recordCreate(`hover:${value}`), { disabled: () => !creating || !running || !!replays?.isPlaying });
   boardGroup.button('Undo pair', () => recordCreate('undo'), { disabled: () => editOff() || !undo.length, title: 'Put the board and pairs back as they were before the last pair landed' });
-  boardGroup.note(() => pasteNote || 'Hold 1–4 over the board to paint red, green, blue or yellow, 5–8 for their breakers, or 0 to clear, or select a piece above and click or drag. The board settles as the game’s does: pieces fall, blocks fuse and breakers shatter what they touch. Freeplay has no opponents, a knock-out doesn’t end it, and it keeps no history.');
+  boardGroup.note(() => pasteNote);
   boardGroup.note(() => {
     if (!match || !creating) return 'Start to paint a board.';
     const issues = boardIssues(match.player.board, pairsNow(), settings.breakers);
