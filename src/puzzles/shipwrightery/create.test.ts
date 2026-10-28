@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardCode, boardIssues, cardChoices, fill, load, paint, readBoardCode, setCard } from './create';
+import { boardCode, boardIssues, cardChoices, fill, load, paint, readBoardCode, setCard, slotTier } from './create';
 import { GOLD, PATTERNS, ShipBoard, ShipSession } from './logic';
 
 describe('shipwrightery create', () => {
@@ -54,11 +54,20 @@ describe('shipwrightery create', () => {
     expect(boardIssues(board, 3).join(' ')).toContain('at most');
   });
 
-  it('offers only the patterns a difficulty deals', () => {
-    expect(cardChoices(0).map((p) => p.id).sort()).toEqual(['cannon', 'rigging', 'sail']);
-    expect(cardChoices(1).every((p) => p.tier < 2)).toBe(true);
-    expect(cardChoices(1)).toHaveLength(PATTERNS.filter((p) => p.tier < 2).length);
-    expect(cardChoices(7)).toEqual(PATTERNS);
+  it('offers each card only the patterns the game deals there', () => {
+    expect(cardChoices(0, 4).map((p) => p.id).sort()).toEqual(['cannon', 'rigging', 'sail']);
+    // Difficulty 1 deals four 3-piece cards, then two 4-piece cards.
+    expect([0, 1, 2, 3, 4, 5].map((slot) => slotTier(1, slot))).toEqual([0, 0, 0, 0, 1, 1]);
+    expect(cardChoices(1, 0).every((p) => p.tier === 0)).toBe(true);
+    expect(cardChoices(1, 5)).toEqual(PATTERNS.filter((p) => p.tier === 1));
+    expect([0, 1, 2, 3, 4, 5].map((slot) => slotTier(7, slot))).toEqual([0, 0, 1, 1, 2, 2]);
+    expect(cardChoices(7, 0).some((p) => p.id === 'nest')).toBe(false);
+    expect(cardChoices(7, 4).some((p) => p.id === 'nest')).toBe(true);
+    // Every dealt board fits the choices.
+    for (let difficulty = 1; difficulty <= 8; difficulty++) {
+      const board = new ShipBoard(difficulty, difficulty * 13);
+      board.available.slice(0, board.numAvailable).forEach((p, slot) => expect(cardChoices(difficulty, slot)).toContain(p));
+    }
   });
 
   it('gives Create sessions no tide or goal', () => {
