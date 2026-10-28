@@ -15,7 +15,7 @@ import {
 } from './logic';
 import { keyMatches } from '../../core/controls';
 import { copyText, pasteText } from '../../core/clipboard';
-import { MATERIAL_NAMES, SLOTS, boardCode, boardIssues, cardChoices, fill as fillBoard, load as loadBoard, paint as paintSquare, readBoardCode, setCard } from './create';
+import { MATERIAL_NAMES, SLOTS, boardCode, boardIssues, cardChoices, slotTier, fill as fillBoard, load as loadBoard, paint as paintSquare, readBoardCode, setCard } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
@@ -67,6 +67,8 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
   let replays!: ReplayRecorder;
   const sounds = new SoundBank(soundUrls, () => !!replays && (replays.isSeeking || replays.isAdvancing));
   let difficulty = Math.max(0, Math.min(8, Math.trunc(store.get('difficulty', 8))));
+  /** Freeplay: the piece the panel's picker changes. */
+  let pieceSlot = 0;
   let mode: Mode = store.get<Mode>('mode', 'normal') === 'create' ? 'create' : 'normal';
   let savedSettings: { difficulty: number; mode: Mode } | null = null;
   /** Freeplay mode: the palette material a left click places (recorded, so replays click the same way), the key held, and pasted-text errors. */
@@ -321,6 +323,12 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
       const shake: Cell = jitter ? [(sample * 13 + i) % 3 - 1, (sample * 7 + i * 2) % 3 - 1] : [0, 0];
       card(b.available[i], i, scale, 0, scale === 1, shake);
     }
+    if (creating() && held < 0 && pieceSlot < b.numAvailable) {
+      // Freeplay outlines the piece the panel's picker changes.
+      ctx.save(); ctx.strokeStyle = '#f5e663'; ctx.lineWidth = 2;
+      ctx.strokeRect(PX + (pieceSlot % 3) * CARD + 3, PY + Math.floor(pieceSlot / 3) * CARD + 3, CARD - 6, CARD - 6);
+      ctx.restore();
+    }
     for (const p of falling) card(p.pattern, p.slot, 1, (now - p.start) / p.ms * (600 - (PY + Math.floor(p.slot / 3) * CARD)), false);
     screen.blit(images.get('flag'), 0, flagY(now), { area: [(Math.floor(now / 100) % 10) * 70, 0, 70, 58] });
     for (const p of placements) {
@@ -468,54 +476,60 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
     return icon;
   }
   const patternName = (p: Pattern) => p.id[0].toUpperCase() + p.id.slice(1);
-  /** The card the picker below changes. */
-  let cardSlot = 0;
-  const slotRow = document.createElement('div');
-  slotRow.className = 'piece-palette card-slots';
-  for (let slot = 0; slot < SLOTS; slot++) {
+  /** Freeplay's piece picker: the six pieces laid out as on the board, then every piece the selected one can become. */
+  const pieceButton = (content: Node[], onClick: () => void) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'panel-button';
+    button.append(...content);
+    button.addEventListener('click', () => { onClick(); panel.used(); });
+    return button;
+  };
+  const slotRow = document.createElement('div');
+  slotRow.className = 'piece-slots';
+  for (let slot = 0; slot < SLOTS; slot++) {
+    const button = pieceButton([], () => { pieceSlot = slot; });
     let shown: Pattern | undefined | null = null;
-    button.addEventListener('click', () => { cardSlot = slot; panel.used(); });
     panel.addSync(() => {
       const pattern = board().available[slot];
       if (pattern !== shown) {
         shown = pattern;
-        button.replaceChildren(patternIcon(pattern), document.createTextNode(`Card ${slot + 1}`));
-        button.title = pattern ? patternName(pattern) : '';
+        button.replaceChildren(patternIcon(pattern), document.createTextNode(pattern ? patternName(pattern) : ''));
       }
       button.hidden = slot >= board().numAvailable;
-      button.setAttribute('aria-pressed', String(cardSlot === slot));
+      button.title = `Change piece ${slot + 1}`;
+      button.setAttribute('aria-pressed', String(pieceSlot === slot));
     });
     slotRow.append(button);
   }
+  boardGroup.note(() => 'Pieces: pick one here or on the board to change it.', { hidden: createOnly });
   boardGroup.append(slotRow, { hidden: createOnly });
+  boardGroup.note(() => {
+    const pattern = board().available[pieceSlot];
+    const tiles = STYLES[difficulty].intro ? '' : ` with another ${slotTier(difficulty, pieceSlot) + 3}-tile piece`;
+    return pattern ? `Replace ${patternName(pattern)}${tiles}:` : '';
+  }, { hidden: createOnly });
   const patternGrid = document.createElement('div');
-  patternGrid.className = 'piece-palette card-patterns';
+  patternGrid.className = 'piece-choices';
   let gridKey = '';
   let gridButtons: { pattern: Pattern; button: HTMLButtonElement }[] = [];
   panel.addSync(() => {
-    if (cardSlot >= board().numAvailable) cardSlot = 0;
-    const key = `${difficulty}:${cardSlot}`;
+    const b = board();
+    // Picking a piece up on the board selects it here too.
+    if (held >= 0 && held < b.numAvailable) pieceSlot = held;
+    if (pieceSlot >= b.numAvailable) pieceSlot = 0;
+    const key = `${difficulty}:${pieceSlot}`;
     if (key !== gridKey) {
       gridKey = key;
-      gridButtons = cardChoices(difficulty, cardSlot).map((pattern) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'panel-button';
-        button.append(patternIcon(pattern), document.createTextNode(patternName(pattern)));
-        button.addEventListener('click', () => { record(`card:${cardSlot},${pattern.id}`); panel.used(); });
-        return { pattern, button };
-      });
+      gridButtons = cardChoices(difficulty, pieceSlot).map((pattern) => ({
+        pattern, button: pieceButton([patternIcon(pattern), document.createTextNode(patternName(pattern))], () => record(`card:${pieceSlot},${pattern.id}`)),
+      }));
       patternGrid.replaceChildren(...gridButtons.map(({ button }) => button));
     }
-    const b = board();
     for (const { pattern, button } of gridButtons) {
-      const elsewhere = b.available.some((p, i) => i !== cardSlot && i < b.numAvailable && p === pattern);
-      button.disabled = editing() || elsewhere;
-      button.title = elsewhere ? 'Already on another card' : '';
-      button.setAttribute('aria-pressed', String(b.available[cardSlot] === pattern));
+      button.hidden = b.available.some((p, i) => i !== pieceSlot && i < b.numAvailable && p === pattern);
+      button.disabled = editing();
+      button.setAttribute('aria-pressed', String(b.available[pieceSlot] === pattern));
     }
   });
   boardGroup.append(patternGrid, { hidden: createOnly });
