@@ -21,8 +21,8 @@ const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, quer
 const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
 const CX = 225, CY = 300;
 const MODES = ['normal', 'ww-test', 'ww'] as const;
-const MODE_OPTIONS = [...MODES.map(value => ({ value, label: modeLabel(value) })),
-  ...MODES.map(mode => ({ value: `create-${mode}` as const, label: mode === 'normal' ? 'Freeplay' : `Freeplay (${modeLabel(mode)})` }))];
+const RULE_OPTIONS = MODES.map(value => ({ value, label: modeLabel(value) }));
+const MODE_OPTIONS = [...RULE_OPTIONS, { value: 'create' as const, label: 'Freeplay' }];
 /** Freeplay mode paints with each colour's initial held over a cell, X to clear and A for a wild target. */
 const PAINT_KEYS = [...COLOUR_NAMES.map((name, colour) => ({ id: `paint${name}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: name[0].toLowerCase(), colour })),
   { id: 'paintClear', label: 'Clear (Freeplay)', defaultKey: 'x', colour: CLEAR }, { id: 'paintWild', label: 'Wild target (Freeplay)', defaultKey: 'a', colour: WILD }];
@@ -352,9 +352,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   panel.clock(() => game ? { label: liveSettings.timerMs ? 'Time left' : 'Time', ms: liveSettings.timerMs ? timeLeft() : elapsed(), countdown: !!liveSettings.timerMs } : null);
   const session = panel.session();
-  // Freeplay paints a board under any rule set, so each rule set has a Freeplay entry too.
-  session.select('Mode', MODE_OPTIONS, () => settings.create ? `create-${settings.mode}` as const : settings.mode, value => {
-    settings.create = value.startsWith('create-'); settings.mode = MODES.find(mode => value.endsWith(mode)) ?? 'normal'; saveSettings(); selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
+  // Freeplay keeps the last rule set chosen; the Rules setting changes it.
+  session.select('Mode', MODE_OPTIONS, () => settings.create ? 'create' : settings.mode, value => {
+    settings.create = value === 'create'; if (value !== 'create') settings.mode = value; saveSettings(); selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
   }, { disabled: busy, title: 'Freeplay lets you paint the stars, targets and incoming star' });
   session.button('Start', () => {
     if (replays.isPlaying) replays.stop();
@@ -422,6 +422,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : 'This board could come up in the game.';
   }, { hidden: () => !creating() });
   const options = panel.settings.group('Game');
+  options.select('Rules', RULE_OPTIONS, () => settings.mode, mode => { settings.mode = mode; saveSettings(); selected = isWerewolf(mode) && settings.extraRing ? 3 : 2; },
+    { disabled: busy, hidden: () => !settings.create, title: 'The rules a Freeplay board is painted and played under' });
   options.select('Difficulty', Array.from({ length: 10 }, (_, value) => ({ value, label: String(value) })), () => settings.difficulty, difficulty => { settings.difficulty = difficulty; saveSettings(); }, { disabled: busy });
   // A quota run is untimed, so it sits with the timers: No timer loops, the quota run ends at the difficulty's quota.
   const timerOptions = LEVEL_TARGETS.map(goal => [{ value: 0, label: 'No timer' }, { value: 'clears' as const, label: `${goal} clears` },
