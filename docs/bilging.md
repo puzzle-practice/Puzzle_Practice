@@ -1,6 +1,6 @@
 # Bilging
 
-Open `#/bilging`. Choose difficulty **0–9** (one through ten stars) and tokens **Off**, **Normal shapes** or **Normal shapes + blades**, then Start. Settings > Game sets the water level (3–9 flooded rows), an optional timer and the alternate piece art.
+Open `#/bilging`. Choose difficulty **0–9** (one through ten stars) and tokens **Off**, **4 Tokens** or **5 Tokens**, then Start. Settings > Game sets the water level (3–9 flooded rows), an optional timer and the alternate piece art.
 
 The arrow keys move the two-piece cursor and Space swaps the pieces under it. Pointing at the board moves the cursor and a click swaps there. Escape pauses. Keys are configurable. There are also panel buttons, saved results and portable replays.
 
@@ -14,7 +14,7 @@ The arrow keys move the two-piece cursor and Space swaps the pieces under it. Po
 - The first line clear in a move scores 3, 5 or 8 per line (3, 4 or 5+ long), times 1, 1.6, 3.5 or 9 for one to four lines at five colours, 1.1, 2.1, 5 or 12 at six, and 1.2, 3, 8 or 20 at seven. Later chain steps score one point per piece in their lines.
 - Crabs that float to or above the water line leave the board, paying 5 points per flooded row each. Swaps above the water take 250 ms, below it 450 ms.
 - Callouts follow the game: Good and Great for one line of 4 or 5, Arrr!, Har! and Yarrr! for two lines, Bingo! for three, Sea Donkey! or Vegas! for four or more, then Super! and Bonus! for later chain steps.
-- With tokens on, a fifth of new coloured pieces carry a token half from the selected pool (circle, diamond, plus and cross, adding blade in the second pool). A token completes when a lower half sits directly beneath the matching upper half; both pieces keep their colour.
+- With tokens on, a fifth of new coloured pieces carry a token half from the selected pool (circle, diamond, plus and cross, adding flower in the 5-token pool). A token completes when a lower half sits directly beneath the matching upper half; both pieces keep their colour.
 - The level-up target is 100, 300, … 1900 points at difficulty 0–9. The stars bar fills as moves score; when it fills, "Great work!" shows and a fresh board is dealt.
 - Pieces rise at 85.7 ms per row. Clears fade over 250 ms, the pufferfish animation lasts 1,175 ms with its burst at 450 ms, and crabs scuttle off the nearer side.
 

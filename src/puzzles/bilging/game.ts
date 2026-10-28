@@ -57,7 +57,7 @@ export function boardIssues(board: BilgeBoard, s: BilgingSettings): string[] {
   if (cells.some((t, i) => t === CRAB && Math.floor(i / WIDTH) >= s.water)) issues.push('A crab is above the water; it would already have been pumped out.');
   const tokens = board.cells.map(token).filter(Boolean);
   if (tokens.length && !s.tokens) issues.push('Token pieces only appear with Tokens on.');
-  else if (tokens.some(t => !BONUS_SETS[s.tokens].includes(t))) issues.push('Blade tokens need Tokens set to include blades.');
+  else if (tokens.some(t => !BONUS_SETS[s.tokens].includes(t))) issues.push('Flower tokens need Tokens set to 5 Tokens.');
   if (board.completedToken()) issues.push('A token is already complete; the game would count it before you can swap.');
   return issues;
 }

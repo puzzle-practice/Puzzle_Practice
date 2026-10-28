@@ -34,7 +34,7 @@ export const VAMPIRE_HOLE_SIZE = 5;
 /** The token pools by bonus mode (duty/data/b): off, the four normal shapes, and those with the blade. */
 export const BONUS_SETS: readonly (readonly number[])[] = [[], [1, 2, 3, 4], [1, 2, 3, 4, 7]];
 /** Token names by type (duty/data/b), 1 circle to 7 blade. */
-export const TOKEN_NAMES = ['', 'Circle', 'Diamond', 'Plus', 'Cross', 'Ring', 'Star', 'Blade'];
+export const TOKEN_NAMES = ['', 'Circle', 'Diamond', 'Plus', 'Cross', 'Ring', 'Star', 'Flower'];
 /** A hole fits in a 10x10 box (Hole.MAX_WIDTH, MAX_HEIGHT). */
 export const MAX_HOLE = 10;
 /** Moves elsewhere before a neglected hole loses a piece or grows (Hole.MAX_HOLE_NEGLECT). */

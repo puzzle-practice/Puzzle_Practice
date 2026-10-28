@@ -1,6 +1,6 @@
 # Sailing
 
-Open `#/sailing`. Choose difficulty **0–9** (one through ten stars) and tokens **Off**, **Normal shapes**, or **Normal shapes + blades**, then Start. Difficulty remains fixed at the chosen value across boards. This is a practice choice; automatic difficulty changes are not reproduced.
+Open `#/sailing`. Choose difficulty **0–9** (one through ten stars) and tokens **Off**, **4 Tokens** or **5 Tokens**, then Start. Difficulty remains fixed at the chosen value across boards. This is a practice choice; automatic difficulty changes are not reproduced.
 
 Left/right move the falling pair. Up rotates counterclockwise, down clockwise, and holding Space accelerates the current pair without preventing movement or rotation. Each new pair starts at normal speed; release and press Space again to accelerate it. Escape pauses. Keys are configurable. There are also buttons, optional timed sessions, an optional landing preview, saved results, and portable replays.
 
@@ -34,7 +34,7 @@ the layout and asks you to return to the editor rather than replacing it with a 
 - Resolution repeats gravity, completed platforms, and horizontal/vertical lines of at least four matching pieces. All completed platforms in a phase count as one chain step. All lines in a phase also count as one step. Crossings clear and score each piece once.
 - Each cascade accumulates base points: up to four ordinary line pieces at 1 each, further ordinary line pieces at 2 each, platform pieces at 4 each, and fixed pieces at 5 each. The final chain multiplier applies to the whole accumulated value. Above twice the raw difficulty, additional chain steps add half a multiplier each. The result rounds down.
 - Newly filled targets add 1 point; losing a correctly filled target costs 1. There is no additional board-clear bonus. Occupied top cells in either middle column cause a booch after resolution, costing 20 points and dealing another board.
-- Token pools are circle/diamond/plus/cross, with blade added in the second pool. Ring and star artwork exists, but those shapes are not in either Sailing generation pool, so they are not offered as normal practice pieces.
+- Token pools are circle/diamond/plus/cross, with flower added in the 5-token pool. Ring and star artwork exists, but those shapes are not in either Sailing generation pool, so they are not offered as normal practice pieces.
 - Token matches require two orthogonally adjacent identical shapes in the same platform or straight-line clear. They need not be on pieces of the same colour in a platform. Each platform/line selects at most one qualifying pair. On a platform, finding the requested shape ends only the scan of that row; if any requested pair was found, the last pair found wins (which may be another shape), otherwise one is chosen at random. Separate crossing lines may each contribute.
 - Feedback text: on the first chain step, platforms show Target / Super / Ultra / Mega Target Bonus for 1 / 2 / 3 / 4+ at once, and lines show Great! for five and Excellent! for six or more (nothing for four). Later steps show Double, Triple, Bingo, Donkey, and Vegas (six or more). Token matches show Double Bonus! from step three. A booch shows Ye Booched It!
 - Left and right repeat seven times a second after a 300 ms hold; rotations and Space never repeat. Up rotates counterclockwise and Down clockwise by default.
@@ -43,7 +43,7 @@ the layout and asks you to return to the editor rather than replacing it with a 
 ## Known assumptions and deliberate practice differences
 
 1. **Live performance calibration is unavailable.** The indicator uses the game's fallback curve: `0, 1.02, 2.04, 2.38, 3.06, 3.4, 3.74, 4.08, 4.08, 4.42, 4.76, 4.76, 5.1, 5.1, 5.44, 5.78, 5.78, 6.12, 6.8, 7.48`. This is verified fallback data, not a claim about an ocean's current scale. “Top indicator threshold (approx.)” rescales this curve. Reports show **Learning**, rather than inventing current duty-rating cutoffs. Recent performance starts empty rather than carrying earlier duty performance into a new session.
-2. **Token availability is forced for practice.** Once a token pool is selected, every new pair receives exactly one shape, as in the game's enabled bonus mode. The live transitions between off, normal shapes, and blades are unknown; no guessed performance gate is imposed.
+2. **Token availability is forced for practice.** Once a token pool is selected, every new pair receives exactly one shape, as in the game's enabled bonus mode. The live transitions between off, 4 tokens, and 5 tokens are unknown; no guessed performance gate is imposed.
 3. **Token units are a practice tally.** A selected match counts as one unit, or two at chain step three or later, following the game's Double Bonus feedback. Exact conversion to vessel maneuver progress and finished maneuvers is unverified. The tally does not claim that a complete ship maneuver has been earned, and the other duty stations are not simulated.
 4. **Selected difficulty stays fixed.** Automatic promotion, reset/wrap rules, and changes following a booch are not inferred. The stars show progress through a practice cycle at the selected level.
 5. **Presentation has small differences.** Falling rates, row timing, landing grace, cascade durations, clear fades, glow motion, and the pause between boards follow the game. Glow launch angles use a separate deterministic visual sequence so replays look consistent. The contact sprite stays aligned to the grid rather than drawing the game's one-pixel bounce. Floating text layout, feedback smoothing, and maneuver-token flight effects remain simplified. The current star shows a single part-filled tile rather than a proportional fill, and the indicator jumps to its level instead of stepping every 300 ms.
@@ -52,7 +52,7 @@ the layout and asks you to return to the editor rather than replacing it with a 
 ## Questions for Jared
 
 - Which ocean/build should be the visual and performance reference? Do recorded sessions show the live sail thresholds, duty ratings, and any initial carried-over performance?
-- At what performance/experience does the normal token pool switch on, and when are blades allowed? Does this change between blockades, flotillas, and monster hunts?
+- At what performance/experience does the normal token pool switch on, and when are flowers allowed? Does this change between blockades, flotillas, and monster hunts?
 - For which ship should maneuver progress be shown? What contribution fills that ship's Sailing bar, including third-or-later-chain bonuses and unrequested shapes?
 - After completing all side stars, what difficulty follows at each starting level? How do a booch, dismiss, battle, and restation affect that progression?
 

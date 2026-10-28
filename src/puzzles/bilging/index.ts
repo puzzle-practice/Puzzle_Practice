@@ -18,7 +18,7 @@ import {
 } from './game';
 import { drawBoard, drawPiece, drawToken, CELL, LEFT, TOP } from './render';
 
-const TOKENS=[{value:0,label:'Off'},{value:1,label:'Normal shapes'},{value:2,label:'Normal shapes + blades'}];
+const TOKENS=[{value:0,label:'Off'},{value:1,label:'4 Tokens'},{value:2,label:'5 Tokens'}];
 const DIFFICULTIES=Array.from({length:10},(_,value)=>({value,label:`${value} · ${value+1} ${value?'stars':'star'}`}));
 const WATER=WATER_LEVELS.map(value=>({value,label:`${value} rows`}));
 const TIMER=[{value:0,label:'No timer'},{value:120000,label:'2 minutes'},{value:300000,label:'5 minutes'},{value:600000,label:'10 minutes'}];

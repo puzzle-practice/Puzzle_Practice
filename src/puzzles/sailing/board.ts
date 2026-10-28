@@ -5,7 +5,7 @@ export const TARGET_MIN = [1, 2, 2, 3, 3, 3, 4, 4, 5, 6];
 export const TARGET_MAX = [1, 2, 3, 4, 5, 6, 6, 7, 7, 7];
 export const FIXED_COUNT = [0, 0, 2, 4, 6, 7, 9, 10, 11, 13];
 export const BONUS_SETS: readonly (readonly number[])[] = [[], [1, 2, 3, 4], [1, 2, 3, 4, 7]];
-export const BONUS_NAMES = ['None', 'Circle', 'Diamond', 'Plus', 'Cross', 'Ring', 'Star', 'Blade'];
+export const BONUS_NAMES = ['None', 'Circle', 'Diamond', 'Plus', 'Cross', 'Ring', 'Star', 'Flower'];
 /** Rows run from top to bottom; a platform's y is its bottom row. */
 export const PATTERNS: readonly (readonly (readonly number[])[])[] = [
   [[-1,0],[0,-1],[-1,0],[0,-1]], [[-1,8],[8,-1],[-1,8],[8,-1]], [[-1,16],[16,-1],[-1,16],[16,-1]],

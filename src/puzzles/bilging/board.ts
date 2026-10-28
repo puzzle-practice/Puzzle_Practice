@@ -10,7 +10,7 @@ export const COLOR_COUNT = [5, 5, 5, 6, 6, 6, 7, 7, 7, 7];
 /** Points the stars meter needs before the level-up at each difficulty. */
 export const LEVEL_POINTS = [100, 300, 500, 700, 900, 1100, 1300, 1500, 1700, 1900];
 export const BONUS_SETS: readonly (readonly number[])[] = [[], [1, 2, 3, 4], [1, 2, 3, 4, 7]];
-export const BONUS_NAMES = ['None', 'Circle', 'Diamond', 'Plus', 'Cross', 'Ring', 'Star', 'Blade'];
+export const BONUS_NAMES = ['None', 'Circle', 'Diamond', 'Plus', 'Cross', 'Ring', 'Star', 'Flower'];
 const FIRST_RUN = [3, 5, 8];
 const RUN_MULTIPLIER = [[1, 1, 1.6, 3.5, 9], [1, 1.1, 2.1, 5, 12], [1, 1.2, 3, 8, 20]];
 

@@ -15,7 +15,7 @@ import { SailingEditor, readLayout, type Brush, type CreateTool } from './create
 import { SailingGame, DEFAULT_SETTINGS, feedbackText, indicatorStep, readSettings, settingsKey, type SailingSettings } from './game';
 import { drawBoard, drawPiece, CELL, LEFT, TOP } from './render';
 
-const TOKENS=[{value:0,label:'Off'},{value:1,label:'Normal shapes'},{value:2,label:'Normal shapes + blades'}];
+const TOKENS=[{value:0,label:'Off'},{value:1,label:'4 Tokens'},{value:2,label:'5 Tokens'}];
 const DIFFICULTIES=Array.from({length:10},(_,value)=>({value,label:`${value} · ${value+1} ${value?'stars':'star'}`}));
 const TIMER=[{value:0,label:'No timer'},{value:120000,label:'2 minutes'},{value:300000,label:'5 minutes'},{value:600000,label:'10 minutes'}];
 const COLOURS=[{value:0,label:'Rope (yellow)'},{value:1,label:'Water (blue)'},{value:2,label:'Wind (white)'}];

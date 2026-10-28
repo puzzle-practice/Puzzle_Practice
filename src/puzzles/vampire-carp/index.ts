@@ -73,8 +73,8 @@ const LOOKS: Record<Look, { suffix: string; outlines: string[]; putty: string }>
 const TOKEN_TILE = CELL;
 const TOKENS = [
   { value: 0, label: 'Off' },
-  { value: 1, label: 'Normal shapes' },
-  { value: 2, label: 'Normal shapes + blades' },
+  { value: 1, label: '4 Tokens' },
+  { value: 2, label: '5 Tokens' },
 ];
 const DIFFICULTIES = Array.from({ length: 10 }, (_, value) => ({ value, label: `${value} · ${value + 1} ${value ? 'stars' : 'star'}` }));
 /** The star meter  at (5, 185) in the view: 9 stars of 21px, 19px apart. */
@@ -942,7 +942,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   });
   settings.select('Tokens', TOKENS, () => config.tokens, (n) => restartOption(() => (config.tokens = n))(), {
     hidden: () => !config.ship,
-    title: 'Maneuver tokens on every plank, from the game’s normal pool or the one with blades',
+    title: 'Maneuver tokens on every plank, from the game’s 4-token or 5-token pool',
   });
   const speedHidden = () => !config.speed;
   settings.select(
