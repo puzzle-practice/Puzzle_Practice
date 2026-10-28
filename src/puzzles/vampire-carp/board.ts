@@ -490,6 +490,23 @@ export class Hole {
     return this.cover(piece, at);
   }
 
+  /**
+   * Freeplay mode: puts a plank back where it was, with no check that it could go there. Putty
+   * pours again from where it was poured. Returns the cells it covered; a plank covering none is
+   * left out.
+   */
+  restorePiece(piece: Piece, at: Cell): number {
+    if (piece.isPutty) {
+      const list = this.puttyList(at[0], at[1]);
+      if (list.length === 0 || list.length > 5) return 0;
+      piece.puttyCells = list.map(([x, y]) => [x - at[0], y - at[1]]);
+    } else if (!piece.cells().some(([x, y]) => this.isEmpty(x + at[0], y + at[1]))) return 0;
+    this.piecesUsed++;
+    if (!piece.grainKept) this.badGrains++;
+    this.tools.push({ piece, at: [at[0], at[1]] });
+    return this.cover(piece, at);
+  }
+
   private cover(piece: Piece, at: Cell): number {
     let count = 0;
     const cells = piece.cells();

@@ -118,6 +118,8 @@ export interface CarpentryKind {
   difficulty: number;
   tokens: number;
   independentStreams?: boolean;
+  /** Freeplay mode: holes never neglect and the toolbox keeps each plank used, so a board can be built plank by plank. */
+  freeplay?: boolean;
 }
 export const VAMPIRE_LAIR: CarpentryKind = { ship: false, difficulty: VAMPIRE_DIFFICULTY, tokens: 0 };
 
@@ -339,15 +341,23 @@ export class Game {
   // ---- Sprites ----
 
   private makeSprite(tool: number, tokens: number[] | null = null): PieceSprite {
-    const piece = new Piece(tool, this.speed || this.board.difficulty >= 2 ? 2 * this.orientRng.nextInt(4) + (tool & 1) : 1, tokens);
+    return this.pieceSprite(new Piece(tool, this.speed || this.board.difficulty >= 2 ? 2 * this.orientRng.nextInt(4) + (tool & 1) : 1, tokens));
+  }
+
+  /** Each plank's look, so a hole laid out again in Freeplay draws its planks as they were. */
+  private looks = new WeakMap<Piece, Look>();
+
+  private pieceSprite(piece: Piece): PieceSprite {
     const cells = piece.cells();
     const w = Math.max(...cells.map((c) => c[0])) - Math.min(...cells.map((c) => c[0])) + 1;
     const h = Math.max(...cells.map((c) => c[1])) - Math.min(...cells.map((c) => c[1])) + 1;
+    const look = this.looks.get(piece) ?? { texture: randInt(8), crop: [randInt(5 * CELL - w * CELL), randInt(3 * CELL - h * CELL)], baseOrient: piece.orient };
+    this.looks.set(piece, look);
     return {
       piece,
       state: 0,
       held: false,
-      look: { texture: randInt(8), crop: [randInt(5 * CELL - w * CELL), randInt(3 * CELL - h * CELL)], baseOrient: piece.orient },
+      look,
       saved: piece.orient,
       shake: null,
       pour: null,
@@ -374,9 +384,11 @@ export class Game {
     return [TOOLBOX.x + slot * 5 + 2, TOOLBOX.y + 2];
   }
 
+  /** A hole's sprite, with any planks already in it (Freeplay mode can lay out a hole with planks). */
   private holeSprite(hole: Hole, pos: Cell): HoleSprite {
-    const cells = hole.empty.map((col) => [...col]);
-    const sprite: HoleSprite = { hole, pos, cells, ragged: [], grown: [], blink: null, countdown: MAX_NEGLECT, pieces: [] };
+    const cells = hole.origEmpty.map((col) => [...col]);
+    const pieces = hole.tools.map(({ piece, at }) => ({ sprite: { ...this.pieceSprite(piece), state: 5 }, at: [at[0], at[1]] as Cell }));
+    const sprite: HoleSprite = { hole, pos, cells, ragged: [], grown: [], blink: null, countdown: MAX_NEGLECT, pieces };
     for (let y = 0; y < hole.height; y++) {
       let first = -1;
       let last = 0;
@@ -741,7 +753,7 @@ export class Game {
       this.stats.placed++;
       this.recordFocus();
       if (!this.startedAt.has(target.hole.id)) this.startedAt.set(target.hole.id, this.now);
-      if (!this.speed) this.board.pieceWillApply(target.index);
+      if (!this.speed && !this.kind.freeplay) this.board.pieceWillApply(target.index);
       this.neglectSprites(hs, sprite, target.at);
       if (slot >= 0) this.refill(slot);
     } else {
@@ -806,6 +818,10 @@ export class Game {
       this.speedRefill(slot);
       return;
     }
+    if (this.kind.freeplay) {
+      this.newTool(slot);
+      return;
+    }
     this.board.populateNextTool(slot);
     this.countFound(this.board.toolbox[slot]);
     this.newTool(slot);
@@ -834,7 +850,7 @@ export class Game {
     target.countdown = MAX_NEGLECT;
     this.stopShake(target);
     target.blink = null;
-    if (this.speed) return;
+    if (this.speed || this.kind.freeplay) return;
     for (const hs of [...this.holeSprites]) {
       if (hs === target || !this.board.holes.includes(hs.hole)) continue;
       const lost = this.neglect(hs);

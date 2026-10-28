@@ -26,7 +26,7 @@ import type { InputEvent } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { GameRecord } from '../../core/storage';
 import { Random } from '../../core/random';
-import { BONUS_SETS, BoardRandom, type Cell, Piece, PIECE_LETTERS, TOKEN_NAMES } from './board';
+import { BONUS_SETS, BoardRandom, type Cell, Piece, PIECE_LETTERS, PUTTY, TOKEN_NAMES } from './board';
 import {
   CELL,
   Game,
@@ -288,9 +288,10 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let meterShown = 0;
   let meterAt = 0;
   let lastMouse: Cell = [-1, -1];
-  // Replays through simulator version 2 applied the final pointer position before queued releases.
+  // Replays through simulator version 2 applied the final pointer position before queued releases;
+  // Freeplay replays before version 6 still had neglect and a toolbox that dealt new planks.
   let legacyPointerOrder = false;
-  let inputVersion = 5;
+  let inputVersion = 6;
   const sessionTime = () => (config.unlimited || config.create ? SESSION_LONG : SESSION_SHORT);
   /** Freeplay mode: the palette choice a left click paints (recorded, so replays click the same way), the key held, and pasted-text errors. */
   let paletteOpen: boolean | null = null, paintWith: boolean | null = null, painting = false, pasteNote = '';
@@ -323,14 +324,14 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
       speed,
       speedRng,
       timePassed,
-      { ship: config.ship, difficulty: config.difficulty, tokens: config.tokens, independentStreams: true },
+      { ship: config.ship, difficulty: config.difficulty, tokens: config.tokens, independentStreams: true, freeplay: config.create && inputVersion >= 6 },
       inputVersion,
     );
     meterShown = 0;
     meterAt = timePassed;
   }
 
-  function startSession(version = 5): void {
+  function startSession(version = 6): void {
     inputVersion = version;
     legacyPointerOrder = version <= 2;
     stats = newStats();
@@ -521,6 +522,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     if (name === 'palette') paletteOpen = value === 'cut' ? true : value === 'wood' ? false : null;
     else if (name === 'tool') { const [slot, tool] = value.split(',').map(Number); game!.edit(() => setTool(game!.board, slot, tool)); }
     else if (name === 'clear') game!.edit(() => { clearHoles(game!.board); return true; });
+    else if (name === 'hold') { paletteOpen = null; game!.holdCheat(Number(value)); }
     else if (name === 'load') { const read = readBoardCode(command.slice(5)); if (read) game!.edit(() => { loadBoard(game!.board, read); return true; }); }
   }
   const record = (command: string) => {
@@ -852,7 +854,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     () => (config.ship ? SHIP_MODES : LAIR_MODES),
     mode,
     setMode,
-    { title: 'Ghost hides placed pieces; Speed deals small holes with the pieces to fill them; Freeplay lets you paint the board' },
+    { title: 'Ghost hides placed pieces; Speed deals small holes with the pieces to fill them; Freeplay lets you build any board' },
   );
   const actions = panel.group();
 
@@ -925,6 +927,21 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     palette.append(button);
   }
   boardGroup.append(palette);
+  // Any plank to lay straight into a hole, on top of the toolbox's three.
+  const planks = document.createElement('div');
+  planks.className = 'piece-palette';
+  PIECE_LETTERS.forEach((letter, kind) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'panel-button';
+    button.style.minWidth = kind === PUTTY ? '64px' : '36px';
+    button.textContent = kind === PUTTY ? 'Putty' : letter.toUpperCase();
+    button.title = kind === PUTTY ? 'Pick up a bucket of putty' : `Pick up the ${letter.toUpperCase()} plank`;
+    button.addEventListener('click', () => { record(`hold:${kind}`); panel.used(); });
+    panel.addSync(() => { button.disabled = !creating() || replays.isPlaying; });
+    planks.append(button);
+  });
+  boardGroup.append(planks);
   boardGroup.button('Clear holes', () => record('clear'), { disabled: editing, title: 'Fill every hole with wood' });
   for (let slot = 0; slot < 3; slot++) {
     boardGroup.select(`Toolbox ${slot + 1}`, TOOL_OPTIONS, () => game?.board.toolbox[slot] ?? TOOL_OPTIONS[0].value, (tool) => record(`tool:${slot},${tool}`), { disabled: editing });
@@ -1104,7 +1121,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   // Version 2 added ship carpentry; version 1 replays are all the Vampire Lair's.
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 2,
-    simulatorVersion: 5,
+    simulatorVersion: 6,
     migrate: (version, value) => {
       if ((version !== 1 && version !== 2) || !value || typeof value !== 'object') return null;
       const wrapper = value as Record<string, unknown>;

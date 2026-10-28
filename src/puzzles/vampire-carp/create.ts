@@ -1,21 +1,52 @@
-// Carpentry's Freeplay mode: painting the holes and choosing the toolbox, and reading both as text.
-// A board's text is C, then each hole's 10x10 box as 25 hex digits (a bit a square, column by
-// column, 1 open), then a colon and the toolbox's three planks: the piece letter (b for putty) and
-// 1 if its grain runs across as dealt, 0 if not.
-import { CarpentryBoard, type Cell, Hole, MAX_HOLE, MAX_KNOCKOUTS, NUM_HOLES, PIECE_LETTERS, PUTTY, PUTTY_TOOL, tutorialCells } from './board';
+// Carpentry's Freeplay mode: painting the holes, the planks in them and the toolbox, and reading
+// them as text. A board's text is C, then each hole's 10x10 box as 25 hex digits (a bit a square,
+// column by column, 1 a square of the hole, planked or not), then a colon and the toolbox's three
+// planks: the piece letter (b for putty) and 1 if its grain runs across as dealt, 0 if not. Planks
+// already in the holes follow a semicolon, six characters each in the order they went in: the
+// hole (0-3), the piece letter, its grain as dealt, its orientation (0-7), then where its first
+// cell sits in the hole's box, x and y, each plus 2 as a hex digit.
+import { CarpentryBoard, type Cell, Hole, MAX_HOLE, MAX_KNOCKOUTS, NUM_HOLES, Piece, PIECE_LETTERS, PUTTY, PUTTY_TOOL, tutorialCells } from './board';
 
 /** I, L, N, Y and putty are always dealt with the grain across. */
 export const FIXED_GRAIN = new Set([1, 2, 4, 10, PUTTY]);
 export const pieceLetter = (kind: number) => (kind === PUTTY ? 'b' : PIECE_LETTERS[kind]);
 
-/** The hole's open squares in its 10x10 box, [x][y]. Planks already in it count as wood. */
+/** The hole's squares in its 10x10 box, [x][y], whether planks cover them yet or not. */
 export function holeGrid(hole: Hole): boolean[][] {
   const grid = Array.from({ length: MAX_HOLE }, () => Array<boolean>(MAX_HOLE).fill(false));
   const [ox, oy] = hole.offset;
   for (let x = 0; x < hole.width; x++) for (let y = 0; y < hole.height; y++) {
-    if (hole.empty[x]?.[y] && x + ox >= 0 && x + ox < MAX_HOLE && y + oy >= 0 && y + oy < MAX_HOLE) grid[x + ox][y + oy] = true;
+    if (hole.origEmpty[x]?.[y] && x + ox >= 0 && x + ox < MAX_HOLE && y + oy >= 0 && y + oy < MAX_HOLE) grid[x + ox][y + oy] = true;
   }
   return grid;
+}
+
+/** A plank in a hole, with its first cell in the hole's 10x10 box rather than the hole. Planks already on the board keep their piece, tokens and all. */
+export interface BoxPlank { tool: number; orient: number; at: Cell; piece?: Piece }
+
+/** The hole's planks in the order they went in, placed in its box. */
+export function holePlanks(hole: Hole): BoxPlank[] {
+  const [ox, oy] = hole.offset;
+  return hole.tools.map(({ piece, at }) => ({ tool: piece.tool, orient: piece.orient, at: [at[0] + ox, at[1] + oy], piece }));
+}
+
+/** The hole for these squares with these planks put back in order. Planks left covering nothing drop out. */
+function rebuild(grid: boolean[][], id: number, planks: BoxPlank[]): Hole {
+  const hole = shapeHole(grid, id);
+  if (!hole.size && !hole.origSquares) return hole;
+  const [ox, oy] = hole.offset;
+  for (const p of planks) hole.restorePiece(p.piece ?? new Piece(p.tool, p.orient), [p.at[0] - ox, p.at[1] - oy]);
+  return hole;
+}
+
+/** The topmost plank covering a square of the hole's box, or -1. */
+function plankOn(hole: Hole, [x, y]: Cell): number {
+  const [ox, oy] = hole.offset;
+  for (let i = hole.tools.length - 1; i >= 0; i--) {
+    const { piece, at } = hole.tools[i];
+    if (piece.cells().some(([cx, cy]) => cx + at[0] + ox === x && cy + at[1] + oy === y)) return i;
+  }
+  return -1;
 }
 
 /**
@@ -39,14 +70,20 @@ export function shapeHole(grid: boolean[][], id: number): Hole {
   return hole;
 }
 
-/** Opens or closes a square of hole `index`'s box. Returns the new hole, or null when nothing changed. */
+/**
+ * Opens or closes a square of hole `index`'s box. A plank on the square comes out, leaving the
+ * square open for cutting or wood for filling; the other planks stay where they are. Returns the
+ * new hole, or null when nothing changed.
+ */
 export function paintHole(board: CarpentryBoard, index: number, at: Cell, open: boolean): Hole | null {
   const [x, y] = at;
   if (x < 0 || y < 0 || x >= MAX_HOLE || y >= MAX_HOLE) return null;
-  const old = board.holes[index], grid = holeGrid(old);
-  if (grid[x][y] === open && old.tools.length === 0) return null;
+  const old = board.holes[index], grid = holeGrid(old), planks = holePlanks(old);
+  const plank = grid[x][y] ? plankOn(old, at) : -1;
+  if (grid[x][y] === open && plank < 0) return null;
+  if (plank >= 0) planks.splice(plank, 1);
   grid[x][y] = open;
-  return (board.holes[index] = shapeHole(grid, old.id));
+  return (board.holes[index] = rebuild(grid, old.id, planks));
 }
 
 /** Closes every hole. */
@@ -67,35 +104,39 @@ export function setTool(board: CarpentryBoard, slot: number, tool: number): bool
 }
 
 export function boardCode(board: CarpentryBoard): string {
-  let code = 'C';
-  for (const hole of board.holes) {
+  let code = 'C', planks = '';
+  board.holes.forEach((hole, h) => {
     const grid = holeGrid(hole);
     let bits = '';
     for (let x = 0; x < MAX_HOLE; x++) for (let y = 0; y < MAX_HOLE; y++) bits += grid[x][y] ? '1' : '0';
     for (let i = 0; i < 100; i += 4) code += parseInt(bits.slice(i, i + 4), 2).toString(16);
-  }
-  return `${code}:${board.toolbox.map((t) => (t < 0 ? '' : pieceLetter(t >> 1) + (t & 1))).join('')}`;
+    for (const p of holePlanks(hole)) planks += `${h}${pieceLetter(p.tool >> 1)}${p.tool & 1}${p.orient}${(p.at[0] + 2).toString(16)}${(p.at[1] + 2).toString(16)}`;
+  });
+  return `${code}:${board.toolbox.map((t) => (t < 0 ? '' : pieceLetter(t >> 1) + (t & 1))).join('')}${planks ? `;${planks}` : ''}`;
 }
 
-export interface BoardText { holes: boolean[][][]; tools: number[] }
+export interface BoardText { holes: boolean[][][]; tools: number[]; planks?: BoxPlank[][] }
 
 export function readBoardCode(text: string): BoardText | null {
-  const m = /^C([0-9a-f]{100}):((?:[filpntuvwxyzb][01]){3})$/i.exec(text.trim());
+  const m = /^C([0-9a-f]{100}):((?:[filpntuvwxyzb][01]){3})(?:;((?:[0-3][filpntuvwxyzb][01][0-7][0-9a-d]{2})+))?$/i.exec(text.trim());
   if (!m) return null;
   const holes = Array.from({ length: NUM_HOLES }, (_, h) => {
     const bits = [...m[1].slice(h * 25, h * 25 + 25)].map((c) => parseInt(c, 16).toString(2).padStart(4, '0')).join('');
     return Array.from({ length: MAX_HOLE }, (_, x) => Array.from({ length: MAX_HOLE }, (_, y) => bits[x * MAX_HOLE + y] === '1'));
   });
-  const tools = [0, 1, 2].map((i) => {
-    const letter = m[2][i * 2].toLowerCase(), kind = letter === 'b' ? PUTTY : PIECE_LETTERS.indexOf(letter as (typeof PIECE_LETTERS)[number]);
-    return toolFor(kind, m[2][i * 2 + 1] === '1');
-  });
-  return { holes, tools };
+  const kindOf = (letter: string) => (letter === 'b' ? PUTTY : PIECE_LETTERS.indexOf(letter as (typeof PIECE_LETTERS)[number]));
+  const tools = [0, 1, 2].map((i) => toolFor(kindOf(m[2][i * 2].toLowerCase()), m[2][i * 2 + 1] === '1'));
+  const planks: BoxPlank[][] = holes.map(() => []);
+  for (let i = 0; i < (m[3]?.length ?? 0); i += 6) {
+    const p = m[3].slice(i, i + 6).toLowerCase(), kind = kindOf(p[1]);
+    planks[Number(p[0])].push({ tool: kind === PUTTY ? PUTTY_TOOL : (kind << 1) | Number(p[2]), orient: kind === PUTTY ? 1 : Number(p[3]), at: [parseInt(p[4], 16) - 2, parseInt(p[5], 16) - 2] });
+  }
+  return { holes, tools, planks };
 }
 
 /** Puts a board read from text onto the board. */
 export function load(board: CarpentryBoard, read: BoardText): void {
-  read.holes.forEach((grid, i) => { board.holes[i] = shapeHole(grid, board.holes[i].id); });
+  read.holes.forEach((grid, i) => { board.holes[i] = rebuild(grid, board.holes[i].id, read.planks?.[i] ?? []); });
   read.tools.forEach((tool, slot) => setTool(board, slot, tool));
 }
 

@@ -788,7 +788,7 @@ describe('Carpentry pickup input', () => {
     step([pos[0] + CARP_CELL, pos[1]], [{ type: 'mouseup', button: 1, pos }]);
     expect(game.held).not.toBeNull();
     const tape = recorder.finish('Pickup regression')!;
-    expect(tape.simulatorVersion).toBe(5);
+    expect(tape.simulatorVersion).toBe(6);
     buttons.get('Play::Start')!(); // Stop the live session before playback.
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
