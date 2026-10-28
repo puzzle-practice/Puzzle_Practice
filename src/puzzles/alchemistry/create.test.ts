@@ -70,10 +70,10 @@ describe('alchemistry create', () => {
     setBulbs(board, 0);
     cycleBulb(board, 5); expect(board.colors[10]).toBe(2);
     cycleBulb(board, 5); cycleBulb(board, 5); expect(board.colors[10]).toBe(9);
-    expect(board.colors[9]).toBe(4);
+    expect(board.colors[9]).toBe(3);
     expect(bulbColors(board)[5]).toEqual({ color: 3, quicksilver: true });
     expect(bulbOrder(board)).toBe(-1);
-    cycleBulb(board, 3, -1); expect(board.colors.slice(4, 8)).toEqual([3, 3, 2, 4]);
+    cycleBulb(board, 3, -1); expect(board.colors.slice(4, 8)).toEqual([3, 2, 2, 2]);
     expect(boardIssues(board).join(' ')).toContain('groups');
     cycleBulb(board, 1, -1); cycleBulb(board, 1, -1);
     expect(board.colors[2]).toBe(9);

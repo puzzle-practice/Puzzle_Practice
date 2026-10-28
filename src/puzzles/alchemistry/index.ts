@@ -33,8 +33,8 @@ const codec: ReplaySettingsCodec = { currentVersion: 1, simulatorVersion: 2, mig
 /** Freeplay mode paints the single tubes with keys 1-9, 0 and - held over the board, and adds bottle labels with their colors' initials. */
 const SHAPE_KEYS = SHAPE_NAMES.slice(0, 11).map((name, shape) => ({ id: `paint${shape + 1}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: '1234567890-'[shape], shape }));
 const LABEL_KEYS = LABEL_COLORS.map(color => ({ id: `label${color}`, label: `Add ${LABEL_NAMES[color].toLowerCase()} label (Freeplay)`, defaultKey: LABEL_NAMES[color][0].toLowerCase(), color }));
-/** The pause between quicksilver pulses running down its path. */
-const QUICKSILVER_REST_MS = 1000;
+/** The game shows a bottle gleam or, one time in five, a quicksilver pulse once this long after the last turn. */
+const IDLE_MS = 3000;
 const bottleAt = ([px, py]: Point) => py >= 480 && py < 555 ? Array.from({ length: 11 }, (_, x) => x).find(x => px >= bottleX(x) && px < bottleX(x) + 36) ?? -1 : -1;
 /** The bulb under a point along the top, laid out as Art.bulbs draws them 48 wide with 26 between. */
 function bulbAt([px, py]: Point): number {
@@ -70,7 +70,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let beltFrom: number[] = [], beltAt = -Infinity;
   let shownFinished: Bottle[] = [];
   let groupAnims: GroupAnimation[] = [], drains: Drain[] = [], squirts: Squirt[] = [], flights: Flight[] = [], breaks: Break[] = [], messages: Message[] = [];
-  let drops: Drop[] = [], dropAt = -Infinity, clearAt = Infinity, refillAt = Infinity, settledAt = Infinity, finishAt = Infinity, gleamAt = -Infinity;
+  let drops: Drop[] = [], dropAt = -Infinity, clearAt = Infinity, refillAt = Infinity, settledAt = Infinity, finishAt = Infinity, gleamAt = -Infinity, idleAt = Infinity, quickAt = -Infinity;
   let allConnected = new Set<number>();
   let fxRandom = new BoardRandom(42), sparks: Spark[] = [];
   const active = () => running;
@@ -86,7 +86,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     viewCells = [...board.cells]; viewColors = [...board.colors]; viewBottles = board.bottles.map(b => b.clone());
     groupAnims = []; drains = []; squirts = []; flights = []; breaks = []; messages = []; drops = [];
     shownFinished = []; allConnected.clear(); beltFrom = []; beltAt = -Infinity;
-    clearAt = refillAt = finishAt = Infinity; settledAt = ticks() + BELT_MS; gleamAt = -Infinity; dropAt = -Infinity;
+    clearAt = refillAt = finishAt = Infinity; settledAt = ticks() + BELT_MS; gleamAt = -Infinity; dropAt = -Infinity; idleAt = Infinity; quickAt = -Infinity;
     startAt = ticks(); endedAt = 0; fills = broken = labels = bestFill = 0; saved = false; outcome = '';
     beltFrom = viewBottles.map((_, x) => -bottleX(11 - x)); beltAt = ticks();
   }
@@ -121,6 +121,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const wasColored = [colorOf(piece), colorOf(piece, 1)];
     if (!board.rotate(x, y, clockwise)) return;
     rotation = { x, y, piece, start: now, clockwise };
+    idleAt = now + IDLE_MS;
     viewCells = [...board.cells];
     sounds.play(clockwise ? 'rotate_cw' : 'rotate_ccw');
     const next = board.get(x, y);
@@ -199,6 +200,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     shownFinished = board.finished.slice(0, oldFinished);
   }
   function update(now: number): void {
+    if (now >= idleAt) {
+      idleAt = Infinity;
+      if (!busy(now)) { if (fxRandom.nextInt(5) === 0) quickAt = now; else gleamAt = now; }
+    }
     if (rotation && now >= rotation.start + ROTATE_MS) rotation = null;
     for (const anim of groupAnims) {
       if (now >= anim.start && !anim.sounded) { anim.sounded = true; sounds.play('fill'); }
@@ -311,7 +316,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ctx.save();
       if (now >= clearAt && allConnected.has(y * 11 + x)) ctx.globalAlpha = Math.max(0, 1 - (now - clearAt) / FADE_MS);
       const quickIndex = quickNodes.findIndex(n => n.x === x && n.y === y);
-      const quickTime = quickIndex < 0 ? -1 : (now % (quickNodes.length * 15 + 250 + QUICKSILVER_REST_MS)) - quickIndex * 15;
+      const quickTime = quickIndex < 0 ? -1 : now - quickAt - quickIndex * 15;
       art.piece(piece, px, py, angle, drains.filter(d => d.node.x === x && d.node.y === y), now,
         !groupAnims.length && !drops.length && quickTime >= 0 && quickTime < 250 ? quickTime / 250 : 0);
       ctx.restore();
