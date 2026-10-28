@@ -13,7 +13,7 @@ import { BoardRandom } from '../forage/board';
 import { AlchemyBoard, Bottle, colorOf, hasInlet, valid, withColor, MAX_LAYERS, MIN_LAYERS, OVERLAP, GOALS, type Cell, type Drop, type FillGroup } from './logic';
 import { Art, position, cellAt, bottleX, slotPosition, ROTATE_MS, DRAIN_STEP_MS, SQUIRT_MS, FADE_MS,
   BELT_MS, BOTTLE_FLIGHT_MS, TEXT_MS, type Drain } from './presentation';
-import { addLabel, boardCode, boardIssues, BULBS, bulbOrder, cycleBottle, fill as fillBoard, LABEL_COLORS, LABEL_NAMES, load as loadBoard, makePiece,
+import { addLabel, boardCode, boardIssues, bulbOf, cycleBottle, cycleBulb, fill as fillBoard, LABEL_COLORS, LABEL_NAMES, load as loadBoard, makePiece,
   paint as paintSquare, readBoardCode, removeLabel, setBulbs, SHAPE_NAMES, SHAPES, SPECIAL_NAMES } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -34,6 +34,16 @@ const codec: ReplaySettingsCodec = { currentVersion: 1, simulatorVersion: 2, mig
 const SHAPE_KEYS = SHAPE_NAMES.slice(0, 11).map((name, shape) => ({ id: `paint${shape + 1}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: '1234567890-'[shape], shape }));
 const LABEL_KEYS = LABEL_COLORS.map(color => ({ id: `label${color}`, label: `Add ${LABEL_NAMES[color].toLowerCase()} label (Freeplay)`, defaultKey: LABEL_NAMES[color][0].toLowerCase(), color }));
 const bottleAt = ([px, py]: Point) => py >= 480 && py < 555 ? Array.from({ length: 11 }, (_, x) => x).find(x => px >= bottleX(x) && px < bottleX(x) + 36) ?? -1 : -1;
+/** The column under a point on the bulbs along the top, laid out as Art.bulbs draws them. */
+function bulbColumnAt([px, py]: Point): number {
+  if (py < 28 || py >= 63) return -1;
+  for (let column = 0, x = 16; column < 11; column++) {
+    const width = column % 2 === 0 ? 48 : 26;
+    if (px >= x && px < x + width) return column;
+    x += width;
+  }
+  return -1;
+}
 interface Message { text: string; start: number; x: number; y: number; color: string; size: number; sound?: string; duration: number }
 interface Squirt { x: number; color: number; start: number }
 interface Flight { bottle: Bottle; x: number; slot: number; start: number }
@@ -401,6 +411,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
             painting = true; paintAt(cellAt(event.pos), paletteShape, now); continue;
           }
           if (event.type === 'mouseup' && event.button === 1 && painting) { painting = false; continue; }
+          if (event.type === 'mouseup' && (event.button === 1 || event.button === 3) && bulbColumnAt(event.pos) >= 0) {
+            if (!busy(now) && cycleBulb(board, bulbOf(board, bulbColumnAt(event.pos)), event.button === 3 ? -1 : 1)) edited();
+            continue;
+          }
           if (event.type === 'mouseup' && (event.button === 1 || event.button === 3) && bottleAt(event.pos) >= 0) {
             const x = bottleAt(event.pos);
             editBottle(x, event.button === 3 ? x => removeLabel(board, x) : paletteLabel !== null ? x => addLabel(board, x, paletteLabel!) : x => cycleBottle(board, x), now);
@@ -481,8 +495,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup.append(palette, { hidden: createOnly });
   boardGroup.select('Special', SPECIAL_NAMES.map((label, value) => ({ value, label })), () => paintSpecial, value => record(`special:${value}`),
     { hidden: createOnly, disabled: () => !creating() || replays.isPlaying });
-  boardGroup.select('Bulbs', BULBS.map((order, value) => ({ value, label: order.slice(0, board.difficulty < 2 ? 2 : 3).map(c => LABEL_NAMES[c]).join(', ') })),
-    () => bulbOrder(board), value => record(`bulbs:${value}`), { hidden: createOnly, disabled: editing });
   boardGroup.button('Fill board', () => record('fill-board'), { hidden: createOnly, disabled: editing, title: 'Make every square the selected tube' });
   boardGroup.button('Before last fill', () => record('undo'), { hidden: createOnly, disabled: () => editing() || !setup, title: 'Put the board back as it was before the last fill' });
   boardGroup.note(() => pasteNote, { hidden: createOnly });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addLabel, boardCode, boardIssues, bulbOrder, cycleBottle, fill, load, makePiece, paint, readBoardCode, removeLabel, setBulbs, shapeOf, SHAPES } from './create';
+import { addLabel, boardCode, boardIssues, bulbColors, bulbOrder, cycleBottle, cycleBulb, fill, load, makePiece, paint, readBoardCode, removeLabel, setBulbs, shapeOf, SHAPES } from './create';
 import { AlchemyBoard, specialOf, valid, WIDTH } from './logic';
 
 describe('alchemistry create', () => {
@@ -40,7 +40,6 @@ describe('alchemistry create', () => {
     const board = new AlchemyBoard(6, 3);
     const bottle = board.bottles[2];
     while (bottle.size > 1) removeLabel(board, 2);
-    expect(removeLabel(board, 2)).toBe(false);
     addLabel(board, 2, 4); addLabel(board, 2, 7);
     expect(bottle.required.slice(0, bottle.size).slice(1)).toEqual([4, 7]);
     cycleBottle(board, 2); cycleBottle(board, 2);
@@ -56,6 +55,43 @@ describe('alchemistry create', () => {
   it('sets the bulbs as the game deals them', () => {
     const board = new AlchemyBoard(5, 8);
     for (let order = 0; order < 6; order++) { setBulbs(board, order); expect(bulbOrder(board)).toBe(order); }
+  });
+
+  it('matches the dealt bulb rules', () => {
+    for (let seed = 1; seed < 40; seed++) {
+      const dealt = new AlchemyBoard(seed % 9, seed), copy = new AlchemyBoard(seed % 9, seed);
+      setBulbs(copy, bulbOrder(dealt));
+      expect([copy.hardSecondary, copy.missingPrimary, copy.baseColors]).toEqual([dealt.hardSecondary, dealt.missingPrimary, dealt.baseColors]);
+    }
+  });
+
+  it('cycles bulbs freely through quicksilver', () => {
+    const board = new AlchemyBoard(6, 8);
+    setBulbs(board, 0);
+    cycleBulb(board, 2); expect(board.colors[10]).toBe(9);
+    expect(bulbColors(board)[2]).toEqual({ color: 4, quicksilver: true });
+    expect(bulbOrder(board)).toBe(-1);
+    cycleBulb(board, 1, -1); expect(board.colors.slice(4, 7)).toEqual([2, 2, 2]);
+    expect(boardIssues(board).join(' ')).toContain('different primary');
+    const copy = new AlchemyBoard(6, 1);
+    load(copy, readBoardCode(boardCode(board))!);
+    expect(copy.colors).toEqual(board.colors);
+    expect(boardCode(copy)).toBe(boardCode(board));
+    cycleBulb(board, 2); expect(bulbColors(board)[2]).toEqual({ color: 2, quicksilver: false });
+    cycleBulb(board, 2, -1); expect(bulbColors(board)[2]).toEqual({ color: 2, quicksilver: true });
+    const small = new AlchemyBoard(1, 2);
+    cycleBulb(small, 1, -1);
+    expect(readBoardCode(boardCode(small))?.bulbs.length).toBe(2);
+    expect(boardIssues(small).join(' ')).toContain('Quicksilver bulbs');
+  });
+
+  it('breaks a bottle down to set its first label', () => {
+    const board = new AlchemyBoard(6, 3);
+    while (!board.bottles[5].broken) expect(removeLabel(board, 5)).toBe(true);
+    expect(removeLabel(board, 5)).toBe(false);
+    addLabel(board, 5, 7); addLabel(board, 5, 2);
+    expect(board.bottles[5].broken).toBe(false);
+    expect(board.bottles[5].required.slice(0, board.bottles[5].size)).toEqual([7, 2]);
   });
 
   it('flags boards the game could not deal', () => {
