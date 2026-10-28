@@ -285,6 +285,12 @@ export class BilgingGame {
     this.board.cells = cells;
     return true;
   }
+  /** Freeplay mode: floods the bottom rows to a new level. Returns false when nothing changed. */
+  setWater(level: number): boolean {
+    if (!this.creating || !WATER_LEVELS.includes(level) || this.settings.water === level) return false;
+    this.settings.water = level;
+    return true;
+  }
   /** Freeplay mode: a fresh random board (the next in this session's seed sequence). */
   generate(): void {
     if (!this.creating || this.busy) return;

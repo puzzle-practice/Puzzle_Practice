@@ -121,6 +121,16 @@ describe('Bilging Create mode', () => {
     g.generate();
     expect(g.board.cells).toEqual(before);
   });
+  it('changes the water level in Freeplay only', () => {
+    const g = create(), normal = new BilgingGame({ ...DEFAULT_SETTINGS }, 21);
+    expect(g.setWater(7)).toBe(true);
+    expect(g.settings.water).toBe(7);
+    expect(g.dry).toBe(true);
+    expect(g.setWater(7)).toBe(false);
+    expect(g.setWater(10)).toBe(false);
+    expect(normal.setWater(7)).toBe(false);
+    expect(normal.settings.water).toBe(3);
+  });
   it('copies and pastes a board', () => {
     const a = create(3);
     a.paint(2, 4, withToken(5, 7, 0));

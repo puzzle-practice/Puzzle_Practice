@@ -110,6 +110,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     if(id.startsWith('fill:'))game.fill(Number(id.slice(5)));
     if(id.startsWith('load:'))game.load(id.slice(5));
     if(id==='generate')game.generate();
+    if(id.startsWith('water:'))game.setWater(Number(id.slice(6)));
   }
   /** Outlined text from its top: the game font at 24px and up, bold Dialog below. */
   function text(value:string,x:number,y:number,size=14,fill='#fff6d4',center=false,alpha?:number):void {
@@ -253,6 +254,11 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     palette.append(button);
   });
   boardGroup.append(palette,{hidden:createOnly});
+  // Freeplay can flood or drain the hold while playing; the change is recorded so replays match.
+  boardGroup.select('Water level',WATER,()=>running?liveSettings.water:settings.water,value=>{
+    settings.water=value;save();
+    if(creating())queue(`water:${value}`);else preview();
+  },{hidden:createOnly,disabled:()=>!!replays?.isPlaying||running&&pause.paused});
   boardGroup.select('Token on colours',TOKEN_HALVES,()=>paintToken,value=>{paintToken=value;},{hidden:createOnly});
   boardGroup.button('Fill board',()=>queue(`fill:${withHalf(palettePiece??0)}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
   boardGroup.note(()=>pasteNote,{hidden:createOnly});
