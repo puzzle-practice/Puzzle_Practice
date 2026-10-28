@@ -19,16 +19,28 @@ describe('navigation create', () => {
     }
   });
 
-  it('paints stars that settle inward', () => {
+  it('paints stars where they are put, floating until the next drop', () => {
     const game = new NavigationGame(normal, 3);
+    game.board.cells.fill(EMPTY);
     expect(paintStar(game, 2, 0, 4)).toBe(true);
-    // Three rings: the star falls to the innermost.
-    expect(game.board.get(2, 2)).toBe(4);
+    expect(game.board.get(2, 0)).toBe(4);
+    expect(game.board.get(2, 2)).toBe(EMPTY);
+    expect(paintStar(game, 2, 0, 4)).toBe(false);
+    expect(boardIssues(game, false, false)).toContain('Some stars are floating. They settle inward when the next star drops.');
+    expect(paintStar(game, 2, 0, CLEAR)).toBe(true);
     expect(game.board.get(2, 0)).toBe(EMPTY);
-    paintStar(game, 2, 0, 1);
-    expect(game.board.get(2, 1)).toBe(1);
-    expect(paintStar(game, 2, 2, CLEAR)).toBe(true);
-    expect(game.board.get(2, 2)).toBe(1);
+    expect(boardIssues(game, false, false)).not.toContain('Some stars are floating. They settle inward when the next star drops.');
+  });
+
+  it('keeps a pasted board’s floating stars', () => {
+    const game = new NavigationGame(normal, 3);
+    game.board.cells.fill(EMPTY);
+    paintStar(game, 1, 0, 2);
+    const code = boardCode(game);
+    const copy = new NavigationGame(normal, 4);
+    load(copy, readBoardCode(code)!);
+    expect(copy.board.get(1, 0)).toBe(2);
+    expect(boardCode(copy)).toBe(code);
   });
 
   it('paints targets in the inner three rings', () => {
