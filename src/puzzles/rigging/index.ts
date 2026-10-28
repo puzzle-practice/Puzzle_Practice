@@ -27,7 +27,7 @@ const PIECE_NAMES=['Orange','Yellow','Black','Purple','Cyan','White','Blue','Tan
 /** Freeplay mode paints with keys 1–8 (the colours), 9 (wild) and 0 (tar) held over the board. */
 const PAINT_KEYS=['1','2','3','4','5','6','7','8','9','0'].map((key,i)=>({id:`paint${i+1}`,label:`Paint ${PIECE_NAMES[i].toLowerCase()} (Freeplay)`,defaultKey:key,piece:PAINTABLE[i]}));
 const PULLEY_NAMES=['Top','Upper right','Lower right','Bottom','Lower left','Upper left'];
-const BOOCHING=Array.from({length:SKIPS_FOR_PENALTY},(_,value)=>({value,label:value===SKIPS_FOR_PENALTY-1?`${value} · miss −5 coils`:String(value)}));
+const BOOCHING=Array.from({length:SKIPS_FOR_PENALTY},(_,value)=>({value,label:String(value)}));
 const SHAPES=[{value:0,label:'None'},...[1,2,3,4,7].map(value=>({value,label:BONUS_NAMES[value]}))];
 /** The game's keys: W E A D Z X move the cursor (or nudge a selected rope), S selects and lets go, Space cancels. */
 const KEYS=[{id:'nw',label:'Up-left',defaultKey:'w'},{id:'ne',label:'Up-right',defaultKey:'e'},{id:'w',label:'Left',defaultKey:'a'},
