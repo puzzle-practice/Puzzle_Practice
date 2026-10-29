@@ -26,9 +26,19 @@ export class MoonField {
   firing = false;
   /** Freeplay places its own moons, so none come up on their own. */
   spawning = true;
+  /** Incoming crates can't land on a moon. Only replays recorded before Den keep this. */
+  blocksCrates = false;
+  /** Den (Exp): a moon wanes on the move's first clear rather than once the move has played out. */
+  eagerPhase = false;
+  /** Den (Exp): moons come up three times as often over columns holding a crate. */
+  chestBias = false;
+  /** Den (Exp): a crate coming in with no moon up brings one with it. */
+  spawnWithCrate = false;
+  /** How long the moon's animations take: 1, or 0.75 for Den (Exp)'s faster moons. */
+  pace = 1;
 
   /** Engine callers and native parity fixtures retain the game's two-moon limit. */
-  constructor(readonly maxMoons: 1 | 2 = 2) {}
+  constructor(readonly maxMoons = 2) {}
 
   snapshot(): Moon[] { return this.active.map((moon) => ({ ...moon })); }
 
@@ -37,7 +47,10 @@ export class MoonField {
   }
 
   noteCleared(x: number, y: number): void {
-    if (!this.firing) this.cleared = true;
+    if (!this.firing) {
+      if (this.eagerPhase && !this.cleared) for (const moon of this.active) moon.phase = Math.max(0, moon.phase - 1);
+      this.cleared = true;
+    }
     this.noteEaten(x, y);
   }
 
@@ -56,6 +69,9 @@ export class MoonField {
         if (this.overlaps(x, y, 2, 2)) continue;
         if ([board.getPiece(x, y), board.getPiece(x + 1, y), board.getPiece(x, y + 1), board.getPiece(x + 1, y + 1)].some(isCrate)) continue;
         positions.push([x, y]);
+        if (this.chestBias && [x, x + 1].some((cx) => Array.from({ length: HEIGHT }, (_, cy) => board.getPiece(cx, cy)).some(isCrate))) {
+          positions.push([x, y], [x, y]);
+        }
       }
     }
     if (!positions.length) return null;
@@ -92,7 +108,8 @@ export class MoonField {
     const expired: Moon[] = [];
     if (this.cleared) {
       for (let i = this.active.length - 1; i >= 0; i--) {
-        if (--this.active[i].phase <= 0) expired.unshift(...this.active.splice(i, 1));
+        if (!this.eagerPhase) this.active[i].phase--;
+        if (this.active[i].phase <= 0) expired.unshift(...this.active.splice(i, 1));
       }
       this.clearingMoves++;
     }
@@ -137,7 +154,7 @@ export class WerewolfForageBoard extends ForageBoard {
   readonly moons: MoonField;
 
   /** Freeplay's board starts without a moon, and none come up: they're painted on. */
-  constructor(seed: number | bigint, difficulty = 8, spawning = true, maxMoons: 1 | 2 = 2) {
+  constructor(seed: number | bigint, difficulty = 8, spawning = true, maxMoons = 2) {
     super(seed, difficulty);
     this.moons = new MoonField(maxMoons);
     this.moons.spawning = spawning;
@@ -146,5 +163,5 @@ export class WerewolfForageBoard extends ForageBoard {
 
   override noteCleared(x: number, y: number): void { this.moons.noteCleared(x, y); }
   protected override noteEaten(x: number, y: number): void { this.moons.noteEaten(x, y); }
-  protected override keepsCratesOff(x: number, y: number): boolean { return this.moons.overlaps(x, y); }
+  protected override keepsCratesOff(x: number, y: number): boolean { return this.moons.blocksCrates && this.moons.overlaps(x, y); }
 }
