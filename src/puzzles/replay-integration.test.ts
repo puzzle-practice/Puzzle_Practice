@@ -2460,7 +2460,7 @@ describe('puzzle completion during replay', () => {
         expect(histories[0][0].endsWith(':den')).toBe(den === 'den');
         expect(histories[0][0].endsWith(':den-exp')).toBe(den === 'exp');
         expect(Object.keys(data).some((k) => k.endsWith(':normalBestPerMove'))).toBe(false);
-        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 8 });
+        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 9 });
       }
     }
     if (puzzle === 'treasure-haul') {

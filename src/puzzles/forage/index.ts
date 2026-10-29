@@ -269,8 +269,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * 6 makes the moon limit selectable, defaulting to one for new games.
    * 7 restores the one-second chest delay, keeping the overlapping click requirement.
    * 8: moons no longer keep incoming crates off their cells.
+   * 9: ant bites no longer charge moons.
    */
-  const RULES = 8;
+  const RULES = 9;
   let rules = RULES;
   const moonLimit = (): number => rules < 6 ? 2 : settings.maxMoons ?? 1;
   let sessionSeed: ForageReplaySeed | null = null;
@@ -354,6 +355,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (g.moons && settings.mode !== 'create') {
       const exp = den() === 'exp';
       g.moons.blocksCrates = rules < 8;
+      g.moons.antsCharge = rules < 9;
       g.moons.eagerPhase = g.moons.chestBias = g.moons.spawnWithCrate = exp;
       g.moons.pace = exp ? 0.75 : 1;
     }
