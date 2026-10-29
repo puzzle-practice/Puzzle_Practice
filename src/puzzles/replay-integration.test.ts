@@ -2192,7 +2192,7 @@ describe('Navigation sessions and replay', () => {
       setReplayTime:(time:number|null)=>{ if(time!==null) now=time; } } as unknown as PuzzleContext);
     buttons.get('Play::Start')!();
     let pausedTime=0;
-    for(let t=0;t<=120000;t+=100) {
+    for(let t=0;t<=140000;t+=100) {
       now=t+pausedTime;
       if(t===300) {
         buttons.get('Play::Pause')!();
@@ -2207,6 +2207,8 @@ describe('Navigation sessions and replay', () => {
     const expected = results()[0] as { rows:string[][]; report:DutyReport };
     expect(expected).not.toBeNull();
     expect(Number(expected.rows.find(([name])=>name==='Stars dropped')![1])).toBeGreaterThan(0);
+    // Dennav and Old Dennav deal a new board on a booch, so the run goes on to the timer.
+    expect(expected.rows.some(([name])=>name==='Boards')).toBe(mode !== 'normal');
     expect(expected.report.mode).toBe(mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal');
     await replayWrites.idle();
     const data=JSON.parse(exportAll()).data;
@@ -2215,7 +2217,7 @@ describe('Navigation sessions and replay', () => {
     const recorder=captured.recorders[0];
     const perf=vi.spyOn(performance,'now').mockReturnValue(0);
     expect(await recorder.playAt(replay.at,replay.runId)).toBe(true);
-    perf.mockReturnValue(replay.duration);instance.frame([]);
+    perf.mockReturnValue(replay.duration);instance.frame([]);perf.mockReturnValue(replay.duration+END_HOLD_MS);instance.frame([]);
     expect((results()[0] as { rows:string[][] }).rows).toEqual(expected.rows);
     expect(JSON.parse(exportAll()).data).toEqual(data);
     setters.get('History:Replays:Jump to (s)')!(replay.duration/2000);
@@ -2226,6 +2228,8 @@ describe('Navigation sessions and replay', () => {
     buttons.get('History:Replays:Jump')!();
     await vi.waitFor(()=>expect(recorder.isSeeking).toBe(false));
     await new Promise(resolve=>setTimeout(resolve,0));
+    // A timed-out run keeps the board in view a moment before the results.
+    instance.frame([]);perf.mockReturnValue(performance.now()+END_HOLD_MS);instance.frame([]);
     expect((results()[0] as { rows:string[][] }).rows).toEqual(expected.rows);
     buttons.get('History:Replays:Stop')!();
     expect(store.get('settings',null)).toEqual(settings);
