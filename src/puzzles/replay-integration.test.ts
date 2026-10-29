@@ -925,7 +925,7 @@ describe('Shipwrightery sessions and replays', () => {
 });
 
 describe('Sailing Create sessions',()=>{
-  it('edits a frozen draft, tries it without timers or recordings, and restores it after play and reopening',async()=>{
+  it('edits a frozen draft, tries it without timers, records each play, and restores it after play and reopening',async()=>{
     const store=new Store('sailing');store.set('mode','Create');
     store.set('settings',{difficulty:5,tokens:1,desired:3,timerMs:120000,indicatorMax:7.48});
     const {panel,buttons,selections,clocks}=panelHarness();let now=0;
@@ -955,7 +955,8 @@ describe('Sailing Create sessions',()=>{
     buttons.get('Play:Freeplay board:Play board')!();instance.frame([]);
     expect((step.mock.contexts.at(-1)! as SailingGame).board.cells).toEqual(draft.cells);
     buttons.get('Play::Start')!();instance.dispose?.();
-    await replayWrites.idle();expect(await listReplayFiles('sailing')).toHaveLength(0);
+    // Each time the board was played is a replay of its own.
+    await replayWrites.idle();expect(await listReplayFiles('sailing')).toHaveLength(2);
     expect(store.history('d5-t1-r3-120000-i7.48')).toHaveLength(0);
     const reopened=await factory(context);buttons.get('Play::Start')!();
     buttons.get('Play:Freeplay board:Play board')!();reopened.frame([]);
@@ -3037,6 +3038,164 @@ describe('every puzzle takes over a replay', () => {
     instance.frame([]);
     expect(recorder.divergedAt).toBeNull();
     buttons.get('History:Replays:Stop')!();
+    instance.dispose?.();
+  });
+});
+
+describe('untimed and Freeplay sessions keep their replays', () => {
+  const screen = () => new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+  async function distilling(mode: string, timerOn: boolean) {
+    const store = new Store('distilling');
+    store.set('mode', mode);
+    store.set('timerOn', timerOn);
+    store.set('createTimerOn', timerOn);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const instance = await (await import('./distilling/index')).default({ screen: screen(), input: { mouse: [-1, -1] }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    now = 500; instance.frame([{ type: 'keydown', key: 'arrowup' }, { type: 'keyup', key: 'arrowup' }]);
+    now = 1000; instance.frame([]);
+    return { instance, buttons, store };
+  }
+
+  it.each([['Standard', false], ['Create', false], ['Create', true]] as const)('Distilling %s (timer %s) keeps a session that sent nothing up', async (mode, timerOn) => {
+    const { instance, buttons, store } = await distilling(mode, timerOn);
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    expect(await listReplayFiles('distilling')).toHaveLength(1);
+    // It still isn't one of the past games: nothing was sent up.
+    expect(Object.keys(JSON.parse(exportAll()).data).filter((key) => key.includes(':history:'))).toHaveLength(0);
+    expect(store.history('Standard:off:0:0-0-0-0-0')).toHaveLength(0);
+    instance.dispose?.();
+  });
+
+  it('Distilling keeps an untimed session left without dismissing it', async () => {
+    const { instance } = await distilling('Standard', false);
+    instance.dispose?.();
+    await replayWrites.idle();
+    expect(await listReplayFiles('distilling')).toHaveLength(1);
+  });
+
+  it('Distilling still drops a timed session that sent nothing up, or an untimed one never played', async () => {
+    const timed = await distilling('Standard', true);
+    timed.buttons.get('Play::Start')!();
+    timed.instance.dispose?.();
+    const store = new Store('distilling');
+    store.set('timerOn', false);
+    const { panel, buttons } = panelHarness();
+    const instance = await (await import('./distilling/index')).default({ screen: screen(), input: { mouse: [-1, -1] }, panel, store, ticks: () => 0 } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!(); buttons.get('Play::Start')!();
+    instance.dispose?.();
+    await replayWrites.idle();
+    expect((await listReplayFiles('distilling')).map((tape) => tape.result)).toEqual([]);
+  });
+
+  it('Sailing Freeplay records a played board and replays it on the same layout', async () => {
+    const store = new Store('sailing'); store.set('mode', 'Create');
+    const { panel, buttons, selections } = panelHarness();
+    let now = 0;
+    const input = { mouse: [-1, -1] };
+    const instance = await (await import('./sailing/index')).default({ screen: screen(), input, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    buttons.get('Play::Start')!();
+    selections.get('Play:Board tools:Tool')!('blocker');
+    instance.frame([{ type: 'mousedown', button: 1, pos: [88 + 3 * 34 + 17, 42 + 14 * 34 + 17] }]);
+    buttons.get('Play:Freeplay board:Play board')!();
+    const keys = ['arrowleft', 'arrowup', 'arrowright', ' '];
+    for (let i = 0; i < 300; i++) {
+      now += 50;
+      const key = keys[i % keys.length];
+      instance.frame(i % 7 === 0 ? [{ type: 'keydown', key }, { type: 'keyup', key }] : []);
+    }
+    const live = recorder.fingerprint!();
+    buttons.get('Play:Freeplay board:Back to editor')!();
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    const tapes = await listReplayFiles('sailing');
+    // Back in the editor, the played board's replay was already saved; stopping saves no other.
+    expect(tapes).toHaveLength(1);
+    const [tape] = tapes;
+    expect(tape.result).toMatch(/^Freeplay · /);
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration);
+    instance.frame([]);
+    expect(recorder.divergedAt).toBeNull();
+    expect(recorder.fingerprint!()).toBe(live);
+    recorder.stop();
+    instance.dispose?.();
+  });
+
+  it('Rumble Freeplay records painting, panel changes and punches, and replays them exactly', async () => {
+    const store = new Store('rumble'); store.set('mode', 'Create');
+    const { panel, buttons, setters, toggles } = panelHarness();
+    let now = 100;
+    const input = { mouse: [160, 120] };
+    const instance = await (await import('./rumble/index')).default({ screen: screen(), input, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    const advance = (ms: number, events: InputEvent[] = []) => { for (let t = 0; t < ms; t += 50) { now += 50; instance.frame(t ? [] : events); } };
+    buttons.get('Play::Start')!();
+    advance(500);
+    setters.get('Controls:Board:Rows')!(5);
+    buttons.get('Controls:Board:Deal (G)')!();
+    advance(500);
+    input.mouse = [170, 140];
+    advance(200, [{ type: 'keydown', key: '2' }, { type: 'keyup', key: '2' }]);
+    toggles.get('Controls:Punch:Random size')!(true);
+    buttons.get('Controls:Punch:Punch! (P)')!();
+    advance(3000);
+    advance(3000, [{ type: 'mousedown', button: 1, pos: [200, 500] }, { type: 'mouseup', button: 1, pos: [200, 500] }]);
+    buttons.get('Controls:Punch:Roll again (R)')!();
+    buttons.get('Controls:Board:Undo (U)')!();
+    advance(2000);
+    const live = recorder.fingerprint!();
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    const [tape] = await listReplayFiles('rumble');
+    expect(tape.result).toMatch(/^Freeplay · /);
+    // Changing the board size in the replay leaves the player's own Freeplay settings alone.
+    setters.get('Controls:Board:Rows')!(3);
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration);
+    instance.frame([]);
+    expect(recorder.divergedAt).toBeNull();
+    expect(recorder.fingerprint!()).toBe(live);
+    recorder.stop();
+    expect(store.get<{ rows: number }>('create', { rows: 0 }).rows).toBe(3);
+    instance.dispose?.();
+  });
+
+  it('Rumble Freeplay starts a new replay on the carried board when werewolf rumbling is switched', async () => {
+    const store = new Store('rumble'); store.set('mode', 'Create');
+    const { panel, buttons, toggles } = panelHarness();
+    let now = 100;
+    const input = { mouse: [170, 140] };
+    const instance = await (await import('./rumble/index')).default({ screen: screen(), input, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    const advance = (ms: number, events: InputEvent[] = []) => { for (let t = 0; t < ms; t += 50) { now += 50; instance.frame(t ? [] : events); } };
+    buttons.get('Play::Start')!();
+    advance(500, [{ type: 'keydown', key: '3' }, { type: 'keyup', key: '3' }]);
+    buttons.get('Controls:Punch:Punch! (P)')!();
+    advance(3000);
+    toggles.get('Controls:Board:Werewolf (orange is furball)')!(true);
+    advance(500, [{ type: 'keydown', key: 'u' }, { type: 'keyup', key: 'u' }]);
+    advance(3000, [{ type: 'mousedown', button: 3, pos: [200, 500] }, { type: 'mouseup', button: 3, pos: [200, 500] }]);
+    const live = recorder.fingerprint!();
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    const tapes = await listReplayFiles('rumble');
+    expect(tapes).toHaveLength(2);
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tapes[0].at, tapes[0].runId)).toBe(true);
+    perf.mockReturnValue(tapes[0].duration);
+    instance.frame([]);
+    expect(recorder.divergedAt).toBeNull();
+    expect(recorder.fingerprint!()).toBe(live);
+    recorder.stop();
     instance.dispose?.();
   });
 });

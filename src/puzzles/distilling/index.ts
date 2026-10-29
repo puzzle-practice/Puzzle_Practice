@@ -492,11 +492,11 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     running = true;
   }
 
-  function stop(completed = false): void {
+  function stop(completed = false, played = replays.hasInput): void {
     if (!running || !game) return;
     sessionEndedAt = ticks();
     resultRows = makeResultRows();
-    if (completed) saveCompletedSession();
+    if (completed) saveCompletedSession(played);
     // Not completed, it's left out of the history: its replay is unlikely to matter.
     else if (excludesUnlikelyReplays()) replays.cancel();
     else replays.finish(`Score ${sessionScore().toFixed(2)}`, endReport());
@@ -515,8 +515,10 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   /** Dismissing keeps the score already earned; it never processes the remaining column. */
   function dismiss(): void {
     if (!running) return;
+    // Whether the player did anything, asked before the dismissal itself is recorded.
+    const played = replays.hasInput;
     replays.command('dismiss');
-    stop(true);
+    stop(true, played);
   }
 
   /** The player's turn is live: the session's on and nothing is sliding (PuzzleController.S, view.s). */
@@ -736,12 +738,15 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     });
   }
 
-  function saveCompletedSession(): void {
+  /** Played: whether the session had any input, which keeps an untimed or Freeplay session's replay. */
+  function saveCompletedSession(played = replays.hasInput): void {
     const key = historyKey(startedMode);
     const report = endReport();
     const sentUp = !!game?.columns.length;
-    // A session that sent nothing up is left out of the history, and its replay with it.
-    const finishedReplay = sentUp || !excludesUnlikelyReplays() ? replays.finish(`Score ${sessionScore().toFixed(2)}`, report) : (replays.cancel(), null);
+    // Untimed and Freeplay sessions rarely send anything up, so they keep their replay once played.
+    const keepReplay = sentUp || !excludesUnlikelyReplays() || ((startedMode === 'Create' || !!game?.timerless) && played);
+    // A timed session that sent nothing up is left out of the history, and its replay with it.
+    const finishedReplay = keepReplay ? replays.finish(`Score ${sessionScore().toFixed(2)}`, report) : (replays.cancel(), null);
     // A session that sent no columns up isn't kept with the past games.
     if (key && game && game.columns.length && !replays.isPlaying) store.addHistory(key, {
       score: Number(sessionScore().toFixed(2)),

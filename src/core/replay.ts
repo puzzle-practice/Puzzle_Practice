@@ -778,6 +778,10 @@ export class ReplayRecorder {
     (frame.actions ??= []).push(structuredClone(action));
   }
   cancel(): void { this.recording = null; this.pendingMouse = null; }
+  /** Whether the game being recorded has had any input yet: a click, a key or a command, not just the pointer moving. */
+  get hasInput(): boolean {
+    return !!this.recording?.frames.some((frame) => frame.events.length || frame.commands?.length || frame.actions?.length);
+  }
   get isPlaying(): boolean { return !!this.playback || this.restoring; }
   /** Closes the replay being watched, e.g. when the player starts a game of their own. */
   stop(): void { if (this.playback || this.loading) this.stopPlayback(); }
