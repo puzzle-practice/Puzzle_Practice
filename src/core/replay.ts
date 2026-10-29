@@ -4,7 +4,7 @@ import type { InputEvent, Point } from './input';
 import { END_HOLD_MS } from './end-hold';
 import { isTyping, type Panel } from './panel';
 import { showsReplayClicks, Store } from './storage';
-import { readArchivedReplay, readReplayArchive, REPLAY_REMOVED, replayRetentionLimit } from './data-backups';
+import { deleteReplay, readArchivedReplay, readReplayArchive, REPLAY_REMOVED, replayRetentionLimit } from './data-backups';
 import { replayId, replayWrites, saveReplayFile, type ReplayMetadata } from './replay-storage';
 
 /** A portable run: puzzle-specific settings and seed data plus the timestamped inputs. */
@@ -369,6 +369,9 @@ interface Playback {
   check: number; divergedAt: number | null;
 }
 
+/** How often an open-ended game's recording is saved as it stands, in ms of play. */
+export const CHECKPOINT_MS = 60_000;
+
 /** List metadata eagerly; load binary payloads and decoded tapes only when needed. */
 export class ReplayRecorder {
   private tapes: ReplayMetadata[] = [];
@@ -420,6 +423,15 @@ export class ReplayRecorder {
    * seed data to what has been dealt so far.
    */
   onTakeOver: ((tape: PuzzleReplay) => void) | null = null;
+  /**
+   * Whether the game being recorded has no end of its own: Freeplay, or a game with no timer. Its
+   * replay is kept however it stops (a setting changed mid-game, or the page closing), so it can
+   * still be watched and rewound. Set by the puzzle; off unless it says so.
+   */
+  openEnded: () => boolean = () => false;
+  /** When an open-ended recording was last saved as it stands, and its id once it has been. */
+  private checkpointAt = 0;
+  private checkpointed: string | null = null;
   /** When the game being recorded was taken over from a replay, in ms into it; null for a game played from the start. */
   private takenOverAt: number | null = null;
   /** The replay last taken over and where, so Resume replay can go back to watching it there. */
@@ -497,7 +509,9 @@ export class ReplayRecorder {
     if (typeof window !== 'undefined') {
       window.addEventListener(REPLAY_REMOVED, this.forget);
       window.addEventListener('keydown', this.arrowKeys);
+      window.addEventListener('pagehide', this.checkpoint);
     }
+    if (typeof document !== 'undefined') document.addEventListener?.('visibilitychange', this.hidden);
   }
 
   /** While a replay plays, Left and Right skip back and forward a second; held, they keep skipping. */
@@ -515,6 +529,31 @@ export class ReplayRecorder {
     this.pendingSeek += ms;
     // Skipping back from the very end carries on watching instead of closing the replay.
     if (ms < 0) this.playback.finishPending = false;
+  }
+
+  /** The page is hidden, and may be closing: an open-ended game's recording is saved as it stands. */
+  private readonly hidden = (): void => { if (document.visibilityState === 'hidden') this.checkpoint(); };
+
+  /**
+   * Saves a copy of an open-ended game's recording so far, so it isn't lost if the page closes before
+   * the game stops. The recording carries on; when it ends, its save replaces this copy.
+   */
+  private readonly checkpoint = (): void => {
+    if (!this.recording || this.isPlaying || this.disposed || !this.openEnded()) return;
+    this.checkpointAt = this.ticks();
+    const copy = structuredClone(this.recording);
+    copy.duration = Math.max(copy.duration, this.checkpointAt - this.recordStart);
+    copy.result = 'Unfinished';
+    if (copy.checks && !copy.checks.length) delete copy.checks;
+    this.checkpointed = replayId(this.puzzle, copy.at, copy.runId);
+    void this.persistTape(this.compressRecording ? compressReplay(copy) : copy);
+  };
+
+  /** The recording is dropped unsaved: so is any copy of it saved along the way. */
+  private dropRecording(): void {
+    this.recording = null; this.pendingMouse = null; this.pendingCheck = null;
+    if (this.checkpointed) void deleteReplay(this.checkpointed).catch(() => {});
+    this.checkpointed = null;
   }
 
   /** A replay was deleted from the History tab: it leaves the list (and stops if it's playing). */
@@ -556,6 +595,7 @@ export class ReplayRecorder {
       ...(this.fingerprint ? { checks: (tape.checks ?? []).filter(([t]) => t <= ranTo).map(([t, hash]): [number, number] => [t, hash]) } : {}),
     };
     this.takenOverAt = p.elapsed;
+    this.checkpointAt = this.ticks(); this.checkpointed = null;
     this.takeOverFrom = { id: replayId(this.puzzle, tape.at, tape.runId), at: p.elapsed };
     this.recordStart = p.start;
     this.compressRecording = this.preferences.get<boolean>('compressReplays', true);
@@ -595,7 +635,8 @@ export class ReplayRecorder {
     // A new game of the player's own: there's no taken-over replay to go back to.
     this.takeOverFrom = null;
     this.compressRecording = this.preferences.get<boolean>('compressReplays', true);
-    this.recordStart = start; this.previousMouse = [-1, -1]; this.pendingMouse = null; this.pendingCheck = null;
+    this.recordStart = this.checkpointAt = start; this.previousMouse = [-1, -1]; this.pendingMouse = null; this.pendingCheck = null;
+    this.checkpointed = null;
     this.mouseButtonsDown.clear(); this.keysDown.clear(); this.releases = [];
     this.lastAt = Math.max(Date.now(), this.lastAt + 1);
     this.recording = { format: 'puzzle-practice-replay', version: 1, puzzle: this.puzzle, at: this.lastAt, duration: 0,
@@ -618,7 +659,8 @@ export class ReplayRecorder {
     this.pendingCheck = null;
     if (this.recording.checks && !this.recording.checks.length) delete this.recording.checks;
     const finished = this.compressRecording ? compressReplay(this.recording) : this.recording;
-    this.recording = null; this.pendingMouse = null;
+    // Its save replaces any copy saved along the way (same id).
+    this.recording = null; this.pendingMouse = null; this.checkpointed = null;
     this.addTape(finished);
     void this.persistTape(finished);
     return finished;
@@ -678,6 +720,7 @@ export class ReplayRecorder {
       }
       this.recording.duration = Math.max(this.recording.duration, t);
       this.recording.steps!.push(t);
+      if (now - this.checkpointAt >= CHECKPOINT_MS && this.openEnded()) this.checkpoint();
       const changed = mouse[0] !== this.previousMouse[0] || mouse[1] !== this.previousMouse[1];
       const wasHeld = this.mouseButtonsDown.size > 0 || this.keysDown.size > 0;
       for (const event of events) {
@@ -777,8 +820,13 @@ export class ReplayRecorder {
     if (frame !== last) this.recording.frames.push(frame);
     (frame.actions ??= []).push(structuredClone(action));
   }
-  cancel(): void { this.recording = null; this.pendingMouse = null; }
+  cancel(): void { if (this.recording) this.dropRecording(); }
   get isPlaying(): boolean { return !!this.playback || this.restoring; }
+  /** Whether the game being recorded has any input yet: a key, a click, an action or a command other than `except`. */
+  hasInput(except?: string): boolean {
+    return !!this.recording?.frames.some((frame) => frame.events.length || frame.actions?.length ||
+      frame.commands?.some((command) => command !== except));
+  }
   /** Closes the replay being watched, e.g. when the player starts a game of their own. */
   stop(): void { if (this.playback || this.loading) this.stopPlayback(); }
   get isPaused(): boolean { return !!this.playback?.paused; }
@@ -793,7 +841,9 @@ export class ReplayRecorder {
     if (typeof window !== 'undefined') {
       window.removeEventListener(REPLAY_REMOVED, this.forget);
       window.removeEventListener('keydown', this.arrowKeys);
+      window.removeEventListener('pagehide', this.checkpoint);
     }
+    if (typeof document !== 'undefined') document.removeEventListener?.('visibilitychange', this.hidden);
   }
   private stopPlayback(): void {
     ++this.request; this.loading = false;
@@ -861,11 +911,14 @@ export class ReplayRecorder {
   }
   /**
    * A setting changed mid-game: a replay closes; a game of the player's stops with nothing saved
-   * (no history, best or replay).
+   * (no history or best). Its replay goes too, unless the game is open-ended (Freeplay or no timer),
+   * which has no other way to stop: that replay is kept, to watch and rewind.
    */
   abandon(): void {
     if (this.playback || this.loading) { this.stopPlayback(); return; }
-    this.recording = null; this.pendingMouse = null; this.pendingCheck = null; this.takenOverAt = null; this.releases = [];
+    if (this.recording && this.openEnded()) this.finish('Stopped');
+    else this.dropRecording();
+    this.takenOverAt = null; this.releases = [];
     this.store.setReadOnly(true);
     try { this.stopRestored?.(); }
     finally { this.store.setReadOnly(false); }
@@ -881,7 +934,7 @@ export class ReplayRecorder {
     const index = from ? this.tapeIndices.get(from.id) : undefined;
     if (!from || index === undefined || this.loading) return;
     if (this.playback) this.stopPlayback();
-    this.recording = null; this.pendingMouse = null; this.pendingCheck = null; this.takenOverAt = null; this.releases = [];
+    this.dropRecording(); this.takenOverAt = null; this.releases = [];
     this.selected = index; this.jumpSeconds = from.at / 1000;
     await this.jumpSelected(true);
     if (!this.playback) return;

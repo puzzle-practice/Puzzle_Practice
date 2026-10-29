@@ -31,7 +31,9 @@ function when(at: number): string {
   const today = new Date();
   const time = date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   if (date.toDateString() === today.toDateString()) return time;
-  return `${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} ${time}`;
+  // The day keeps to one line, so a narrow table wraps the time under it and the day stays whole.
+  const day = date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }).replace(/ /g, '\u00a0');
+  return `${day} ${time}`;
 }
 
 /**

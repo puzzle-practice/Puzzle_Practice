@@ -984,6 +984,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     boardActive = true;
     start();
   }, stopReplay, isForageReplaySeed, setReplayTime, () => frame([]), replaySettingsCodec, () => !boardActive || !!replay);
+  // Freeplay and games with no timer have no end of their own: their replays are kept however they stop,
+  // unless the session is too short to rate (Exclude unlikely replays).
+  replays.openEnded = () => boardActive && !replay && roundSeconds() === 0 && recordedAction && !(unrated() && excludesUnlikelyReplays());
   replays.onTakeOver = () => {
     // The game carries on as the player's: only the boards dealt so far are part of it.
     replay = null;

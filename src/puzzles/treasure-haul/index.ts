@@ -1525,6 +1525,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }, (seed) => new Random(0).restore(seed), setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
 
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  // Freeplay and games with no timer have no end of their own: their replays are kept however they stop.
+  replays.openEnded = () => running && !timed();
   replays.onTakeOver = () => {
     savedReplaySettings = null;
   };

@@ -260,6 +260,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let lastReplayState: DistillingReplayState | null = null;
   let paused = false;
   let startedMode: Mode = mode;
+  /** Freeplay, or a session with no timer: it has no end of its own, so its replay is kept once it has sent something up. */
+  let openRun = false;
   /** A piece key (1-5) held down in Freeplay mode paints the piece under the mouse. */
   let paintWith: number | null = null;
   let palettePiece: number | null = null;
@@ -474,6 +476,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     game = newGame(now);
     replays.begin({ mode, timerOn, createTimerOn, timerSeconds, difficulty, spawnRates: [...spawnRates], practiceNum: [...practiceNum] }, lastReplayState, now);
     startedMode = mode;
+    openRun = mode === 'Create' || runSettings().interval === null;
     paused = false;
     paintWith = null;
     palettePiece = null;
@@ -498,7 +501,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     resultRows = makeResultRows();
     if (completed) saveCompletedSession();
     // Not completed, it's left out of the history: its replay is unlikely to matter.
-    else if (excludesUnlikelyReplays()) replays.cancel();
+    else if (dropsReplay()) replays.cancel();
     else replays.finish(`Score ${sessionScore().toFixed(2)}`, endReport());
     game.finished = true;
     game.burnDue = false;
@@ -736,12 +739,20 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     });
   }
 
+  /**
+   * A session that sent nothing up keeps no replay (Exclude unlikely replays). Untimed and Freeplay
+   * sessions that sent something up keep theirs even when they're left without being dismissed.
+   */
+  function dropsReplay(): boolean {
+    return excludesUnlikelyReplays() && !(openRun && game?.columns.length);
+  }
+
   function saveCompletedSession(): void {
     const key = historyKey(startedMode);
     const report = endReport();
     const sentUp = !!game?.columns.length;
     // A session that sent nothing up is left out of the history, and its replay with it.
-    const finishedReplay = sentUp || !excludesUnlikelyReplays() ? replays.finish(`Score ${sessionScore().toFixed(2)}`, report) : (replays.cancel(), null);
+    const finishedReplay = sentUp || !dropsReplay() ? replays.finish(`Score ${sessionScore().toFixed(2)}`, report) : (replays.cancel(), null);
     // A session that sent no columns up isn't kept with the past games.
     if (key && game && game.columns.length && !replays.isPlaying) store.addHistory(key, {
       score: Number(sessionScore().toFixed(2)),
@@ -1258,6 +1269,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   }, isDistillingReplayState, setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
 
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  replays.openEnded = () => running && openRun && !dropsReplay();
   replays.onTakeOver = () => {
     savedReplaySettings = null;
     replayStartState = null;

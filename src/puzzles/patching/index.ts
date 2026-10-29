@@ -72,7 +72,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     view = new PatchingView(screen, images, playSound, board, ticks(), seed ^ 0x76ad);
     paletteType = null; setup = ''; pasteNote = '';
     running = true; finished = false; score = cleared = torn = gusts = moves = tokens = 0;
-    startAt = endAt = ticks(); lastMouse = [-1, -1]; wheelAt = -Infinity; resetInput();
+    startAt = endAt = ticks(); lastMouse = [-1, -1]; downAt = 0; wheelAt = -Infinity; resetInput();
     replays.begin(liveSettings, seed); view.play('puzzle_intro', ticks());
   }
   function finish(): void {
@@ -295,6 +295,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }, validSeed, pause.setReplayTime, () => frame([]), codec, () => !busy() || replays.isPlaying);
   replays.setStopLive(finish);
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  // Freeplay and games with no timer have no end of their own: their replays are kept however they stop.
+  replays.openEnded = creating;
   replays.onTakeOver = () => { savedSettings = null; };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(board, running, finished, startAt, score, cleared, torn, gusts, moves, tokens, sequence,
