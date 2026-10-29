@@ -2,7 +2,8 @@ import { EMPTY, NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, LEVEL_TA
 
 /**
  * `clears` is the untimed run that ends at the difficulty's constellation quota, counted across
- * dismissed boards. With no timer and no `clears`, boards keep dealing constellations until a booch or Stop.
+ * dismissed boards. With no timer and no `clears`, boards keep dealing constellations until a booch or Stop;
+ * in Dennav and Old Dennav a booch deals a fresh board in the same run instead of ending it.
  * `slowDrop` holds each incoming star at the top until Drop is pressed, for practice without the fall.
  */
 export interface NavigationSettings { mode: 'normal' | 'ww' | 'ww-test'; difficulty: number; extraRing: boolean; wildTargets: boolean; timerMs: number; clears: boolean; dismissDelayMs: number; slowDrop: boolean;

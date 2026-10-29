@@ -106,13 +106,17 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** A fresh board in the same run (WW or quota-run Dismiss): what the run has scored stays. */
   function nextBoard(): void {
     if (!running || !game || game.finished || timeUp()) return;
+    deal('New board');
+  }
+  function deal(note: string): void {
+    if (!game) return;
     banked = totals();
     board++;
     // A quota run's count carries on; a timed WW board has its own quota.
     game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0));
     selected = game.board.rings - 1;
     scenes = []; fastDrop = false; incomingRadius = 220;
-    message = 'New board'; messageAt = ticks(); messagePx = gameFont(3); messageFill = TEXT_WHITE;
+    message = note; messageAt = ticks(); messagePx = gameFont(3); messageFill = TEXT_WHITE;
     dealAt = liveSettings.dismissDelayMs ? ticks() + liveSettings.dismissDelayMs : 0;
     if (!dealAt) sounds.play('fanfare');
   }
@@ -139,6 +143,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     });
     message = reason; messageAt = ticks(); messagePx = gameFont(1); messageFill = TEXT_WHITE;
   }
+  /** A finished board ends the run, except a Dennav or Old Dennav booch, which deals a fresh board in the same run while time is left. */
+  function boardDone(): void {
+    if (!running || !game) return;
+    if (game.booched && isWerewolf(liveSettings.mode) && !liveSettings.create && !timeUp()) { sounds.play('booched'); deal('Booched! New board'); }
+    else end(game.booched ? 'Booched!' : 'Level complete');
+  }
   function startScene(scene: Scene): void {
     if (!scene.clear) return;
     const clear = scene.clear;
@@ -160,7 +170,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function queue(steps: Scene[]): void {
     scenes = steps; sceneStart = ticks();
     if (scenes.length) startScene(scenes[0]);
-    else if (game?.finished) end(game.booched ? 'Booched!' : 'Level complete');
+    else if (game?.finished) boardDone();
   }
   function rotate(clockwise: boolean): void {
     if (!running || !game || scenes.length || pause.paused || dealing() || timeUp()) return;
@@ -289,7 +299,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         scenes.shift();
         if (scenes.length) startScene(scenes[0]);
         else {
-          if (game?.finished) end(game.booched ? 'Booched!' : 'Level complete');
+          if (game?.finished) boardDone();
         }
       }
       if (running && dealAt && !dealing()) { dealAt = 0; sounds.play('fanfare'); }
