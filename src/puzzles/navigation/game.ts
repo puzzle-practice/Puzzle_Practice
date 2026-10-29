@@ -8,7 +8,9 @@ import { EMPTY, NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, LEVEL_TA
  */
 export interface NavigationSettings { mode: 'normal' | 'ww' | 'ww-test'; difficulty: number; extraRing: boolean; wildTargets: boolean; timerMs: number; clears: boolean; dismissDelayMs: number; slowDrop: boolean;
   /** Freeplay mode paints the board, with no timer, quota or history, and each star waits for Drop. */
-  create: boolean }
+  create: boolean;
+  /** Replays saved before a Dennav booch dealt a new board: the booch ends the run, as it did then. */
+  boochEnds?: boolean }
 export const DEFAULT_SETTINGS: NavigationSettings = { mode: 'ww-test', difficulty: 4, extraRing: true, wildTargets: true, timerMs: 120000, clears: false, dismissDelayMs: 1000, slowDrop: false, create: false };
 /** How long Dismiss holds play before the next board is dealt. */
 export const DISMISS_DELAYS = [0, 500, 1000, 1500, 2000, 3000];
@@ -19,9 +21,10 @@ export function readSettings(value: unknown): NavigationSettings | null {
       typeof s.extraRing !== 'boolean' || typeof s.wildTargets !== 'boolean' || ![0, 120000, 300000].includes(s.timerMs) ||
       (s.clears !== undefined && typeof s.clears !== 'boolean') || (s.clears && s.timerMs !== 0) ||
       (s.dismissDelayMs !== undefined && !DISMISS_DELAYS.includes(s.dismissDelayMs)) ||
-      (s.slowDrop !== undefined && typeof s.slowDrop !== 'boolean') || (s.create !== undefined && typeof s.create !== 'boolean')) return null;
+      (s.slowDrop !== undefined && typeof s.slowDrop !== 'boolean') || (s.create !== undefined && typeof s.create !== 'boolean') ||
+      (s.boochEnds !== undefined && typeof s.boochEnds !== 'boolean')) return null;
   return { mode: s.mode, difficulty: s.difficulty, extraRing: s.extraRing, wildTargets: s.wildTargets, timerMs: s.timerMs, clears: s.clears ?? false,
-    dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false };
+    dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false, ...(s.boochEnds ? { boochEnds: true } : {}) };
 }
 export const isWerewolf = (mode: NavigationSettings['mode']): boolean => mode === 'ww' || mode === 'ww-test';
 export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal';
