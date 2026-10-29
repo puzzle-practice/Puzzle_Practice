@@ -585,7 +585,43 @@ a {
 
 .panel-stats-action-cell {
   width: 1%;
-  padding-left: 8px !important;
+  padding-left: 4px !important;
+}
+
+.panel-stats-action-cell + .panel-stats-action-cell { padding-left: 2px !important; }
+.panel-stats-action-cell:last-child { padding-right: 0; }
+
+/* Tables with a row of buttons (the History card) must fit the card at any width: long headings
+   wrap at their spaces, narrow cards use smaller text and buttons, and only the narrowest break
+   a heading mid-word. */
+.panel-stats.has-actions thead th {
+  letter-spacing: 0;
+  vertical-align: bottom;
+}
+
+.panel-stats.has-actions .panel-stats-action { width: 26px; height: 26px; }
+
+.panel-stats.has-actions th:first-child { width: 1%; padding-left: 0; }
+.panel-stats.has-actions tbody th { font-size: 0.88em; }
+
+.panel-group:has(.panel-stats.has-actions) {
+  container-type: inline-size;
+}
+
+@container (max-width: 340px) {
+  .panel-stats.has-actions { font-size: 0.85rem; }
+  .panel-stats.has-actions th, .panel-stats.has-actions td { padding-inline: 3px; }
+  .panel-stats.has-actions thead th { font-size: 0.64rem; }
+  .panel-stats.has-actions .panel-stats-action-cell { padding-left: 3px !important; }
+  .panel-stats.has-actions .panel-stats-action-cell + .panel-stats-action-cell { padding-left: 1px !important; }
+  .panel-stats.has-actions .panel-stats-action { width: 24px; height: 24px; font-size: 0.75rem; }
+}
+
+@container (max-width: 280px) {
+  .panel-stats.has-actions { font-size: 0.8rem; }
+  .panel-stats.has-actions th, .panel-stats.has-actions td { padding-inline: 2px; }
+  .panel-stats.has-actions thead th { overflow-wrap: anywhere; }
+  .panel-stats.has-actions .panel-stats-action { width: 22px; height: 22px; font-size: 0.7rem; }
 }
 
 .panel-stats-action {

@@ -697,7 +697,7 @@ export class Group {
     rowAction?: RowAction | readonly RowAction[],
   ): this {
     const actions: readonly RowAction[] = !rowAction ? [] : Array.isArray(rowAction) ? rowAction : [rowAction as RowAction];
-    const table = el('table', 'panel-stats');
+    const table = el('table', actions.length ? 'panel-stats has-actions' : 'panel-stats');
     if (header.some(Boolean)) {
       const head = el('tr');
       for (const cell of header) head.append(el('th', '', cell));
