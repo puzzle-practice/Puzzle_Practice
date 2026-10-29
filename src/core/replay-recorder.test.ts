@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { decodeReplayBlob, encodeReplayBlob, replayMetadata, ReplayRecorder, type PuzzleReplay } from './replay';
+import { CHECKPOINT_MS, decodeReplayBlob, encodeReplayBlob, replayMetadata, ReplayRecorder, type PuzzleReplay } from './replay';
 import { listReplayFiles, replayWrites, saveReplayFile } from './replay-storage';
 import { Store } from './storage';
 import { currentPirate } from './duty/profile';
@@ -263,6 +263,44 @@ describe('recording and playback regressions', () => {
     expect(saved.map((entry) => entry.puzzle).sort()).toEqual(['first', 'second']);
     expect(saved.every((entry) => entry.result === 'Stopped when leaving puzzle')).toBe(true);
     expect(localStorage.getItem('puzzle-practice:first:replays')).toBeNull();
+  });
+
+  it('keeps an open-ended game abandoned by a setting change, and drops any other', async () => {
+    const h = harness();
+    h.recorder.begin({}, {});
+    h.frame(10, [{ type: 'keydown', key: 'space' }], [1, 1]);
+    h.recorder.abandon();
+    h.recorder.openEnded = () => true;
+    h.recorder.begin({}, {});
+    h.frame(20, [{ type: 'keydown', key: 'space' }], [2, 2]);
+    h.recorder.abandon();
+    await replayWrites.idle();
+    expect((await listReplayFiles('distilling')).map((entry) => entry.result)).toEqual(['Stopped']);
+  });
+
+  it("saves an open-ended game as it stands every so often; its end replaces that copy, and dropping it removes it", async () => {
+    const h = harness();
+    h.recorder.openEnded = () => true;
+    h.recorder.begin({}, {});
+    h.frame(10, [{ type: 'keydown', key: 'space' }], [1, 1]);
+    h.frame(CHECKPOINT_MS + 10, [], [2, 2]);
+    await replayWrites.idle();
+    let saved = await listReplayFiles('distilling');
+    expect(saved.map((entry) => entry.result)).toEqual(['Unfinished']);
+    expect(saved[0].duration).toBe(CHECKPOINT_MS + 10);
+    h.finish(CHECKPOINT_MS + 500);
+    await replayWrites.idle();
+    saved = await listReplayFiles('distilling');
+    expect(saved.map((entry) => entry.result)).toEqual(['Finished']);
+    expect(saved[0].duration).toBe(CHECKPOINT_MS + 500);
+
+    h.recorder.begin({}, {}, CHECKPOINT_MS + 1000);
+    h.frame(2 * CHECKPOINT_MS + 1000, [{ type: 'keydown', key: 'space' }], [3, 3]);
+    await replayWrites.idle();
+    expect(await listReplayFiles('distilling')).toHaveLength(2);
+    h.recorder.cancel();
+    await replayWrites.idle();
+    expect((await listReplayFiles('distilling')).map((entry) => entry.result)).toEqual(['Finished']);
   });
 
   it('serializes compression without losing a later run and encodes each run just once', async () => {

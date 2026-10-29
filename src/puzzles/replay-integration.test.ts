@@ -925,7 +925,7 @@ describe('Shipwrightery sessions and replays', () => {
 });
 
 describe('Sailing Create sessions',()=>{
-  it('edits a frozen draft, tries it without timers or recordings, and restores it after play and reopening',async()=>{
+  it('edits a frozen draft, tries it without timers, records each try, and restores it after play and reopening',async()=>{
     const store=new Store('sailing');store.set('mode','Create');
     store.set('settings',{difficulty:5,tokens:1,desired:3,timerMs:120000,indicatorMax:7.48});
     const {panel,buttons,selections,clocks}=panelHarness();let now=0;
@@ -954,9 +954,17 @@ describe('Sailing Create sessions',()=>{
     expect(store.get('createBoard',null)).toEqual(draft);
     buttons.get('Play:Freeplay board:Play board')!();instance.frame([]);
     expect((step.mock.contexts.at(-1)! as SailingGame).board.cells).toEqual(draft.cells);
-    buttons.get('Play::Start')!();instance.dispose?.();
-    await replayWrites.idle();expect(await listReplayFiles('sailing')).toHaveLength(0);
+    buttons.get('Play::Start')!();
+    // Each try is a replay (Freeplay keeps no history), and plays back on the draft it was tried on.
+    await replayWrites.idle();
+    const tries=await listReplayFiles('sailing');
+    expect(tries.map(entry=>entry.result).sort()).toEqual(['Back to editor','Stopped']);
     expect(store.history('d5-t1-r3-120000-i7.48')).toHaveLength(0);
+    const recorder=captured.recorders.at(-1)!;
+    expect(await recorder.playAt(tries[0].at,tries[0].runId)).toBe(true);
+    instance.frame([]);
+    expect((step.mock.contexts.at(-1)! as SailingGame).board.cells).toEqual(draft.cells);
+    buttons.get('History:Replays:Stop')!();instance.dispose?.();
     const reopened=await factory(context);buttons.get('Play::Start')!();
     buttons.get('Play:Freeplay board:Play board')!();reopened.frame([]);
     expect((step.mock.contexts.at(-1)! as SailingGame).board.cells).toEqual(draft.cells);
@@ -2711,9 +2719,56 @@ describe('changing a setting mid-game', () => {
     instance.dispose?.();
   });
 
-  it('distilling keeps no replay of a session that sent nothing up', async () => {
+  it.each([
+    ['navigation with no timer', 'navigation', { mode: 'normal', difficulty: 4, extraRing: false, wildTargets: false, timerMs: 0 }],
+    ['navigation Freeplay', 'navigation', { mode: 'normal', difficulty: 4, extraRing: false, wildTargets: false, timerMs: 120000, create: true }],
+    ['bilging with no timer', 'bilging', { mode: 'normal', difficulty: 3, tokens: 0, water: 3, timerMs: 0, indicatorMax: 4.5 }],
+    ['bilging Freeplay', 'bilging', { mode: 'create', difficulty: 3, tokens: 0, water: 3, timerMs: 120000, indicatorMax: 4.5 }],
+  ] as const)('%s keeps its replay when a setting changes mid-game', async (_name, puzzle, settings) => {
+    const store = new Store(puzzle);
+    store.set('settings', settings);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./' + puzzle + '/index')).default as PuzzleFactory;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    buttons.get('Play::Start')!();
+    for (let frame = 0; frame < 200; frame++) { now += 17; instance.frame(frame % 20 === 10 ? [{ type: 'mousedown', button: 1, pos: [200, 300] }] : []); }
+    expect(recorder.openEnded()).toBe(true);
+    recorder.abandon();
+    await replayWrites.idle();
+    const saved = await listReplayFiles(puzzle);
+    expect(saved.map((entry) => entry.result)).toEqual(['Stopped']);
+    // It's still left out of the history and stats: only the replay is kept.
+    expect(Object.keys(JSON.parse(exportAll()).data).filter((key) => key.includes(':history:'))).toEqual([]);
+    expect(await recorder.playAt(saved[0].at, saved[0].runId)).toBe(true);
+    instance.dispose?.();
+  });
+
+  it.each([
+    ['Freeplay', { mode: 'Create' }],
+    ['with no timer', { mode: 'Standard', timerOn: false }],
+  ] as const)('distilling keeps the replay of a session %s that sent nothing up', async (_name, values) => {
     const store = new Store('distilling');
-    store.set('mode', 'Practice');
+    for (const [key, value] of Object.entries(values)) store.set(key, value);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./distilling/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    for (let frame = 0; frame < 60; frame++) { now += 17; instance.frame([]); }
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    expect(await listReplayFiles('distilling')).toHaveLength(1);
+    instance.dispose?.();
+  });
+
+  it('distilling keeps no replay of a timed session that sent nothing up', async () => {
+    const store = new Store('distilling');
+    store.set('mode', 'Standard');
     const { panel, buttons } = panelHarness();
     let now = 0;
     const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });

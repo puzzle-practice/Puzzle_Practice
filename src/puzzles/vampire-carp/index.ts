@@ -1184,6 +1184,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   () => (!boardActive && !pauseAvailable()) || replays.isPlaying);
 
   // Taken over, the replay's settings are the game's, and new boards come as in any game.
+  // Freeplay and games with no timer have no end of their own: their replays are kept however they stop.
+  replays.openEnded = () => boardActive && (config.create || config.unlimited);
   replays.onTakeOver = () => {
     savedReplaySettings = null;
     replayBoardSeeds = null;
