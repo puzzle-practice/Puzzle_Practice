@@ -1265,6 +1265,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   if (import.meta.env.DEV) (window as unknown as { __sf: unknown }).__sf = { get match() { return match; } };
 
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  // Freeplay and games with no timer have no end of their own: their replays are kept however they stop.
+  replays.openEnded = () => running && creating;
   replays.onTakeOver = () => {
     savedSettings = null;
   };

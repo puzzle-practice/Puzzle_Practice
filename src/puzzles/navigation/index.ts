@@ -498,6 +498,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (running) end('Stopped'); });
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  // Freeplay and games with no timer have no end of their own: their replays are kept however they stop.
+  replays.openEnded = () => running && (liveSettings.create || !liveSettings.timerMs);
   replays.onTakeOver = () => { savedSettings = null; };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(game, running, finished, selected, runSeed, board, banked, startTime, timerElapsedBeforeBoard,

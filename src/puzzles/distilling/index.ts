@@ -260,6 +260,8 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   let lastReplayState: DistillingReplayState | null = null;
   let paused = false;
   let startedMode: Mode = mode;
+  /** Freeplay, or a session with no timer: it has no end of its own, so its replay is always kept. */
+  let openRun = false;
   /** A piece key (1-5) held down in Freeplay mode paints the piece under the mouse. */
   let paintWith: number | null = null;
   let palettePiece: number | null = null;
@@ -474,6 +476,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     game = newGame(now);
     replays.begin({ mode, timerOn, createTimerOn, timerSeconds, difficulty, spawnRates: [...spawnRates], practiceNum: [...practiceNum] }, lastReplayState, now);
     startedMode = mode;
+    openRun = mode === 'Create' || runSettings().interval === null;
     paused = false;
     paintWith = null;
     palettePiece = null;
@@ -1267,6 +1270,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   }, isDistillingReplayState, setReplayTime, () => frame([]), replaySettingsCodec, () => !running || replays.isPlaying);
 
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
+  replays.openEnded = () => running && openRun;
   replays.onTakeOver = () => {
     savedReplaySettings = null;
     replayStartState = null;
