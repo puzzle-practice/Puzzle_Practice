@@ -291,7 +291,7 @@ export class Panel {
     replayPreferences.toggle('Exclude unlikely replays',
       () => this.preferences.get<boolean>('excludeUnlikelyReplays', true),
       (on) => this.preferences.set('excludeUnlikelyReplays', on),
-      { title: 'Sessions left out of the history as unlikely to matter (a Normal forage too short to rate, a Distilling session that sent nothing up) keep no replay. Turn off to keep their replays.' },
+      { title: 'Sessions left out of the history as unlikely to matter (a Normal forage too short to rate, a timed Distilling session that sent nothing up) keep no replay. Untimed and Freeplay sessions always keep theirs. Turn off to keep their replays.' },
     );
     replayPreferences.toggle('Compress replays',
       () => this.preferences.get<boolean>('compressReplays', true),

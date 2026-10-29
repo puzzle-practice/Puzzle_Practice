@@ -12,7 +12,7 @@ import { keyMatches } from '../../core/controls';
 import type { InputEvent } from '../../core/input';
 import type { PuzzleFactory } from '../../core/puzzle';
 import { BONUS_NAMES, BONUS_SETS, PATTERNS, WIDTH, HEIGHT, EMPTY, oriented } from './board';
-import { SailingEditor, readLayout, type Brush, type CreateTool } from './create';
+import { SailingEditor, readLayout, type Brush, type CreateTool, type Layout } from './create';
 import { SailingGame, DEFAULT_SETTINGS, feedbackText, indicatorStep, readSettings, settingsKey, type SailingSettings } from './game';
 import { drawBoard, drawPiece, CELL, LEFT, TOP } from './render';
 
@@ -26,6 +26,14 @@ const KEYS=[{id:'left',label:'Move left',defaultKey:'arrowleft'},{id:'right',lab
 // Left and right repeat seven times a second after a 300 ms hold; rotations and Space never repeat.
 const REPEAT_DELAY_MS=300, REPEAT_INTERVAL_MS=Math.trunc(1000/7);
 const validSeed=(s:unknown):s is number=>Number.isInteger(s)&&Number(s)>=0&&Number(s)<=0xffffffff;
+/** A Freeplay try's replay seed: the board's seed and the drafted layout it was played on. */
+type DraftSeed={seed:number;layout:Layout};
+const draftSeed=(s:unknown):DraftSeed|null=>{
+  if(!s||typeof s!=='object')return null;
+  const {seed,layout}=s as {seed?:unknown;layout?:unknown};
+  const read=readLayout(layout);
+  return validSeed(seed)&&read?{seed,layout:read}:null;
+};
 
 export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:rawReplayTime}) => {
   const pause=new SessionPause(rawTicks,rawReplayTime), {ticks,setReplayTime}=pause;
@@ -48,7 +56,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'sailing','Sailing',[]);
   const busy=()=>running||(replays?.isPlaying??false);
-  const elapsed=()=>Math.min(!creating()&&liveSettings.timerMs||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
+  const elapsed=()=>Math.min(!game.sandbox&&liveSettings.timerMs||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
   const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
   const history=()=>store.history(settingsKey(settings));
@@ -70,7 +78,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     if(!running)return;
     running=false;finished=true;timeUp=false;endAt=ticks();resetInput();commands=[];
     if(reason==='Time up')hold.start();
-    if(liveCreate){finished=false;preview();return;}
+    if(liveCreate){finishTry(reason);finished=false;preview();return;}
     const report=duty.end({mode:liveSettings.tokens?'Token practice':'Normal',performance:LEARNING,
       score:{label:'Points / pair',value:game.efficiency.toFixed(2)}});
     const tape=replays.finish(`${reason} · ${game.efficiency.toFixed(2)} points/pair`,report);
@@ -92,15 +100,27 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     game=new SailingGame(liveSettings,42,true);
     game.board.loadLayout(editor.board.cells,editor.board.targets);game.active=null;
   }
-  function playDraft():void {
-    if(!editable())return;
-    game=new SailingGame(liveSettings,crypto.getRandomValues(new Uint32Array(1))[0],true);
-    game.board.loadLayout(editor.board.cells,editor.board.targets);game.hold();
+  /** Plays a drafted layout; each try is recorded, so it can be watched again from the History tab. */
+  function playLayout(layout:Layout,seed:number):void {
+    game=new SailingGame(liveSettings,seed,true);
+    game.board.loadLayout(layout.cells,layout.targets);game.hold();
     editing=false;lastAt=startAt=ticks();resetInput();commands=[];message='';
     lastScene=null;lastMoves=lastBoards=lastBooches=0;
+    replays.begin(liveSettings,{seed,layout},startAt);
+  }
+  function playDraft():void {
+    if(!editable())return;
+    playLayout(editor.snapshot(),crypto.getRandomValues(new Uint32Array(1))[0]);
+  }
+  /** Ends a Freeplay try's replay; a try with nothing played keeps none. */
+  function finishTry(reason:string):void {
+    if(replays.isPlaying)return;
+    if(!replays.hasInput()){replays.cancel();return;}
+    replays.finish(`Freeplay · ${reason} · ${game.efficiency.toFixed(2)} points/pair`);
   }
   function editDraft():void {
     if(!creating()||!running)return;
+    finishTry('Back to editor');
     pause.resume();editing=true;resetInput();commands=[];showDraft();
   }
   function editInput(events:InputEvent[]):void {
@@ -185,8 +205,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     const resumed=pause.input(events,'sailing',running);
     if(!resumed){resetInput();draw(ticks());return;}
     const liveCommands=replays.isPlaying?[]:commands.splice(0);
-    if(!creating())for(const command of liveCommands)replays.command(command);
-    const routed=creating()?{events:resumed,commands:[],renderOnly:false}:replays.frame(resumed,input.mouse,ticks());
+    for(const command of liveCommands)replays.command(command);
+    const routed=replays.frame(resumed,input.mouse,ticks());
     if(routed.renderOnly){draw(ticks());return;}
     const now=ticks(), delta=Math.max(0,now-lastAt);lastAt=now;
     if(running){
@@ -224,13 +244,13 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
         lastBoards=game.boards;lastBooches=game.booches;
       }
       // Time's up: no more moves, and the session ends once the board has settled.
-      if(!creating()&&liveSettings.timerMs&&elapsed()>=liveSettings.timerMs)timeUp=true;
+      if(!game.sandbox&&liveSettings.timerMs&&elapsed()>=liveSettings.timerMs)timeUp=true;
       if(timeUp&&!game.busy)end('Time up');
     }
     if(!replays.isSeeking&&!replays.isAdvancing)draw(now);
   }
 
-  panel.clock(()=>!creating()&&(running||finished)?{label:liveSettings.timerMs?'Time left':'Time',ms:liveSettings.timerMs?Math.max(0,liveSettings.timerMs-elapsed()):elapsed(),countdown:!!liveSettings.timerMs}:null);
+  panel.clock(()=>!game.sandbox&&(running||finished)?{label:liveSettings.timerMs?'Time left':'Time',ms:liveSettings.timerMs?Math.max(0,liveSettings.timerMs-elapsed()):elapsed(),countdown:!!liveSettings.timerMs}:null);
   const session=panel.session();
   session.select('Mode',[{value:'Normal',label:'Normal'},{value:'Create',label:'Freeplay'}],()=>mode,value=>{mode=value;store.set('mode',mode);preview();},{disabled:busy});
   session.button('Start',()=>{if(replays.isPlaying)replays.stop();if(running)end('Stopped');else start();},{variant:'primary',label:()=>running&&!replays.isPlaying?'Stop':'Start'});
@@ -279,11 +299,15 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   ]}:null);
   const codec:ReplaySettingsCodec={currentVersion:1,simulatorVersion:1,migrate:(version,value)=>version===1?readSettings(value):null};
   replays=new ReplayRecorder('sailing',store,panel,ticks,tape=>{
-    savedSettings??={...settings};settings=readSettings(tape.settings)!;start(tape.seed as number,false);
+    savedSettings??={...settings};settings=readSettings(tape.settings)!;
+    // A Freeplay try plays its recorded layout; the draft in the editor is left alone.
+    const draft=draftSeed(tape.seed);
+    if(draft){start(draft.seed,true);playLayout(draft.layout,draft.seed);}
+    else start(tape.seed as number,false);
   },()=>{
     running=false;finished=false;timeUp=false;resetInput();commands=[];duty.clear();
     if(savedSettings){settings=savedSettings;savedSettings=null;}preview();
-  },validSeed,setReplayTime,()=>frame([]),codec,()=>!running||replays.isPlaying);
+  },seed=>validSeed(seed)||!!draftSeed(seed),setReplayTime,()=>frame([]),codec,()=>!running||editing||replays.isPlaying);
   replays.setStopLive(()=>{if(running)end('Stopped');});
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
   replays.onTakeOver=()=>{savedSettings=null;};

@@ -16,7 +16,7 @@ Pieces may fill platform targets, and replacing a joined half disconnects its pa
 Right-click or choose Eraser to remove a piece first, then the platform underneath on another
 click. Undo/Redo includes whole pairs, platforms and Clear board. Drafts save automatically in
 browser storage. **Play board** tests a copy with normal falling pieces and clearing rules;
-**Back to editor** restores the unchanged draft. Freeplay has no timer or saved scores/replays.
+**Back to editor** restores the unchanged draft. Freeplay has no timer or saved scores. Each try you play is saved as a replay in the History tab.
 Clearing the final platform leaves the board available for line practice. A blocked spawn keeps
 the layout and asks you to return to the editor rather than replacing it with a generated board.
 

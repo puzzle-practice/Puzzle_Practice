@@ -925,7 +925,7 @@ describe('Shipwrightery sessions and replays', () => {
 });
 
 describe('Sailing Create sessions',()=>{
-  it('edits a frozen draft, tries it without timers or recordings, and restores it after play and reopening',async()=>{
+  it('edits a frozen draft, tries it without timers, keeps no replay of untouched tries, and restores it after play and reopening',async()=>{
     const store=new Store('sailing');store.set('mode','Create');
     store.set('settings',{difficulty:5,tokens:1,desired:3,timerMs:120000,indicatorMax:7.48});
     const {panel,buttons,selections,clocks}=panelHarness();let now=0;
@@ -3037,6 +3037,165 @@ describe('every puzzle takes over a replay', () => {
     instance.frame([]);
     expect(recorder.divergedAt).toBeNull();
     buttons.get('History:Replays:Stop')!();
+    instance.dispose?.();
+  });
+});
+
+describe('untimed and Freeplay sessions keep their replays', () => {
+  const screen = () => new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+  /** Plays the newest replay to its end: true when every recorded check matched. */
+  async function replaysCleanly(puzzle: string, frame: () => void): Promise<boolean> {
+    await replayWrites.idle();
+    const [tape] = await listReplayFiles(puzzle);
+    const recorder = captured.recorders.at(-1)!;
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration + 1);
+    frame();
+    const loaded = await recorder['loadTape'](tape);
+    expect(loaded!.checks?.length ?? 0).toBeGreaterThan(0);
+    const clean = recorder.divergedAt === null;
+    recorder.stop();
+    perf.mockRestore();
+    return clean;
+  }
+
+  it.each([
+    ['untimed Standard', { mode: 'Standard', timerOn: false }, 1],
+    ['Freeplay', { mode: 'Create' }, 1],
+    ['timed Standard', { mode: 'Standard', timerOn: true }, 0],
+  ] as const)('distilling keeps a %s session that sent nothing up: %i replay', async (_label, values, kept) => {
+    const store = new Store('distilling');
+    for (const [k, v] of Object.entries(values)) store.set(k, v);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const factory = (await import('./distilling/index')).default;
+    const instance = await factory({ screen: screen(), input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    for (let frame = 0; frame < 120; frame++) {
+      now += 17;
+      instance.frame(frame % 30 === 10 ? [{ type: 'keydown', key: 'arrowright' }, { type: 'keyup', key: 'arrowright' }, { type: 'keydown', key: 'space' }, { type: 'keyup', key: 'space' }] : []);
+    }
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    expect(await listReplayFiles('distilling')).toHaveLength(kept);
+    if (kept) expect(await replaysCleanly('distilling', () => instance.frame([]))).toBe(true);
+    instance.dispose?.();
+  });
+
+  it('distilling keeps no replay of an untimed session with nothing played', async () => {
+    const store = new Store('distilling');
+    store.set('timerOn', false);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const factory = (await import('./distilling/index')).default;
+    const instance = await factory({ screen: screen(), input: { mouse: [-1, -1] }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    for (let frame = 0; frame < 60; frame++) { now += 17; instance.frame([]); }
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    expect(await listReplayFiles('distilling')).toHaveLength(0);
+    instance.dispose?.();
+  });
+
+  it('sailing records each Freeplay try and replays it on its own layout, leaving the draft alone', async () => {
+    const store = new Store('sailing'); store.set('mode', 'Create');
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const factory = (await import('./sailing/index')).default;
+    const instance = await factory({ screen: screen(), input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const step = vi.spyOn(SailingGame.prototype, 'step');
+    const click = (x: number, y: number) => instance.frame([{ type: 'mousedown', button: 1, pos: [88 + x * 34 + 17, 42 + y * 34 + 17] }]);
+    buttons.get('Play::Start')!();
+    click(0, 14);
+    const draft = store.get<unknown>('createBoard', null);
+    buttons.get('Play:Freeplay board:Play board')!();
+    // Space turns gravity on; then each pair is moved, turned and dropped.
+    const keys = ['space', 'arrowleft', 'arrowup', 'space', 'arrowright', 'space', 'arrowdown', 'space'];
+    for (let frame = 0; frame < 3000; frame++) {
+      now += 17;
+      const k = keys[Math.floor(frame / 20) % keys.length];
+      instance.frame(frame % 20 === 0 ? [{ type: 'keydown', key: k }] : frame % 20 === 5 ? [{ type: 'keyup', key: k }] : []);
+    }
+    const live = step.mock.contexts.at(-1)! as SailingGame;
+    expect(live.moves).toBeGreaterThan(0);
+    const played = { moves: live.moves, cells: [...live.board.cells] };
+    buttons.get('Play:Freeplay board:Back to editor')!();
+    await replayWrites.idle();
+    const files = await listReplayFiles('sailing');
+    expect(files.map(file => file.result)).toEqual([expect.stringMatching(/^Freeplay · Back to editor · /)]);
+    expect(await replaysCleanly('sailing', () => {
+      instance.frame([]);
+      const watched = step.mock.contexts.at(-1)! as SailingGame;
+      expect({ moves: watched.moves, cells: [...watched.board.cells] }).toEqual(played);
+    })).toBe(true);
+    expect(store.get('createBoard', null)).toEqual(draft);
+    // Back in the editor, a try with nothing played keeps no replay.
+    buttons.get('Play::Start')!();
+    expect(store.get('createBoard', null)).toEqual(draft);
+    buttons.get('Play:Freeplay board:Play board')!();
+    expect(captured.recorders.at(-1)!['recording']).not.toBeNull();
+    for (let frame = 0; frame < 30; frame++) { now += 17; instance.frame([]); }
+    buttons.get('Play::Start')!();
+    instance.dispose?.();
+    await replayWrites.idle();
+    expect(await listReplayFiles('sailing')).toHaveLength(1);
+  });
+
+  it('rumble records Freeplay edits, panel changes, punches and shots and replays them to the same board', async () => {
+    vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new Random(11)));
+    const updates = vi.spyOn(RumbleMatch.prototype, 'update');
+    const store = new Store('rumble'); store.set('mode', 'Create');
+    const harness = panelHarness();
+    let now = 100;
+    const input = { mouse: [-1, -1] as [number, number] };
+    const factory = (await import('./rumble/index')).default;
+    const instance = await factory({ screen: screen(), input, panel: harness.panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const match = () => updates.mock.contexts.at(-1)! as RumbleMatch;
+    const advance = (ms: number, events: InputEvent[] = []) => {
+      for (let t = 0; t < ms; t += 17) { now += 17; instance.frame(t === 0 ? events : []); }
+    };
+    harness.buttons.get('Play::Start')!();
+    advance(200);
+    // Paint with a held key while the mouse moves, then charge and bruise a ball.
+    input.mouse = [140, 90];
+    advance(50, [{ type: 'keydown', key: '1' }]);
+    input.mouse = [170, 90]; advance(50);
+    input.mouse = [200, 90]; advance(50, [{ type: 'keyup', key: '1' }]);
+    advance(50, [{ type: 'keydown', key: 'c' }, { type: 'keyup', key: 'c' }]);
+    advance(50, [{ type: 'keydown', key: 'b' }, { type: 'keyup', key: 'b' }]);
+    // Panel changes: new rows and a random bludgeon, a fresh deal, a punch and an undo.
+    harness.setters.get('Controls:Board:Rows')!(5);
+    harness.selections.get('Controls:Punch:Bludgeon')!(-1);
+    advance(100);
+    harness.buttons.get('Controls:Board:Deal (G)')!();
+    advance(100);
+    harness.buttons.get('Controls:Punch:Punch! (P)')!();
+    advance(4000);
+    harness.buttons.get('Controls:Punch:Punch! (P)')!();
+    advance(4000);
+    harness.buttons.get('Controls:Board:Undo (U)')!();
+    advance(100);
+    // Shots, as in a fight.
+    input.mouse = [200, 300];
+    for (let shot = 0; shot < 4; shot++) advance(3000, [{ type: 'mousedown', button: shot % 2 ? 3 : 1, pos: [200, 300] }, { type: 'mouseup', button: shot % 2 ? 3 : 1, pos: [200, 300] }]);
+    harness.toggles.get('Settings:Freeplay:Board drops a row every 8 shots')!(false);
+    advance(500, [{ type: 'keydown', key: 'g' }, { type: 'keyup', key: 'g' }]);
+    const played = { cells: [...match().player.board.cells], shots: match().player.stats.shots };
+    harness.buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    const files = await listReplayFiles('rumble');
+    expect(files.map(file => file.result)).toEqual([expect.stringMatching(/^Freeplay · \d+ punch(es)? · \d+ shots$/)]);
+    // The player's own Freeplay settings are put back after watching.
+    const rows = store.get<{ rows: number }>('create', { rows: 0 }).rows;
+    expect(await replaysCleanly('rumble', () => {
+      instance.frame([]);
+      expect({ cells: [...match().player.board.cells], shots: match().player.stats.shots }).toEqual(played);
+    })).toBe(true);
+    expect(store.get<{ rows: number }>('create', { rows: 0 }).rows).toBe(rows);
     instance.dispose?.();
   });
 });
