@@ -12,6 +12,7 @@ describe('Werewolf parity with test build 20261017062155', () => {
       const game = new Forage(BigInt(fixture.seed), { beforeMove: (g) => { if (bonus) g.board.bonusMode = bonus; } }, fixture.difficulty, true);
       // The test build keeps incoming crates off moons.
       game.moons!.blocksCrates = true;
+      game.moons!.antsCharge = true;
       const moons = () => game.moons!.active.map((m) => [m.id, m.x, m.y, m.phase, m.charge]);
       expect(game.cells).toEqual(fixture.start);
       expect(moons()).toEqual(fixture.startMoons);
@@ -84,6 +85,7 @@ describe('Werewolf moons', () => {
   it('counts repeated clears in the 2x2, while ants do not age moons', () => {
     const board = new ForageBoard(1);
     const moons = new MoonField();
+    moons.antsCharge = true;
     moons.active.push({ id: 1, x: 2, y: 3, phase: 4, charge: 0 });
     moons.noteEaten(2, 3);
     moons.endMove(board);
@@ -152,14 +154,15 @@ describe('Werewolf moons', () => {
     expect(board.moons.spawn(board)).toBeNull();
   });
 
-  it('charges a moon when an ant eats within it', () => {
+  it.each([false, true])('charges a moon when an ant eats within it unless turned off for Den (Exp) (%s)', (antsCharge) => {
     const board = new WerewolfForageBoard(1);
+    board.moons.antsCharge = antsCharge;
     board.moons.active.splice(0);
     board.moons.active.push({ id: 1, x: 2, y: 3, phase: 4, charge: 0 });
     board.setPiece(2, 2, makeAnts(8, 3));
     board.tickAnts();
     board.moons.endMove(board);
-    expect(board.moons.active[0]).toMatchObject({ charge: 1, phase: 4 });
+    expect(board.moons.active[0]).toMatchObject({ charge: antsCharge ? 1 : 0, phase: 4 });
   });
 
   it('uses the wolf animation and clamped throw origin at an edge', () => {

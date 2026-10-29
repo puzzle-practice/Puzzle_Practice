@@ -23,6 +23,7 @@ boards, automatic next board and 1/2/3 crate scoring are unchanged.
 - The moon's firing (and fading) animations run at 4/3 speed, so the board is held 25% less time.
 - A new moon is three times as likely to come up on a spot over a column holding a crate.
 - A crate that comes in while no moon is up brings a moon up with it.
+- Ants eating inside a moon don't add to its claw count.
 
 In every mode, moons no longer keep incoming crates off their cells (the test build does; replays
 recorded before this change keep it). History and best scores are kept apart for Den and Den
@@ -44,9 +45,10 @@ sheets retain every original tile pixel.
 - Start with one moon on a random, crate-free 2×2 area, using the board's Java-compatible RNG.
   Moon positions stay fixed when pieces rotate or fall.
 - Every nonempty, noncrate clear within a moon adds one charge. Four charges fire it.
-  Repeated clears of the same coordinate count. Ant bites charge moons too.
+  Repeated clears of the same coordinate count. Ant bites charge moons too (except in Den (Exp);
+  see above).
 - Moons age once per move that clears pieces anywhere, expire after four such moves,
-  and respawn after two or three clearing moves, with at most the selected one or two present.
+  and respawn after two or three clearing moves, with at most the selected number present.
   Ant bites and
   the moon beams themselves do not advance that age/spawn clock.
 - Check charged moons after gravity, crate collection and matches, before crate placement.
@@ -62,7 +64,8 @@ sheets retain every original tile pixel.
 - Moons appear at full strength; each new phase shows at full strength for 250ms, then fades
   over 250ms to 60%. A firing moon fades from 60%. From `20261017062155` the claw marks do the
   same whenever their count (or the moon's phase) changes.
-- From `20261017062155`: every scoring move howls (`chest_howl`) and the Werewolf intro plays on
+- From `20261017062155`: every scoring move howls (`chest_howl`), except here a move that clears a
+  chest, and the Werewolf intro plays on
   the first game only. Practice omits the continuous night ambience.
 - Moon snapshots are kept per animation step, and birth times are tracked during replay seeking.
 

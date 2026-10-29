@@ -269,8 +269,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * 6 makes the moon limit selectable, defaulting to one for new games.
    * 7 restores the one-second chest delay, keeping the overlapping click requirement.
    * 8: moons no longer keep incoming crates off their cells.
+   * 9: ant bites no longer charge moons in Den (Exp).
    */
-  const RULES = 8;
+  const RULES = 9;
   let rules = RULES;
   const moonLimit = (): number => rules < 6 ? 2 : settings.maxMoons ?? 1;
   let sessionSeed: ForageReplaySeed | null = null;
@@ -354,6 +355,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (g.moons && settings.mode !== 'create') {
       const exp = den() === 'exp';
       g.moons.blocksCrates = rules < 8;
+      // Den (Exp) only: ant bites don't add to a moon's claw count.
+      g.moons.antsCharge = rules < 9 || !exp;
       g.moons.eagerPhase = g.moons.chestBias = g.moons.spawnWithCrate = exp;
       g.moons.pace = exp ? 0.75 : 1;
     }
@@ -545,8 +548,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       else if (settings.mode !== 'puzzle') score += result.gauntletPoints;
       crates += result.collected[0] + result.collected[1] + result.collected[2];
       sessionCrates = sessionCrates.map((n, i) => n + result.collected[i]);
-      // The score sound, by the move's game points (Werewolf howls whatever the points).
-      if (result.points > 0 && !(normalMode() && crates >= BANANAS)) {
+      // The score sound, by the move's game points (Werewolf howls whatever the points, but not on
+      // a move that clears a chest).
+      const clearsChest = result.collected.some((n) => n > 0);
+      if (result.points > 0 && !(normalMode() && crates >= BANANAS) && !(werewolf() && clearsChest)) {
         const last = game.steps[game.steps.length - 1];
         last.sounds.push({ name: werewolf() ? 'chest_howl' : result.points > 14 ? 'score_big' : result.points > 7 ? 'score_medium' : 'score_small', delay: last.duration });
       }

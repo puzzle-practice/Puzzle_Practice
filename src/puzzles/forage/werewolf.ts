@@ -28,6 +28,8 @@ export class MoonField {
   spawning = true;
   /** Incoming crates can't land on a moon. Only replays recorded before Den keep this. */
   blocksCrates = false;
+  /** Ant bites inside a moon add to its claw count: off in Den (Exp), except in replays recorded before. */
+  antsCharge = false;
   /** Den (Exp): a moon wanes on the move's first clear rather than once the move has played out. */
   eagerPhase = false;
   /** Den (Exp): moons come up three times as often over columns holding a crate. */
@@ -51,11 +53,15 @@ export class MoonField {
       if (this.eagerPhase && !this.cleared) for (const moon of this.active) moon.phase = Math.max(0, moon.phase - 1);
       this.cleared = true;
     }
-    this.noteEaten(x, y);
+    this.charge(x, y);
   }
 
-  /** Ant bites charge moons but do not age them or advance the spawn timer. */
+  /** Ant bites never age moons or advance the spawn timer; they charge them unless antsCharge is off. */
   noteEaten(x: number, y: number): void {
+    if (this.antsCharge) this.charge(x, y);
+  }
+
+  private charge(x: number, y: number): void {
     for (const moon of this.active) {
       if (x >= moon.x && x <= moon.x + 1 && y >= moon.y && y <= moon.y + 1) moon.charge++;
     }
