@@ -179,13 +179,16 @@ describe('Werewolf moons', () => {
 describe('Den (Exp) moons', () => {
   const quiet = () => Array.from({ length: WIDTH * HEIGHT }, (_, i) => (i % WIDTH + 2 * Math.floor(i / WIDTH)) % 5);
 
-  it('keeps Den to one moon at a time', () => {
-    const board = new WerewolfForageBoard(3, 8, true, 1);
-    for (let i = 0; i < 10; i++) {
+  it.each([1, 5])('keeps Den to at most %s moons at a time', (limit) => {
+    const board = new WerewolfForageBoard(3, 8, true, limit);
+    let most = 0;
+    for (let i = 0; i < 60; i++) {
       board.moons.noteCleared(0, 0);
       board.moons.endMove(board);
-      expect(board.moons.active.length).toBeLessThanOrEqual(1);
+      for (const moon of board.moons.active) moon.phase = 4;
+      most = Math.max(most, board.moons.active.length);
     }
+    expect(most).toBe(limit);
   });
 
   it('wanes a moon on the first clear of a move, once', () => {

@@ -38,7 +38,7 @@ export class MoonField {
   pace = 1;
 
   /** Engine callers and native parity fixtures retain the game's two-moon limit. */
-  constructor(readonly maxMoons: 1 | 2 = 2) {}
+  constructor(readonly maxMoons = 2) {}
 
   snapshot(): Moon[] { return this.active.map((moon) => ({ ...moon })); }
 
@@ -154,7 +154,7 @@ export class WerewolfForageBoard extends ForageBoard {
   readonly moons: MoonField;
 
   /** Freeplay's board starts without a moon, and none come up: they're painted on. */
-  constructor(seed: number | bigint, difficulty = 8, spawning = true, maxMoons: 1 | 2 = 2) {
+  constructor(seed: number | bigint, difficulty = 8, spawning = true, maxMoons = 2) {
     super(seed, difficulty);
     this.moons = new MoonField(maxMoons);
     this.moons.spawning = spawning;

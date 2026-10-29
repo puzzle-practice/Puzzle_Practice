@@ -118,6 +118,9 @@ const RATING_SCALES: RatingScale[] = [
   { id: 'gauntletPoints', label: 'Gauntlet and Chaos, points', cutoffs: [3, 6, 9, 12, 15, 20, 25, 30, 35, 40], gauntlet: true },
 ];
 
+/** Den's Maximum moons setting goes up to five. */
+const MAX_MOONS = 5;
+
 /** Modes that end and keep a best score. */
 const SCORED = new Set<Mode>(['ci', 'infinite', 'normal', 'chaos', 'werewolf']);
 
@@ -179,7 +182,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const warning = new TimerWarning('gauntlet', () => replays?.isSeeking ?? false);
 
   const settings: Settings = { ...DEFAULT_SETTINGS, ...store.get<Partial<Settings>>('settings', {}) };
-  settings.maxMoons = settings.maxMoons === 2 ? 2 : 1;
+  settings.maxMoons = Math.min(MAX_MOONS, Math.max(1, Math.round(Number(settings.maxMoons) || 1)));
   // The initial local test exposed a separate mode. Fold saved play settings into Gauntlet.
   // Replay settings are restored separately below, preserving that version's rules.
   if (settings.mode === 'werewolf') {
@@ -269,7 +272,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    */
   const RULES = 8;
   let rules = RULES;
-  const moonLimit = (): 1 | 2 => den() ? 1 : rules < 6 ? 2 : settings.maxMoons ?? 1;
+  const moonLimit = (): number => rules < 6 ? 2 : settings.maxMoons ?? 1;
   let sessionSeed: ForageReplaySeed | null = null;
   let recordedAction = false;
   let nextReplayBoard = 0;
@@ -296,7 +299,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       (settings.ants ? 'ants' : '');
     // Preserve existing scores for the original Gauntlet and Normal round lengths.
     const original = normalMode() ? 0 : 120;
-    if (den()) return `${base}:${den() === 'exp' ? 'den-exp' : 'den'}`;
+    if (den()) return `${base}:${den() === 'exp' ? 'den-exp' : 'den'}${moonLimit() === 1 ? '' : `:moons:${moonLimit()}`}`;
     return base + (roundSeconds() === original ? '' : `:timer:${roundSeconds()}`) +
       (settings.mode === 'ci' && settings.werewolfArt ? ':werewolf-art' : '') +
       (settings.mode === 'ci' && settings.moons ? `:moons${moonLimit() === 1 ? ':1' : ''}` : '');
@@ -975,7 +978,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         Number.isInteger(s.forageLevel) && (s.forageLevel as number) >= 0 && (s.forageLevel as number) <= 15 &&
         ['bb', 'fj', 'cc', 'eq', 'machete', 'shovel', 'monkey', 'ants', 'scramble'].every((key) => typeof s[key] === 'boolean') &&
         ['werewolfArt', 'moons'].every((key) => s[key] === undefined || typeof s[key] === 'boolean') &&
-        (s.maxMoons === undefined || s.maxMoons === 1 || s.maxMoons === 2) &&
+        (s.maxMoons === undefined || (Number.isInteger(s.maxMoons) && (s.maxMoons as number) >= 1 && (s.maxMoons as number) <= MAX_MOONS)) &&
         (s.den === undefined || s.den === 'den' || s.den === 'exp') &&
         ratios(s.normalRatios) && (s.chestRatios === undefined || ratios(s.chestRatios)) &&
         (s.roundSeconds === undefined || (Number.isFinite(s.roundSeconds) && (s.roundSeconds as number) >= 0)) &&
@@ -1066,6 +1069,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   bind(specials, 'Monkey', 'monkey', werewolf);
   bind(specials, 'Wolf', 'monkey', () => !werewolf());
   bind(specials, 'Ants', 'ants');
+  specials.select('Maximum moons', Array.from({ length: MAX_MOONS }, (_, i) => ({ value: i + 1, label: String(i + 1) })), moonLimit,
+    (value) => { settings.maxMoons = value; saveSettings(); },
+    { hidden: () => !den(), title: 'Maximum moons on the board at once; applies to the next game' });
   panel.settings.group('Reset').button('Reset to defaults', () => {
     Object.assign(settings, structuredClone(DEFAULT_SETTINGS));
     delete settings.roundSeconds;

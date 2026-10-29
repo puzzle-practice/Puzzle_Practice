@@ -2267,17 +2267,37 @@ describe('Navigation sessions and replay', () => {
 });
 
 describe('Forage Den art', () => {
-  it.each([undefined, 2])('plays Den with one moon, even from saved Gauntlet moons with a limit of %s', async (limit) => {
+  it.each([undefined, 3, 5])('plays Den with the selected moon limit %s, defaulting to one', async (limit) => {
     const { MoonField } = await import('./forage/werewolf');
     const spawn = vi.spyOn(MoonField.prototype, 'spawn');
     const store = new Store('forage');
-    store.set('settings', { mode: 'ci', moons: true, maxMoons: limit, roundSeconds: 0 });
+    store.set('settings', { mode: 'ci', den: 'den' });
+    const { panel, buttons, selections } = panelHarness();
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./forage/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => 0 } as unknown as PuzzleContext);
+    const select = selections.get('Settings:Specials:Maximum moons');
+    expect(select).toBeDefined();
+    if (limit !== undefined) {
+      select!(limit);
+      expect(store.get('settings', {})).toMatchObject({ maxMoons: limit });
+    }
+    buttons.get('Play::Start')!();
+    expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).maxMoons).toBe(limit ?? 1);
+    instance.dispose?.();
+  });
+
+  it('opens saved Gauntlet moons as Den, keeping their moon limit', async () => {
+    const { MoonField } = await import('./forage/werewolf');
+    const spawn = vi.spyOn(MoonField.prototype, 'spawn');
+    const store = new Store('forage');
+    store.set('settings', { mode: 'ci', moons: true, maxMoons: 2, roundSeconds: 0 });
     const { panel, buttons } = panelHarness();
     const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
     const factory = (await import('./forage/index')).default;
     const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => 0 } as unknown as PuzzleContext);
     buttons.get('Play::Start')!();
-    expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).maxMoons).toBe(1);
+    expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).maxMoons).toBe(2);
     instance.dispose?.();
   });
 

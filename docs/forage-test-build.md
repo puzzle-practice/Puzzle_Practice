@@ -12,7 +12,8 @@ npm run dev -- --host 127.0.0.1 --port 5212 --strictPort
 
 Both Den modes are Gauntlet with Werewolf Isle's settings filled in: a 5 minute timer, the
 Werewolf art (forest background, treasure crates, sounds and the wolf in place of the monkey) and
-moons, with at most one moon up at a time. Gauntlet's chest ratios, paced delivery, nine-crate
+moons. **Maximum moons** under Specials sets how many moons can be up at once, from 1 (the
+default) to 5; it applies to the next game and is saved with recordings. Gauntlet's chest ratios, paced delivery, nine-crate
 boards, automatic next board and 1/2/3 crate scoring are unchanged.
 
 **Den (Exp)** adds experimental moon changes on top:
@@ -25,7 +26,8 @@ boards, automatic next board and 1/2/3 crate scoring are unchanged.
 
 In every mode, moons no longer keep incoming crates off their cells (the test build does; replays
 recorded before this change keep it). History and best scores are kept apart for Den and Den
-(Exp). The old Werewolf art and Moons toggles are gone: saved Gauntlet settings with moons on, and
+(Exp). The old Werewolf art and Moons toggles are gone: saved Gauntlet settings with moons on (keeping
+their moon limit), and
 the initial local Werewolf mode, open as Den. Replays recorded with the toggles still play back
 with them.
 
