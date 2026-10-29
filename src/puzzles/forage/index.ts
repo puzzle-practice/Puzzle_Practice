@@ -583,7 +583,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       } else {
         boardActive = false;
         ended = true;
-        endRecording(`Dismissed, ${movesUsed} moves`, endReport());
+        const report = endReport();
+        // A short session with no moves keeps no replay either, as a short scored one doesn't.
+        if (unrated() && excludesUnlikelyReplays() && !replay) { replays.cancel(); sessionSeed = null; recordedAction = false; }
+        else endRecording(`Dismissed, ${movesUsed} moves`, report);
       }
     } else if (boardActive) {
       boardActive = false;

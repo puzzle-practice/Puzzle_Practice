@@ -2554,7 +2554,9 @@ describe('replays match the live game', () => {
 });
 
 describe('short Normal forage sessions', () => {
-  it('are unrated and keep no replay, best or history', async () => {
+  // Turns of four matching pieces are recorded but aren't moves, so the session can end with none.
+  it.each([false, true])('are unrated and keep no replay, best or history (turns that change nothing: %s)', async (still) => {
+    if (still) vi.spyOn((await import('./forage/engine')).Forage.prototype, 'act').mockReturnValue('same');
     vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new Random(3)));
     const store = new Store('forage');
     store.set('settings', { mode: 'normal' });
