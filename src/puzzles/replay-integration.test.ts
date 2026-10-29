@@ -2266,28 +2266,22 @@ describe('Navigation sessions and replay', () => {
   });
 });
 
-describe('Forage art toggle', () => {
-  it.each([undefined, 1, 2])('uses the selected moon limit %s, defaulting to one', async (limit) => {
+describe('Forage Den art', () => {
+  it.each([undefined, 2])('plays Den with one moon, even from saved Gauntlet moons with a limit of %s', async (limit) => {
     const { MoonField } = await import('./forage/werewolf');
     const spawn = vi.spyOn(MoonField.prototype, 'spawn');
     const store = new Store('forage');
-    store.set('settings', { mode: 'ci', moons: true, roundSeconds: 0 });
-    const { panel, buttons, selections } = panelHarness();
+    store.set('settings', { mode: 'ci', moons: true, maxMoons: limit, roundSeconds: 0 });
+    const { panel, buttons } = panelHarness();
     const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
     const factory = (await import('./forage/index')).default;
     const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => 0 } as unknown as PuzzleContext);
-    const select = selections.get('Settings:Specials:Maximum moons');
-    expect(select).toBeDefined();
-    if (limit !== undefined) {
-      select!(limit);
-      expect(store.get('settings', {})).toMatchObject({ maxMoons: limit });
-    }
     buttons.get('Play::Start')!();
-    expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).maxMoons).toBe(limit ?? 1);
+    expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).maxMoons).toBe(1);
     instance.dispose?.();
   });
 
-  it.each([false, true])('swaps the monkey board icon and animation when art is %s', async (art) => {
+  it.each([false, true])('swaps the monkey board icon and animation when Den is %s', async (art) => {
     const { Forage } = await import('./forage/engine');
     const { WIDTH, HEIGHT, MONKEY } = await import('./forage/board');
     const { Images } = await import('../core/assets');
@@ -2299,15 +2293,14 @@ describe('Forage art toggle', () => {
       return originalAct.call(this, x, y, ccw);
     });
     const store = new Store('forage');
-    store.set('settings', { mode: 'ci', roundSeconds: 0, moons: false });
-    const { panel, buttons, toggles } = panelHarness();
+    store.set('settings', { mode: 'ci', roundSeconds: 0, den: art ? 'den' : undefined });
+    const { panel, buttons } = panelHarness();
     const blit = vi.fn();
     const ctx = Object.assign(canvasContext(), { drawImage: vi.fn() });
     const screen = new Proxy({ ctx, blit }, { get: (target, key) => key in target ? target[key as keyof typeof target] : () => ({ width: 0, height: 0 }) });
     let now = 0;
     const factory = (await import('./forage/index')).default;
     const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now } as unknown as PuzzleContext);
-    toggles.get('Settings:Display:Werewolf art')!(art);
     buttons.get('Play::Start')!();
     now = 2000; instance.frame([]);
     blit.mockClear();
@@ -2368,11 +2361,11 @@ describe('puzzle completion during replay', () => {
     ['vampire-carp', 121000, 1000, {}],
     ['vampire-carp', 121000, 1000, { config: { ship: true, difficulty: 6, tokens: 2 } }],
     ['forage', 12000, 20, { settings: { mode: 'ci', roundSeconds: 5 } }],
-    ['forage', 12000, 20, { settings: { mode: 'ci', roundSeconds: 5, werewolfArt: true, moons: false } }],
-    ['forage', 12000, 20, { settings: { mode: 'ci', roundSeconds: 5, werewolfArt: false, moons: true } }],
-    ['forage', 12000, 20, { settings: { mode: 'ci', roundSeconds: 5, werewolfArt: true, moons: true } }],
-    ['forage', 12000, 20, { settings: { mode: 'ci', roundSeconds: 5, moons: true, maxMoons: 2 } }],
-    ['forage', 12000, 20, { settings: { mode: 'werewolf', roundSeconds: 5 } }],
+    // Den's five minutes, at a coarser step.
+    ['forage', 302000, 100, { settings: { mode: 'ci', den: 'den' } }],
+    ['forage', 302000, 100, { settings: { mode: 'ci', den: 'exp' } }],
+    // The first test's Werewolf mode comes back as Den.
+    ['forage', 302000, 100, { settings: { mode: 'werewolf', roundSeconds: 5 } }],
     ['swordfight', 90000, 20, { settings: { opponents: 1, skill: 5, difficulty: 5, breakers: 12.5, sword: [2, 0, 0], enemySword: [6, 4, 2] } }],
   ] as const)('%s keeps player history unchanged through playback, seeking and Stop', async (puzzle, end, step, settings) => {
     const store = new Store(puzzle);
@@ -2435,24 +2428,19 @@ describe('puzzle completion during replay', () => {
       expect(history.anticlockwise).toBeGreaterThan(0);
       expect(result.rows).toContainEqual(['Clockwise, anticlockwise', `0, ${history.anticlockwise}`]);
       if ('settings' in settings) {
-        const savedSettings = store.get<{ werewolfArt: boolean; moons: boolean; maxMoons?: number }>('settings', { werewolfArt: false, moons: false });
+        const den = store.get<{ den?: 'den' | 'exp' }>('settings', {}).den;
         const report = (results()[0] as { report: DutyReport }).report;
-        expect(report.mode).toBe('Gauntlet');
+        expect(report.mode).toBe(den === 'exp' ? 'Den (Exp)' : den ? 'Den' : 'Gauntlet');
         expect(report.score.label).toBe('Score');
         expect(Number(report.score.value)).toBe(report.cleared[0].items.reduce((sum, item, i) => sum + item.count * (i + 1), 0));
-        expect(report.cleared[0].items.map((i) => i.icon)).toEqual(savedSettings.werewolfArt
+        expect(report.cleared[0].items.map((i) => i.icon)).toEqual(den
           ? ['werewolf-chest-small', 'werewolf-chest-medium', 'werewolf-chest-large']
           : ['ci-bone-box', 'ci-fetish-jar', 'ci-cursed-chest']);
         expect(histories[0][0]).toContain('ci:');
-        expect(histories[0][0].includes(':werewolf-art')).toBe(!!savedSettings.werewolfArt);
-        expect(histories[0][0].includes(':moons')).toBe(!!savedSettings.moons);
-        if (savedSettings.moons) {
-          expect(histories[0][0].endsWith(':moons:1')).toBe(savedSettings.maxMoons !== 2);
-          const tape = await recorder['loadTape'](replay);
-          expect(tape!.settings).toMatchObject({ maxMoons: savedSettings.maxMoons ?? 1 });
-        }
+        expect(histories[0][0].endsWith(':den')).toBe(den === 'den');
+        expect(histories[0][0].endsWith(':den-exp')).toBe(den === 'exp');
         expect(Object.keys(data).some((k) => k.endsWith(':normalBestPerMove'))).toBe(false);
-        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 7 });
+        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 8 });
       }
     }
     if (puzzle === 'treasure-haul') {

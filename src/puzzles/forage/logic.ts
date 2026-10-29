@@ -32,6 +32,12 @@ export interface Settings {
   moons?: boolean;
   /** Gauntlet: maximum simultaneous moons; practice defaults to one. */
   maxMoons?: 1 | 2;
+  /**
+   * Gauntlet as a Den preset: 5 minutes, Werewolf art and one moon at a time. 'exp' adds the
+   * experimental moons: they wane as soon as a move clears, animate faster, favour columns with
+   * crates and come up with a crate when none is up.
+   */
+  den?: 'den' | 'exp';
   /** Which crate sizes spawn outside puzzle mode. */
   bb: boolean;
   fj: boolean;

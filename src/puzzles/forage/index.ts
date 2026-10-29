@@ -90,11 +90,15 @@ const RANDOM_POOL = Object.keys(PUZZLES)
  * CI and Infinite are cursed isle (Gauntlet) foraging: when a board's crates are all collected,
  * deal a new one (within the 2 minutes, for CI). Normal is normal foraging in the game's rules,
  * with no clock, and is one board: it ends when the banana meter is full,
- * or when the player dismisses it.
+ * or when the player dismisses it. Den and Den (Exp) are Gauntlet with Werewolf Isle's settings
+ * filled in (settings.den).
  */
-const MODES: Option<Mode>[] = [
+type ModeChoice = Mode | 'den' | 'den-exp';
+const MODES: Option<ModeChoice>[] = [
   { value: 'puzzle', label: 'Puzzle' },
   { value: 'ci', label: 'Gauntlet' },
+  { value: 'den', label: 'Den' },
+  { value: 'den-exp', label: 'Den (Exp)' },
   { value: 'chaos', label: 'Chaos' },
   { value: 'normal', label: 'Normal' },
   { value: 'create', label: 'Freeplay' },
@@ -180,10 +184,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Replay settings are restored separately below, preserving that version's rules.
   if (settings.mode === 'werewolf') {
     settings.mode = 'ci';
-    settings.werewolfArt = true;
-    settings.moons = true;
+    settings.den = 'den';
     store.set('settings', settings);
   }
+  // Werewolf art and moons were Gauntlet toggles before the Den modes took them over.
+  if (settings.mode === 'ci' && !settings.den && settings.moons) settings.den = 'den';
+  if (!settings.den) settings.werewolfArt = settings.moons = false;
   if (settings.mode === 'infinite') {
     settings.mode = 'ci';
     settings.roundSeconds ??= 0;
@@ -198,8 +204,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const normalBest = store.get<Record<string, number>>('normalBestPerMove', {});
   const werewolfBest = store.get<Record<string, number>>('werewolfBestPerMove', {});
   const legacyWerewolf = () => settings.mode === 'werewolf';
-  const werewolf = () => legacyWerewolf() || (settings.mode === 'ci' && !!settings.werewolfArt);
-  const useMoons = () => legacyWerewolf() || (settings.mode === 'ci' && !!settings.moons);
+  /** Den or Den (Exp), when playing Gauntlet with a Den preset. */
+  const den = () => (settings.mode === 'ci' ? settings.den : undefined);
+  const werewolf = () => legacyWerewolf() || (settings.mode === 'ci' && (!!den() || !!settings.werewolfArt));
+  const useMoons = () => legacyWerewolf() || (settings.mode === 'ci' && (!!den() || !!settings.moons));
   const normalMode = () => settings.mode === 'normal' || legacyWerewolf();
   const bests = () => (legacyWerewolf() ? werewolfBest : normalMode() ? normalBest : ciBest);
 
@@ -257,10 +265,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * 5 overlaps the chest delay with two fresh moves, restarting only after the chest lands.
    * 6 makes the moon limit selectable, defaulting to one for new games.
    * 7 restores the one-second chest delay, keeping the overlapping click requirement.
+   * 8: moons no longer keep incoming crates off their cells.
    */
-  const RULES = 7;
+  const RULES = 8;
   let rules = RULES;
-  const moonLimit = (): 1 | 2 => rules < 6 ? 2 : settings.maxMoons ?? 1;
+  const moonLimit = (): 1 | 2 => den() ? 1 : rules < 6 ? 2 : settings.maxMoons ?? 1;
   let sessionSeed: ForageReplaySeed | null = null;
   let recordedAction = false;
   let nextReplayBoard = 0;
@@ -287,12 +296,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       (settings.ants ? 'ants' : '');
     // Preserve existing scores for the original Gauntlet and Normal round lengths.
     const original = normalMode() ? 0 : 120;
+    if (den()) return `${base}:${den() === 'exp' ? 'den-exp' : 'den'}`;
     return base + (roundSeconds() === original ? '' : `:timer:${roundSeconds()}`) +
       (settings.mode === 'ci' && settings.werewolfArt ? ':werewolf-art' : '') +
       (settings.mode === 'ci' && settings.moons ? `:moons${moonLimit() === 1 ? ':1' : ''}` : '');
   };
 
-  const roundSeconds = () => settings.mode === 'create' ? 0 : settings.roundSeconds ?? (settings.mode === 'ci' ? 120 : 0);
+  const roundSeconds = () => settings.mode === 'create' ? 0 : den() ? 300 : settings.roundSeconds ?? (settings.mode === 'ci' ? 120 : 0);
   const roundDuration = () => roundSeconds() * 1000;
 
   /** Where this game's history is kept: per settings for CI and Normal, per puzzle (unscrambled) for Puzzle. */
@@ -338,6 +348,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     g.board.allowed = [settings.shovel, settings.machete, settings.monkey, settings.eq, settings.ants];
     if (!normalMode()) g.crateArt = [...CURSED_TILES];
     if (werewolf()) g.crateArt = [...WEREWOLF_TILES];
+    if (g.moons && settings.mode !== 'create') {
+      const exp = den() === 'exp';
+      g.moons.blocksCrates = rules < 8;
+      g.moons.eagerPhase = g.moons.chestBias = g.moons.spawnWithCrate = exp;
+      g.moons.pace = exp ? 0.75 : 1;
+    }
     return g;
   }
 
@@ -488,7 +504,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const performance = unrated() ? duty.rate(null, null) : settings.mode === 'normal' ? duty.rate('normal', shownScore())
       : gauntlet ? duty.rate('gauntletPoints', score) : duty.rate(null, null);
     return duty.end({
-      mode: legacyWerewolf() ? 'Werewolf' : MODES.find((m) => m.value === settings.mode)?.label,
+      mode: legacyWerewolf() ? 'Werewolf' : MODES.find((m) => m.value === modeChoice())?.label,
       performance,
       unrated: unrated(),
       score: isPuzzle() ? { label: 'Moves', value: String(movesUsed) }
@@ -771,6 +787,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // ---- Panel ----
 
   const isPuzzle = () => settings.mode === 'puzzle';
+  const modeChoice = (): ModeChoice => (den() ? (den() === 'exp' ? 'den-exp' : 'den') : settings.mode);
   const setting = <K extends keyof Settings>(k: K) => ({
     get: () => settings[k],
     set: (value: Settings[K]) => {
@@ -778,7 +795,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       saveSettings();
     },
   });
-  const bind = <K extends 'scramble' | 'bb' | 'fj' | 'cc' | 'eq' | 'machete' | 'shovel' | 'monkey' | 'ants' | 'werewolfArt' | 'moons'>(
+  const bind = <K extends 'scramble' | 'bb' | 'fj' | 'cc' | 'eq' | 'machete' | 'shovel' | 'monkey' | 'ants'>(
     group: ReturnType<typeof panel.group>,
     label: string,
     k: K,
@@ -805,7 +822,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     ...PAINT_KEYS.map(({ id, label, defaultKey }) => ({ id, label, defaultKey })),
   ]);
   const session = panel.session();
-  session.select('Mode', MODES, setting('mode').get, setting('mode').set, {});
+  session.select('Mode', MODES, modeChoice, (value) => {
+    // The Den modes are Gauntlet with Werewolf Isle's settings filled in.
+    settings.mode = value === 'den' || value === 'den-exp' ? 'ci' : value;
+    settings.den = value === 'den' ? 'den' : value === 'den-exp' ? 'exp' : undefined;
+    settings.werewolfArt = settings.moons = false;
+    saveSettings();
+  }, {});
   session.number(
     'Puzzle',
     () => Number(puzzleId),
@@ -953,6 +976,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         ['bb', 'fj', 'cc', 'eq', 'machete', 'shovel', 'monkey', 'ants', 'scramble'].every((key) => typeof s[key] === 'boolean') &&
         ['werewolfArt', 'moons'].every((key) => s[key] === undefined || typeof s[key] === 'boolean') &&
         (s.maxMoons === undefined || s.maxMoons === 1 || s.maxMoons === 2) &&
+        (s.den === undefined || s.den === 'den' || s.den === 'exp') &&
         ratios(s.normalRatios) && (s.chestRatios === undefined || ratios(s.chestRatios)) &&
         (s.roundSeconds === undefined || (Number.isFinite(s.roundSeconds) && (s.roundSeconds as number) >= 0)) &&
         typeof s.puzzleId === 'string' && (s.puzzleId === '0' || s.puzzleId in PUZZLES) &&
@@ -996,9 +1020,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     settledAt, playing.length, pendingNextBoard, ended, boardActive, JSON.stringify(rng.snapshot())].join('|');
 
   const setup = panel.settings.group('Game');
-  setup.select('Timer', [0, 30, 120, 300].map((value) => ({ value, label: value ? `${value} seconds` : 'No timer' })), roundSeconds, (value) => { settings.roundSeconds = value; saveSettings(); }, { hidden: isPuzzle });
+  setup.select('Timer', [0, 30, 120, 300].map((value) => ({ value, label: value ? `${value} seconds` : 'No timer' })), roundSeconds, (value) => { settings.roundSeconds = value; saveSettings(); }, { hidden: () => isPuzzle() || !!den() });
   bind(setup, 'Scramble', 'scramble', () => !isPuzzle());
-  bind(panel.settings.group('Display'), 'Werewolf art', 'werewolfArt', () => settings.mode !== 'ci');
 
   const crateGroup = panel.settings.group('Crates');
   bind(crateGroup, 'Bone box', 'bb', werewolf);
@@ -1043,10 +1066,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   bind(specials, 'Monkey', 'monkey', werewolf);
   bind(specials, 'Wolf', 'monkey', () => !werewolf());
   bind(specials, 'Ants', 'ants');
-  bind(specials, 'Moons', 'moons', () => settings.mode !== 'ci');
-  specials.select('Maximum moons', [1, 2].map((value) => ({ value, label: String(value) })), moonLimit,
-    (value) => { settings.maxMoons = value === 2 ? 2 : 1; saveSettings(); },
-    { hidden: () => settings.mode !== 'ci' || !settings.moons, title: 'Maximum moons on the board at once; applies to the next game' });
   panel.settings.group('Reset').button('Reset to defaults', () => {
     Object.assign(settings, structuredClone(DEFAULT_SETTINGS));
     delete settings.roundSeconds;
@@ -1262,8 +1281,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
 
   /** The beams grow one cell per 40ms, beginning 350ms after the moon fires. */
-  function drawMoonEffect(effect: Extract<Effect, { kind: 'moon' }>, age: number): boolean {
+  function drawMoonEffect(effect: Extract<Effect, { kind: 'moon' }>, shownFor: number): boolean {
     const { moon, blast } = effect;
+    // Den (Exp)'s moons play out at 4/3 speed.
+    const age = shownFor / (effect.pace ?? 1);
     if (!blast) {
       if (age >= 400) return false;
       moonImage('moon_phase', Math.min(3, 4 - Math.max(1, moon.phase)), moon, 0.6 * (1 - age / 400));

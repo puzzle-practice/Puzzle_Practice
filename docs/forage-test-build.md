@@ -2,30 +2,39 @@
 
 ## Try it
 
-Open <http://localhost:5212/#/forage>, select **Gauntlet**, and open **Settings**.
-Enable **Werewolf art** under Display and/or **Moons** under Specials, then press **Start**.
-With Moons enabled, **Maximum moons** under Specials selects one (the default) or two
-simultaneous moons. The choice applies to the next game and is saved with recordings.
-If the local server has stopped, run from this worktree:
+Open <http://localhost:5212/#/forage>, select **Den** or **Den (Exp)** as the mode, then press
+**Start**. If the local server has stopped, run from this worktree:
 
 ```powershell
 npm ci
 npm run dev -- --host 127.0.0.1 --port 5212 --strictPort
 ```
 
-The toggles are independent and default off. Werewolf art changes the background, treasure
-crates, sounds and monkey presentation to a wolf; Moons enables moon targets and their beams with
-either art set. The existing mouse/keyboard controls work. Gauntlet keeps its timer, chest
-ratios, paced delivery, nine-crate boards, automatic next board and 1/2/3 crate scoring.
-History and best scores distinguish each toggle combination. Replays save both settings.
-Saved settings from the initial local Werewolf mode migrate to Gauntlet with both toggles on.
-Werewolf is no longer a mode choice.
+Both Den modes are Gauntlet with Werewolf Isle's settings filled in: a 5 minute timer, the
+Werewolf art (forest background, treasure crates, sounds and the wolf in place of the monkey) and
+moons, with at most one moon up at a time. Gauntlet's chest ratios, paced delivery, nine-crate
+boards, automatic next board and 1/2/3 crate scoring are unchanged.
+
+**Den (Exp)** adds experimental moon changes on top:
+
+- A moon wanes as soon as a move clears pieces, so its art changes with the clear rather than
+  once the move has played out. It still goes at the end of the move after its last phase.
+- The moon's firing (and fading) animations run at 4/3 speed, so the board is held 25% less time.
+- A new moon is three times as likely to come up on a spot over a column holding a crate.
+- A crate that comes in while no moon is up brings a moon up with it.
+
+In every mode, moons no longer keep incoming crates off their cells (the test build does; replays
+recorded before this change keep it). History and best scores are kept apart for Den and Den
+(Exp). The old Werewolf art and Moons toggles are gone: saved Gauntlet settings with moons on, and
+the initial local Werewolf mode, open as Den. Replays recorded with the toggles still play back
+with them.
 
 ## What the test build adds
 
 The Werewolf Isle variant adds a Werewolf board with moon targets. Existing fruit, special
 generation, gravity, rotations and crate points keep the same rules. The board reports clears
-and ant bites to the moons and keeps incoming crates off moon targets. The expanded piece/crate
+and ant bites to the moons and keeps incoming crates off moon targets (the site only does this
+for older replays; see above). The expanded piece/crate
 sheets retain every original tile pixel.
 
 ## Implemented rules

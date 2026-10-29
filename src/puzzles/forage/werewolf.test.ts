@@ -10,6 +10,8 @@ describe('Werewolf parity with test build 20261017062155', () => {
     it(`seed ${fixture.seed}, difficulty ${fixture.difficulty}: 200 moves`, () => {
       let bonus = 0;
       const game = new Forage(BigInt(fixture.seed), { beforeMove: (g) => { if (bonus) g.board.bonusMode = bonus; } }, fixture.difficulty, true);
+      // The test build keeps incoming crates off moons.
+      game.moons!.blocksCrates = true;
       const moons = () => game.moons!.active.map((m) => [m.id, m.x, m.y, m.phase, m.charge]);
       expect(game.cells).toEqual(fixture.start);
       expect(moons()).toEqual(fixture.startMoons);
@@ -136,10 +138,15 @@ describe('Werewolf moons', () => {
     expect(blast.rays).toHaveLength(6);
   });
 
-  it('keeps crate placement off moons and moon placement off crates', () => {
+  it('keeps crate placement off moons only for older replays, and moon placement off crates', () => {
     const board = new WerewolfForageBoard(1);
     board.moons.active.splice(0);
     board.moons.active.push({ id: 1, x: 0, y: 0, phase: 4, charge: 0 });
+    board.crates = 0;
+    board.crateArea = 0;
+    const columns = new Set(Array.from({ length: 200 }, () => board.findCratePosition(0)));
+    expect([0, 1].some((x) => columns.has(x))).toBe(true);
+    board.moons.blocksCrates = true;
     for (let i = 0; i < 30; i++) expect(board.findCratePosition(0)).toBeGreaterThanOrEqual(2);
     board.cells.fill(makeCrate(0, 0, 0));
     expect(board.moons.spawn(board)).toBeNull();
@@ -166,5 +173,89 @@ describe('Werewolf moons', () => {
     expect(game.steps[1].sprites.filter((s) => s.path === 'arc').every((s) => s.from[0] === 2 && s.from[1] === 2)).toBe(true);
     expect(game.steps.every((s) => !s.monkey.length)).toBe(true);
     expect(game.cells).not.toContain(EMPTY);
+  });
+});
+
+describe('Den (Exp) moons', () => {
+  const quiet = () => Array.from({ length: WIDTH * HEIGHT }, (_, i) => (i % WIDTH + 2 * Math.floor(i / WIDTH)) % 5);
+
+  it('keeps Den to one moon at a time', () => {
+    const board = new WerewolfForageBoard(3, 8, true, 1);
+    for (let i = 0; i < 10; i++) {
+      board.moons.noteCleared(0, 0);
+      board.moons.endMove(board);
+      expect(board.moons.active.length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('wanes a moon on the first clear of a move, once', () => {
+    const board = new WerewolfForageBoard(1);
+    board.moons.eagerPhase = true;
+    const moon = board.moons.active[0];
+    board.moons.noteCleared(6, 9);
+    expect(moon.phase).toBe(3);
+    board.moons.noteCleared(6, 9);
+    board.moons.endMove(board);
+    expect(moon.phase).toBe(3);
+  });
+
+  /** The first move from a seeded board that clears inside a charged moon set over the turn. */
+  const firstFiring = (setup: (game: Forage) => void): Forage => {
+    for (let seed = 1; seed < 50; seed++) {
+      for (let x = 0; x < WIDTH - 1; x++) {
+        for (let y = 0; y < HEIGHT - 1; y++) {
+          const game = new Forage(seed, {}, 8, true);
+          setup(game);
+          game.moons!.active.splice(0, 1, { id: 1, x, y, phase: 4, charge: 3 });
+          if (game.act(x, y, true) === 'moved' && game.steps.some((s) => s.effects.some((e) => e.kind === 'moon' && e.blast))) return game;
+        }
+      }
+    }
+    throw new Error('no firing move');
+  };
+
+  it('shows the waned moon in the step that clears', () => {
+    const other = new Forage(1, {}, 8, true);
+    other.moons!.eagerPhase = true;
+    const moon = other.moons!.active[0];
+    for (let x = 0; x < WIDTH - 1 && moon.phase === 4; x++) {
+      for (let y = 0; y < HEIGHT - 1 && moon.phase === 4; y++) {
+        const before = other.steps.length;
+        if (other.act(x, y, true) !== 'moved' || !other.steps.slice(before).some((s) => s.sprites.some((p) => p.clear))) continue;
+        const first = other.steps.slice(before).find((s) => s.sprites.some((p) => p.clear))!;
+        expect(first.moons?.find((m) => m.id === moon.id)?.phase).toBe(3);
+      }
+    }
+    expect(moon.phase).toBeLessThan(4);
+  });
+
+  it('favours spots over a column with a crate', () => {
+    const counts = [0, 0];
+    for (let seed = 1; seed <= 300; seed++) {
+      const board = new WerewolfForageBoard(seed);
+      board.moons.active.splice(0);
+      board.moons.chestBias = true;
+      board.setPiece(0, HEIGHT - 1, makeCrate(0, 0, 0));
+      const moon = board.moons.spawn(board)!;
+      counts[moon.x <= 0 ? 0 : 1]++;
+    }
+    // One spot in six over column 0, weighted three times, comes up about 3/8 of the time.
+    expect(counts[0] / 300).toBeGreaterThan(0.25);
+  });
+
+  it('brings a moon in with a crate when none is up', () => {
+    const game = new Forage(1, { beforeMove: (g) => { g.board.bonusMode = 64; } }, 8, true);
+    game.moons!.spawnWithCrate = true;
+    game.moons!.active.splice(0);
+    game.board.rng.nextFloat = () => 0;
+    game.load(quiet());
+    game.act(0, 0, true);
+    expect(game.crateCount()).toBe(1);
+    expect(game.moons!.active).toHaveLength(1);
+  });
+
+  it('fires faster at Den (Exp) pace', () => {
+    const firing = (game: Forage) => game.steps.find((s) => s.effects.some((e) => e.kind === 'moon' && e.blast))!.duration;
+    expect(firing(firstFiring((g) => { g.moons!.pace = 0.75; }))).toBeCloseTo(firing(firstFiring(() => {})) * 0.75);
   });
 });

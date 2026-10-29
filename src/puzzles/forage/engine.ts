@@ -115,7 +115,7 @@ export interface MonkeyAnim {
 export type Effect =
   | { kind: 'pop'; piece: number; at: Cell; delay: number }
   | { kind: 'text'; text: string; size: number; delay: number }
-  | { kind: 'moon'; moon: Moon; blast: MoonBlast | null; delay: number };
+  | { kind: 'moon'; moon: Moon; blast: MoonBlast | null; delay: number; pace: number };
 
 export interface Step {
   /** What holds still during the step. */
@@ -438,7 +438,7 @@ export class Forage {
     if (this.moons) {
       const { expired } = this.moons.endMove(this.board);
       const step = this.begin();
-      for (const moon of expired) step.effects.push({ kind: 'moon', moon, blast: null, delay: 0 });
+      for (const moon of expired) step.effects.push({ kind: 'moon', moon, blast: null, delay: 0, pace: this.moons.pace });
       this.end();
     }
     // The end of the move.
@@ -515,7 +515,10 @@ export class Forage {
   private spawnCrate(): boolean {
     this.begin();
     const placed = this.board.spawnCrate(this.fall) > 0;
-    if (placed) this.end();
+    if (placed) {
+      this.moonWithCrate();
+      this.end();
+    }
     else this.current = null;
     return placed;
   }
@@ -527,15 +530,15 @@ export class Forage {
     if (!moons || !moon) return false;
     const blast = moons.blast(moon, this.board);
     const step = this.begin();
-    step.effects.push({ kind: 'moon', moon, blast, delay: 0 });
+    step.effects.push({ kind: 'moon', moon, blast, delay: 0, pace: moons.pace });
     this.sound('moon_fire');
     moons.firing = true;
     for (const [key, distance] of blast.cells) {
       const x = Math.trunc(key / 100), y = key % 100;
       const piece = this.board.getPiece(x, y);
       if (piece === EMPTY || isCrate(piece)) continue;
-      const delay = 350 + (distance - 1) * 40;
-      step.sprites.push({ piece, from: [x, y], to: [x, y], delay, duration: 370, path: 'line', clear: true, moonClear: true });
+      const delay = (350 + (distance - 1) * 40) * moons.pace;
+      step.sprites.push({ piece, from: [x, y], to: [x, y], delay, duration: 370 * moons.pace, path: 'line', clear: true, moonClear: true });
       if (piece < 5) step.effects.push({ kind: 'pop', piece, at: [x, y], delay });
       this.board.noteCleared(x, y);
       this.board.setPiece(x, y, EMPTY);
@@ -544,6 +547,12 @@ export class Forage {
     this.points.endStep();
     this.end();
     return true;
+  }
+
+  /** Den (Exp): a crate coming in when no moon is up brings one up with it. */
+  private moonWithCrate(): void {
+    const moons = this.moons;
+    if (moons?.spawnWithCrate && moons.spawning && !moons.active.length) moons.spawn(this.board);
   }
 
   /** The ants step once a move. */
@@ -583,6 +592,7 @@ export class Forage {
         this.fall(piece, x + dx, -1 - dy, x + dx, height - 1 - dy);
       }
     }
+    this.moonWithCrate();
     this.end();
   }
 
