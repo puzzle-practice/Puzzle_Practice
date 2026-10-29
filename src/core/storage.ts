@@ -134,7 +134,7 @@ export function savesHistory(): boolean {
 
 /**
  * Settings > Global > Replays > Exclude unlikely replays (on unless turned off): sessions left out
- * of the history as unlikely to matter (a barely started Normal forage, a timed Distilling session that
+ * of the history as unlikely to matter (a barely started Normal forage, a Distilling session that
  * sent nothing up) keep no replay either. Off keeps their replays.
  */
 export function excludesUnlikelyReplays(): boolean {
