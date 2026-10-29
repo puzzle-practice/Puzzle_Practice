@@ -82,7 +82,7 @@ describe('Werewolf moons', () => {
     expect(wolf.moons.active[0]).toMatchObject({ phase: 4, charge: 0 });
   });
 
-  it('counts repeated clears in the 2x2, while ants (in older replays) do not age moons', () => {
+  it('counts repeated clears in the 2x2, while ants do not age moons', () => {
     const board = new ForageBoard(1);
     const moons = new MoonField();
     moons.antsCharge = true;
@@ -154,7 +154,7 @@ describe('Werewolf moons', () => {
     expect(board.moons.spawn(board)).toBeNull();
   });
 
-  it.each([false, true])('charges a moon when an ant eats within it only in older replays (%s)', (antsCharge) => {
+  it.each([false, true])('charges a moon when an ant eats within it unless turned off for Den (Exp) (%s)', (antsCharge) => {
     const board = new WerewolfForageBoard(1);
     board.moons.antsCharge = antsCharge;
     board.moons.active.splice(0);

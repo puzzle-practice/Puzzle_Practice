@@ -269,7 +269,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * 6 makes the moon limit selectable, defaulting to one for new games.
    * 7 restores the one-second chest delay, keeping the overlapping click requirement.
    * 8: moons no longer keep incoming crates off their cells.
-   * 9: ant bites no longer charge moons.
+   * 9: ant bites no longer charge moons in Den (Exp).
    */
   const RULES = 9;
   let rules = RULES;
@@ -355,7 +355,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (g.moons && settings.mode !== 'create') {
       const exp = den() === 'exp';
       g.moons.blocksCrates = rules < 8;
-      g.moons.antsCharge = rules < 9;
+      // Den (Exp) only: ant bites don't add to a moon's claw count.
+      g.moons.antsCharge = rules < 9 || !exp;
       g.moons.eagerPhase = g.moons.chestBias = g.moons.spawnWithCrate = exp;
       g.moons.pace = exp ? 0.75 : 1;
     }

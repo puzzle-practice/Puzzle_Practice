@@ -2287,6 +2287,20 @@ describe('Forage Den art', () => {
     instance.dispose?.();
   });
 
+  it.each(['den', 'exp'] as const)('lets ant bites charge moons only outside Den (Exp) (%s)', async (den) => {
+    const { MoonField } = await import('./forage/werewolf');
+    const spawn = vi.spyOn(MoonField.prototype, 'spawn');
+    const store = new Store('forage');
+    store.set('settings', { mode: 'ci', den });
+    const { panel, buttons } = panelHarness();
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./forage/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => 0 } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    expect((spawn.mock.contexts.at(-1) as InstanceType<typeof MoonField>).antsCharge).toBe(den !== 'exp');
+    instance.dispose?.();
+  });
+
   it('opens saved Gauntlet moons as Den, keeping their moon limit', async () => {
     const { MoonField } = await import('./forage/werewolf');
     const spawn = vi.spyOn(MoonField.prototype, 'spawn');

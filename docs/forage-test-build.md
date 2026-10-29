@@ -23,10 +23,10 @@ boards, automatic next board and 1/2/3 crate scoring are unchanged.
 - The moon's firing (and fading) animations run at 4/3 speed, so the board is held 25% less time.
 - A new moon is three times as likely to come up on a spot over a column holding a crate.
 - A crate that comes in while no moon is up brings a moon up with it.
+- Ants eating inside a moon don't add to its claw count.
 
-In every mode, moons no longer keep incoming crates off their cells, and ants eating inside a moon
-no longer add to its claw count (the test build does both; replays recorded before each change
-keep it). History and best scores are kept apart for Den and Den
+In every mode, moons no longer keep incoming crates off their cells (the test build does; replays
+recorded before this change keep it). History and best scores are kept apart for Den and Den
 (Exp). The old Werewolf art and Moons toggles are gone: saved Gauntlet settings with moons on (keeping
 their moon limit), and
 the initial local Werewolf mode, open as Den. Replays recorded with the toggles still play back
@@ -45,8 +45,8 @@ sheets retain every original tile pixel.
 - Start with one moon on a random, crate-free 2×2 area, using the board's Java-compatible RNG.
   Moon positions stay fixed when pieces rotate or fall.
 - Every nonempty, noncrate clear within a moon adds one charge. Four charges fire it.
-  Repeated clears of the same coordinate count. Ant bites charge moons too (the site only does
-  this for older replays; see above).
+  Repeated clears of the same coordinate count. Ant bites charge moons too (except in Den (Exp);
+  see above).
 - Moons age once per move that clears pieces anywhere, expire after four such moves,
   and respawn after two or three clearing moves, with at most the selected number present.
   Ant bites and
