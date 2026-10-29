@@ -2301,6 +2301,30 @@ describe('Forage Den art', () => {
     instance.dispose?.();
   });
 
+  it.each([false, true])('howls on a scoring move in Den unless it clears a chest (%s)', async (chest) => {
+    const { Forage } = await import('./forage/engine');
+    vi.spyOn(Forage.prototype, 'act').mockImplementation(function (this: InstanceType<typeof Forage>) {
+      this.steps.push({ board: this.cells.slice(), sprites: [], monkey: [], sounds: [], effects: [], duration: 100 });
+      return 'moved';
+    });
+    vi.spyOn(Forage.prototype, 'lastResult', 'get').mockReturnValue({ points: 5, gauntletPoints: chest ? 1 : 0, collected: [chest ? 1 : 0, 0, 0], chained: 0, combo: 0 });
+    const store = new Store('forage');
+    store.set('settings', { mode: 'ci', den: 'den' });
+    const { panel, buttons } = panelHarness();
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    let now = 0;
+    const factory = (await import('./forage/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    now = 3000; instance.frame([]);
+    instance.frame([{ type: 'mousedown', button: 1, pos: [167, 250] }]);
+    for (let i = 0; i < 40; i++) { now += 17; instance.frame([]); }
+    // The score sound waits for the move's last step.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(captured.sounds.includes('chest_howl')).toBe(!chest);
+    instance.dispose?.();
+  });
+
   it.each([false, true])('swaps the monkey board icon and animation when Den is %s', async (art) => {
     const { Forage } = await import('./forage/engine');
     const { WIDTH, HEIGHT, MONKEY } = await import('./forage/board');

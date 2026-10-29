@@ -547,8 +547,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       else if (settings.mode !== 'puzzle') score += result.gauntletPoints;
       crates += result.collected[0] + result.collected[1] + result.collected[2];
       sessionCrates = sessionCrates.map((n, i) => n + result.collected[i]);
-      // The score sound, by the move's game points (Werewolf howls whatever the points).
-      if (result.points > 0 && !(normalMode() && crates >= BANANAS)) {
+      // The score sound, by the move's game points (Werewolf howls whatever the points, but not on
+      // a move that clears a chest).
+      const clearsChest = result.collected.some((n) => n > 0);
+      if (result.points > 0 && !(normalMode() && crates >= BANANAS) && !(werewolf() && clearsChest)) {
         const last = game.steps[game.steps.length - 1];
         last.sounds.push({ name: werewolf() ? 'chest_howl' : result.points > 14 ? 'score_big' : result.points > 7 ? 'score_medium' : 'score_small', delay: last.duration });
       }

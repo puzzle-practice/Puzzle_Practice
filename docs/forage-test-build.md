@@ -64,7 +64,8 @@ sheets retain every original tile pixel.
 - Moons appear at full strength; each new phase shows at full strength for 250ms, then fades
   over 250ms to 60%. A firing moon fades from 60%. From `20261017062155` the claw marks do the
   same whenever their count (or the moon's phase) changes.
-- From `20261017062155`: every scoring move howls (`chest_howl`) and the Werewolf intro plays on
+- From `20261017062155`: every scoring move howls (`chest_howl`), except here a move that clears a
+  chest, and the Werewolf intro plays on
   the first game only. Practice omits the continuous night ambience.
 - Moon snapshots are kept per animation step, and birth times are tracked during replay seeking.
 
