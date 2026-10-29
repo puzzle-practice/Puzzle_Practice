@@ -3061,10 +3061,10 @@ describe('untimed and Freeplay sessions keep their replays', () => {
   }
 
   it.each([
-    ['untimed Standard', { mode: 'Standard', timerOn: false }, 1],
-    ['Freeplay', { mode: 'Create' }, 1],
-    ['timed Standard', { mode: 'Standard', timerOn: true }, 0],
-  ] as const)('distilling keeps a %s session that sent nothing up: %i replay', async (_label, values, kept) => {
+    ['an untimed Standard', 1, { mode: 'Standard', timerOn: false }],
+    ['a Freeplay', 1, { mode: 'Create' }],
+    ['a timed Standard', 0, { mode: 'Standard', timerOn: true }],
+  ] as const)('distilling keeps %s session that sent nothing up: %i replay(s)', async (_label, kept, values) => {
     const store = new Store('distilling');
     for (const [k, v] of Object.entries(values)) store.set(k, v);
     const { panel, buttons } = panelHarness();
