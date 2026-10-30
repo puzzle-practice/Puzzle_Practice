@@ -10,6 +10,9 @@ import { dutyDesk } from '../../core/duty/desk';
 import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
 import { TEXT } from '../../core/duty/report';
+
+/** What the game calls a 4, 5 and 6-chain. */
+const CHAIN_NAMES = ['bingo', 'donkey', 'vegas'];
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { InputEvent } from '../../core/input';
@@ -51,11 +54,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let banked: RunTotals = NO_TOTALS;
   const totals = (): RunTotals => game ? addBoard(banked, game) : banked;
   /**
-   * From the clears played this run: the longest chain, counting one that ends on a constellation, and
-   * constellations charted in a bingo, donkey or vegas (a 4, 5, or 6-or-longer chain). Kept here rather
-   * than in the game so replays recorded before these were counted still pass their state checks.
+   * From the clears played this run: constellations charted by their chain (`charts[n - 1]` in an n-chain),
+   * the longest chain (the biggest multiplier on a constellation) and the longest cascade (the biggest
+   * on a clear of stars). Kept here rather than in the game so older replays still pass their state checks.
    */
-  let longestChain = 0, bigCharts = [0, 0, 0];
+  let charts: number[] = [], longestChain = 0, longestCascade = 0;
   let running = false, finished = false, selected = 0;
   let startTime = 0, endTime = 0;
   let timerElapsedBeforeBoard = 0;
@@ -97,7 +100,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     liveSettings = settings.create ? { ...settings, timerMs: 0, clears: false, slowDrop: true } : { ...settings };
     duty.clear();
     layer = 'stars'; palette = paintWith = null; painting = false; setup = ''; pasteNote = '';
-    runSeed = seed; board = 0; banked = NO_TOTALS; longestChain = 0; bigCharts = [0, 0, 0];
+    runSeed = seed; board = 0; banked = NO_TOTALS; charts = []; longestChain = longestCascade = 0;
     dealAt = 0; pendingStart = null;
     game = new NavigationGame(liveSettings, seed);
     selected = game.board.rings - 1;
@@ -136,18 +139,19 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const run = totals();
     const report = duty.end({ mode: modeLabel(liveSettings.mode), performance: LEARNING,
       score: { label: 'Points', value: String(run.points) },
-      // Werewolf Isle's report shows each constellation as a moon.
+      // Werewolf Isle's report shows each constellation by its chain: a moon up to a triple, then
+      // only a count in the brackets, one place per chain length, as far as the longest chain charted.
       cleared: isWerewolf(liveSettings.mode) ? [{ label: 'Constellations Charted', inScore: true, items: [
-        { icon: 'moon-crescent', label: 'crescent moons, charted with no chain', count: run.moons[0] },
-        { icon: 'moon-half', label: 'half moons, charted in a double chain', count: run.moons[1] },
-        { icon: 'moon-full', label: 'full moons, charted in a triple chain or longer', count: run.moons[2] },
-        ...[['bingo', 'bingos'], ['donkey', 'donkeys'], ['vegas', 'vegas']].map(([one, many], i) => ({ icon: TEXT, label: bigCharts[i] === 1 ? one : many, count: bigCharts[i] })),
+        { icon: 'moon-crescent', label: 'crescent moons, charted with no chain', count: charts[0] ?? 0 },
+        { icon: 'moon-half', label: 'half moons, charted in a double chain', count: charts[1] ?? 0 },
+        { icon: 'moon-full', label: 'full moons, charted in a triple chain', count: charts[2] ?? 0 },
+        ...charts.slice(3).map((count, i) => ({ icon: TEXT, label: `charted in a ${CHAIN_NAMES[i] ?? `${i + 4}-chain`}`, count })),
       ] }] : [] });
     const tape = replays.finish(`${reason} · ${run.points} points`, report);
     // Freeplay is a sandbox and keeps no history.
     if (!replays.isPlaying && !liveSettings.create) store.addHistory(settingsKey(liveSettings), {
       score: run.points, constellations: run.constellations, stars: run.stars, moves: run.moves,
-      chain: longestChain, boards: board + 1, seconds: elapsed() / 1000, reason, ...duty.fields(report),
+      chain: longestChain, cascade: longestCascade, boards: board + 1, seconds: elapsed() / 1000, reason, ...duty.fields(report),
       ...(tape ? { replayAt: tape.at, replayId: tape.runId ?? '' } : {}),
     });
     message = reason; messageAt = ticks(); messagePx = gameFont(1); messageFill = TEXT_WHITE;
@@ -178,8 +182,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
   function queue(steps: Scene[]): void {
     for (const { clear } of steps) if (clear) {
+      if (clear.kind === 'run') { longestCascade = Math.max(longestCascade, clear.chain); continue; }
       longestChain = Math.max(longestChain, clear.chain);
-      if (clear.kind === 'target' && clear.chain >= 4) bigCharts[Math.min(clear.chain, 6) - 4]++;
+      while (charts.length < clear.chain) charts.push(0);
+      charts[clear.chain - 1]++;
     }
     scenes = steps; sceneStart = ticks();
     if (scenes.length) startScene(scenes[0]);
@@ -495,7 +501,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     rows: [['Points', String(totals().points)],
       ['Constellations', board && !liveSettings.clears ? String(totals().constellations) : `${totals().constellations}${of(runGoal(liveSettings))}`],
       ...(board ? [['Boards', String(board + 1)]] : []),
-      ['Stars dropped', String(totals().stars)], ['Ring rotations', String(totals().moves)], ['Longest chain', String(longestChain)], ['Time', `${(elapsed()/1000).toFixed(2)}s`]],
+      ['Stars dropped', String(totals().stars)], ['Ring rotations', String(totals().moves)], ['Longest chain', String(longestChain)], ['Longest cascade', String(longestCascade)], ['Time', `${(elapsed()/1000).toFixed(2)}s`]],
   } : null);
   // Version 1 had no looping: an untimed run then ended at the quota, as a quota run does now.
   // Before version 4 a booch ended every run, Dennav and Old Dennav included.

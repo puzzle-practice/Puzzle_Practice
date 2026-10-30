@@ -5,7 +5,7 @@ import { PERFORMANCE } from './ratings';
 
 /**
  * One kind of thing cleared, e.g. small chests. `icon` names a picture in icons.ts; SPACE is a gap in a row,
- * and TEXT an item with no picture, whose count joins the brackets with its label when it isn't zero.
+ * and TEXT an item with no picture: only its count shows, in the brackets.
  */
 export interface ClearedItem {
   icon: string;

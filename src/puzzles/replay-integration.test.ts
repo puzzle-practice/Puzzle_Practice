@@ -2237,14 +2237,14 @@ describe('Navigation sessions and replay', () => {
     instance.dispose?.();
   });
 
-  it('counts a chain that ends on a constellation, and charts in a bingo, donkey or vegas', async () => {
-    const { NavigationGame } = await import('./navigation/game');
-    const clears = [['run',1],['run',2],['target',3],['target',4],['target',4],['target',6],['target',7]] as const;
+  it('reports constellations by chain length, the longest chain and the longest cascade', async () => {
+    const { NavigationGame, DEFAULT_SETTINGS } = await import('./navigation/game');
+    const clears = [['run',1],['run',2],['run',3],['run',4],['target',5],['target',1],['run',1],['target',2],['target',4],['target',7],['target',7]] as const;
     const drop = vi.spyOn(NavigationGame.prototype,'drop').mockImplementationOnce(function (this: InstanceType<typeof NavigationGame>) {
       return clears.map(([kind,chain]) => ({ ...this.scene(10), clear: { kind, cells: [], points: 1, chain } }));
     });
     const store=new Store('navigation');
-    store.set('settings',{ ...(await import('./navigation/game')).DEFAULT_SETTINGS, mode:'ww-test' });
+    store.set('settings',{ ...DEFAULT_SETTINGS, mode:'ww-test' });
     const { panel,buttons,results }=panelHarness();let now=0;
     const screen=new Proxy({ ctx:canvasContext() },{ get:(target,key)=>key==='ctx'?target.ctx:()=>({ width:0,height:0 }) });
     const factory=(await import('./navigation/index')).default;
@@ -2256,8 +2256,10 @@ describe('Navigation sessions and replay', () => {
     drop.mockRestore();
     const result=results()[0] as { rows:string[][]; report:DutyReport };
     expect(result.rows).toContainEqual(['Longest chain','7']);
-    expect(result.report.cleared[0].items.slice(3)).toEqual([
-      { icon:'text', label:'bingos', count:2 }, { icon:'text', label:'donkeys', count:0 }, { icon:'text', label:'vegas', count:2 }]);
+    expect(result.rows).toContainEqual(['Longest cascade','4']);
+    // One place per chain length, 1-based: a moon up to a triple, then counts only.
+    expect(result.report.cleared[0].items.map(item => item.count)).toEqual([1, 1, 0, 1, 1, 0, 2]);
+    expect(result.report.cleared[0].items.slice(3).map(item => item.icon)).toEqual(['text', 'text', 'text', 'text']);
   });
 
   it('records button controls and saves a stopped run once when leaving', async () => {

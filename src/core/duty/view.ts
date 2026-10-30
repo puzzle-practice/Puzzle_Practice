@@ -189,8 +189,7 @@ function rowCanvas(group: ClearedGroup): HTMLCanvasElement | null {
   return canvas;
 }
 
-const counts = (group: ClearedGroup) => `[${group.items.filter((item) => item.icon !== TEXT || item.count)
-  .map((item) => item.icon === TEXT ? `${item.count} ${item.label}` : item.count).join(', ')}]`;
+const counts = (group: ClearedGroup) => `[${group.items.map((item) => item.count).join(', ')}]`;
 
 /**
  * A report as a card. `details` is the session's full table of numbers and `averages` the
