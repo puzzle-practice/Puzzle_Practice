@@ -141,9 +141,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const report = duty.end({ mode: modeLabel(liveSettings.mode), performance: LEARNING,
       score: { label: 'Points', value: String(run.points) },
       // Werewolf Isle's report shows each constellation as a moon by its chain, one bracket place per
-      // chain length, ending at the longest chain charted. Past a 7-chain there's only the count.
+      // chain length: always up to a triple, then on to the longest chain charted. Past a 7-chain there's only the count.
       cleared: isWerewolf(liveSettings.mode) ? [{ label: 'Constellations Charted', inScore: true,
-        items: (charts.length ? charts : [0]).map((count, i) => ({ icon: MOONS[i] ?? TEXT, label: `charted in a ${CHAIN_NAMES[i] ?? `${i + 1}-chain`}`, count })) }] : [] });
+        items: [...charts, 0, 0, 0].slice(0, Math.max(3, charts.length)).map((count, i) => ({ icon: MOONS[i] ?? TEXT, label: `charted in a ${CHAIN_NAMES[i] ?? `${i + 1}-chain`}`, count })) }] : [] });
     const tape = replays.finish(`${reason} · ${run.points} points`, report);
     // Freeplay is a sandbox and keeps no history.
     if (!replays.isPlaying && !liveSettings.create) store.addHistory(settingsKey(liveSettings), {

@@ -2209,6 +2209,8 @@ describe('Navigation sessions and replay', () => {
     expect(Number(expected.rows.find(([name])=>name==='Stars dropped')![1])).toBeGreaterThan(0);
     // Dennav and Old Dennav deal a new board on a booch, so the run goes on to the timer.
     expect(expected.rows.some(([name])=>name==='Boards')).toBe(mode !== 'normal');
+    // The report's brackets always run up to a triple, even with no chains.
+    if (mode !== 'normal') expect(expected.report.cleared[0].items.length).toBeGreaterThanOrEqual(3);
     expect(expected.report.mode).toBe(mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal');
     await replayWrites.idle();
     const data=JSON.parse(exportAll()).data;
