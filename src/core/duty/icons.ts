@@ -9,6 +9,7 @@ import vampirateChests from './media/vampirate_chests.png?url';
 import werewolfChests from './media/werewolf_chests.png?url';
 import coffins from './media/vampirate_patches.png?url';
 import moons from './media/werewolf_moons.png?url';
+import moonStars from './media/werewolf_moons_stars.png?url';
 import puzzles from './media/puzzles.png?url';
 import haulCoin from '../../puzzles/treasure-haul/media/minipiece0.png?url';
 import haulRuby from '../../puzzles/treasure-haul/media/minipiece4.png?url';
@@ -36,6 +37,8 @@ export interface Icon {
   area: [number, number, number, number];
   /** Drawn this tall in a tally (the game's chest tiles are 12). */
   height: number;
+  /** In a stack, every copy but the last of each group is drawn as this instead. */
+  under?: Icon;
 }
 
 const frame = (url: string, w: number, h: number, index = 0, height = 12): Icon => ({ url, area: [index * w, 0, w, h], height });
@@ -67,6 +70,12 @@ export const ICONS: Record<string, Icon> = {
   'moon-crescent': frame(moons, 12, 12, 0),
   'moon-half': frame(moons, 12, 12, 1),
   'moon-full': frame(moons, 12, 12, 2),
+  // Past a triple, a full moon with a black plus per step: bingo, donkey, vegas, then a 7-chain.
+  // Only the front moon of a stack shows its pluses; the ones behind are plain full moons.
+  'moon-bingo': { ...frame(moonStars, 12, 12, 0), under: frame(moons, 12, 12, 2) },
+  'moon-donkey': { ...frame(moonStars, 12, 12, 1), under: frame(moons, 12, 12, 2) },
+  'moon-vegas': { ...frame(moonStars, 12, 12, 2), under: frame(moons, 12, 12, 2) },
+  'moon-seven': { ...frame(moonStars, 12, 12, 3), under: frame(moons, 12, 12, 2) },
   'haul-coin': frame(haulCoin, 23, 23, 0, 14),
   'haul-ruby': frame(haulRuby, 16, 23, 0, 14),
   'haul-emerald': frame(haulEmerald, 16, 23, 0, 14),

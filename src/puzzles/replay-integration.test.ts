@@ -2209,6 +2209,8 @@ describe('Navigation sessions and replay', () => {
     expect(Number(expected.rows.find(([name])=>name==='Stars dropped')![1])).toBeGreaterThan(0);
     // Dennav and Old Dennav deal a new board on a booch, so the run goes on to the timer.
     expect(expected.rows.some(([name])=>name==='Boards')).toBe(mode !== 'normal');
+    // The report's brackets always run up to a triple, even with no chains.
+    if (mode !== 'normal') expect(expected.report.cleared[0].items.length).toBeGreaterThanOrEqual(3);
     expect(expected.report.mode).toBe(mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal');
     await replayWrites.idle();
     const data=JSON.parse(exportAll()).data;
@@ -2235,6 +2237,31 @@ describe('Navigation sessions and replay', () => {
     expect(store.get('settings',null)).toEqual(settings);
     expect(JSON.parse(exportAll()).data).toEqual(data);
     instance.dispose?.();
+  });
+
+  it('reports constellations by chain length, the longest chain and the longest cascade', async () => {
+    const { NavigationGame, DEFAULT_SETTINGS } = await import('./navigation/game');
+    const clears = [['run',1],['run',2],['run',3],['run',4],['target',5],['target',1],['run',1],['target',2],['target',4],['target',7],['target',7],['target',9]] as const;
+    const drop = vi.spyOn(NavigationGame.prototype,'drop').mockImplementationOnce(function (this: InstanceType<typeof NavigationGame>) {
+      return clears.map(([kind,chain]) => ({ ...this.scene(10), clear: { kind, cells: [], points: 1, chain } }));
+    });
+    const store=new Store('navigation');
+    store.set('settings',{ ...DEFAULT_SETTINGS, mode:'ww-test' });
+    const { panel,buttons,results }=panelHarness();let now=0;
+    const screen=new Proxy({ ctx:canvasContext() },{ get:(target,key)=>key==='ctx'?target.ctx:()=>({ width:0,height:0 }) });
+    const factory=(await import('./navigation/index')).default;
+    const instance=await factory({ screen,input:{ mouse:[-1,-1] },panel,store,ticks:()=>now } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    buttons.get('Controls:Controls:Drop star')!();
+    for (now=100;now<=600;now+=100) instance.frame([]);
+    instance.dispose?.();await replayWrites.idle();
+    drop.mockRestore();
+    const result=results()[0] as { rows:string[][]; report:DutyReport };
+    expect(result.rows).toContainEqual(['Longest chain','9']);
+    expect(result.rows).toContainEqual(['Longest cascade','4']);
+    // One place per chain length, 1-based, ending at the longest chain charted; moons up to a 7-chain, then counts only.
+    expect(result.report.cleared[0].items.map(item => item.count)).toEqual([1, 1, 0, 1, 1, 0, 2, 0, 1]);
+    expect(result.report.cleared[0].items.map(item => item.icon)).toEqual(['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-donkey', 'moon-vegas', 'moon-seven', 'text', 'text']);
   });
 
   it('records button controls and saves a stopped run once when leaving', async () => {

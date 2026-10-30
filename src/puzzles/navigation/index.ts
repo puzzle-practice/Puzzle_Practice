@@ -9,6 +9,11 @@ import { historyGroup } from '../../core/history';
 import { dutyDesk } from '../../core/duty/desk';
 import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
+import { TEXT } from '../../core/duty/report';
+
+/** A constellation charted in a chain of each length, from none. */
+const CHAIN_NAMES = ['single', 'double', 'triple', 'bingo', 'donkey', 'vegas'];
+const MOONS = ['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-donkey', 'moon-vegas', 'moon-seven'];
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { InputEvent } from '../../core/input';
@@ -49,6 +54,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let runSeed = 0, board = 0;
   let banked: RunTotals = NO_TOTALS;
   const totals = (): RunTotals => game ? addBoard(banked, game) : banked;
+  /**
+   * From the clears played this run: constellations charted by their chain (`charts[n - 1]` in an n-chain),
+   * the longest chain (the biggest multiplier on a constellation) and the longest cascade (the biggest
+   * on a clear of stars). Kept here rather than in the game so older replays still pass their state checks.
+   */
+  let charts: number[] = [], longestChain = 0, longestCascade = 0;
   let running = false, finished = false, selected = 0;
   let startTime = 0, endTime = 0;
   let timerElapsedBeforeBoard = 0;
@@ -90,7 +101,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     liveSettings = settings.create ? { ...settings, timerMs: 0, clears: false, slowDrop: true } : { ...settings };
     duty.clear();
     layer = 'stars'; palette = paintWith = null; painting = false; setup = ''; pasteNote = '';
-    runSeed = seed; board = 0; banked = NO_TOTALS;
+    runSeed = seed; board = 0; banked = NO_TOTALS; charts = []; longestChain = longestCascade = 0;
     dealAt = 0; pendingStart = null;
     game = new NavigationGame(liveSettings, seed);
     selected = game.board.rings - 1;
@@ -108,12 +119,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (!running || !game || game.finished || timeUp()) return;
     deal('New board');
   }
-  function deal(note: string): void {
+  /** `opening` is false after a booch: Dennav's next board carries on at 3/2/1 rather than opening on 1/2/1. */
+  function deal(note: string, opening = true): void {
     if (!game) return;
     banked = totals();
     board++;
     // A quota run's count carries on; a timed WW board has its own quota.
-    game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0));
+    game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0), opening);
     selected = game.board.rings - 1;
     scenes = []; fastDrop = false; incomingRadius = 220;
     message = note; messageAt = ticks(); messagePx = gameFont(3); messageFill = TEXT_WHITE;
@@ -128,17 +140,15 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const run = totals();
     const report = duty.end({ mode: modeLabel(liveSettings.mode), performance: LEARNING,
       score: { label: 'Points', value: String(run.points) },
-      // Werewolf Isle's report shows each constellation as a moon.
-      cleared: isWerewolf(liveSettings.mode) ? [{ label: 'Constellations Charted', inScore: true, items: [
-        { icon: 'moon-crescent', label: 'crescent moons, charted with no chain', count: run.moons[0] },
-        { icon: 'moon-half', label: 'half moons, charted in a double chain', count: run.moons[1] },
-        { icon: 'moon-full', label: 'full moons, charted in a triple chain or longer', count: run.moons[2] },
-      ] }] : [] });
+      // Werewolf Isle's report shows each constellation as a moon by its chain, one bracket place per
+      // chain length: always up to a triple, then on to the longest chain charted. Past a 7-chain there's only the count.
+      cleared: isWerewolf(liveSettings.mode) ? [{ label: 'Constellations Charted', inScore: true,
+        items: [...charts, 0, 0, 0].slice(0, Math.max(3, charts.length)).map((count, i) => ({ icon: MOONS[i] ?? TEXT, label: `charted in a ${CHAIN_NAMES[i] ?? `${i + 1}-chain`}`, count })) }] : [] });
     const tape = replays.finish(`${reason} · ${run.points} points`, report);
     // Freeplay is a sandbox and keeps no history.
     if (!replays.isPlaying && !liveSettings.create) store.addHistory(settingsKey(liveSettings), {
       score: run.points, constellations: run.constellations, stars: run.stars, moves: run.moves,
-      chain: run.longestChain, boards: board + 1, seconds: elapsed() / 1000, reason, ...duty.fields(report),
+      chain: longestChain, cascade: longestCascade, boards: board + 1, seconds: elapsed() / 1000, reason, ...duty.fields(report),
       ...(tape ? { replayAt: tape.at, replayId: tape.runId ?? '' } : {}),
     });
     message = reason; messageAt = ticks(); messagePx = gameFont(1); messageFill = TEXT_WHITE;
@@ -146,7 +156,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** A finished board ends the run, except a Dennav or Old Dennav booch, which deals a fresh board in the same run while time is left. */
   function boardDone(): void {
     if (!running || !game) return;
-    if (game.booched && isWerewolf(liveSettings.mode) && !liveSettings.create && !liveSettings.boochEnds && !timeUp()) { sounds.play('booched'); deal('Booched! New board'); }
+    if (game.booched && isWerewolf(liveSettings.mode) && !liveSettings.create && !liveSettings.boochEnds && !timeUp()) { sounds.play('booched'); deal('Booched! New board', !!liveSettings.boochOpens); }
     else end(game.booched ? 'Booched!' : 'Level complete');
   }
   function startScene(scene: Scene): void {
@@ -168,6 +178,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     sounds.play(sound);
   }
   function queue(steps: Scene[]): void {
+    for (const { clear } of steps) if (clear) {
+      if (clear.kind === 'run') { longestCascade = Math.max(longestCascade, clear.chain); continue; }
+      longestChain = Math.max(longestChain, clear.chain);
+      while (charts.length < clear.chain) charts.push(0);
+      charts[clear.chain - 1]++;
+    }
     scenes = steps; sceneStart = ticks();
     if (scenes.length) startScene(scenes[0]);
     else if (game?.finished) boardDone();
@@ -482,14 +498,16 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     rows: [['Points', String(totals().points)],
       ['Constellations', board && !liveSettings.clears ? String(totals().constellations) : `${totals().constellations}${of(runGoal(liveSettings))}`],
       ...(board ? [['Boards', String(board + 1)]] : []),
-      ['Stars dropped', String(totals().stars)], ['Ring rotations', String(totals().moves)], ['Longest chain', String(totals().longestChain)], ['Time', `${(elapsed()/1000).toFixed(2)}s`]],
+      ['Stars dropped', String(totals().stars)], ['Ring rotations', String(totals().moves)], ['Longest chain', String(longestChain)], ['Longest cascade', String(longestCascade)], ['Time', `${(elapsed()/1000).toFixed(2)}s`]],
   } : null);
   // Version 1 had no looping: an untimed run then ended at the quota, as a quota run does now.
   // Before version 4 a booch ended every run, Dennav and Old Dennav included.
-  const codec: ReplaySettingsCodec = { currentVersion: 4, simulatorVersion: 1, migrate: (version, value) => {
-    const read = version <= 4 ? readSettings(value) : null;
+  // In version 4 the Dennav board a booch dealt opened on 1/2/1 again.
+  const codec: ReplaySettingsCodec = { currentVersion: 5, simulatorVersion: 1, migrate: (version, value) => {
+    const read = version <= 5 ? readSettings(value) : null;
     if (read?.mode === 'ww-test' && version < 3) return null;
-    if (!read || version === 4) return read;
+    if (!read || version === 5) return read;
+    if (version === 4) return { ...read, boochOpens: true };
     // Version 1 dealt Dismissed boards at once.
     return version === 1 ? { ...read, clears: !read.timerMs, dismissDelayMs: 0, boochEnds: true } : { ...read, boochEnds: true };
   } };
@@ -513,7 +531,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Freeplay and games with no timer have no end of their own: their replays are kept however they stop.
   replays.openEnded = () => running && (liveSettings.create || !liveSettings.timerMs);
   // An old replay's booch rule stays with the run taken over, not with the next one started.
-  replays.onTakeOver = () => { savedSettings = null; delete settings.boochEnds; };
+  replays.onTakeOver = () => { savedSettings = null; delete settings.boochEnds; delete settings.boochOpens; };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(game, running, finished, selected, runSeed, board, banked, startTime, timerElapsedBeforeBoard,
     incomingRadius, fastDrop, dealAt, scenes, sceneStart);

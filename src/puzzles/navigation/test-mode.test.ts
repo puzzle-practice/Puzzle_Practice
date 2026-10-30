@@ -36,6 +36,15 @@ describe('Dennav', () => {
     }
   });
 
+  it('carries on at 3/2/1 on a board dealt after a booch', () => {
+    for (const extraRing of [false, true]) {
+      const rings = extraRing ? 4 : 3;
+      const game = new NavigationGame({ ...settings, extraRing }, boardSeed(5, 1), Infinity, false);
+      expect(counts(game.targets, rings)).toEqual([3, 2, 1]);
+      expect(counts(game.board.nextConstellation(), rings)).toEqual([3, 2, 1]);
+    }
+  });
+
   it('charges after charting, adds at most one extra target, and resets with a new action', () => {
     const helper = new TestWildTargets(true, 4);
     const current = [{ octant: 0, ring: 3, colour: 1, wild: false }];

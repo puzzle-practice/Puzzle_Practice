@@ -7,7 +7,7 @@ import { drawFaceInto, faceOptions, FACE, type FaceSpec } from './face';
 import { ICONS, iconWidth, loadIcon, stationIcon, type Icon } from './icons';
 import { loadProfile, NAME_LIMIT, saveProfile, type PirateProfile } from './profile';
 import { LEARNING, moodFor, MOODS, performanceWord } from './ratings';
-import { SPACE, type ClearedGroup, type DutyReport } from './report';
+import { SPACE, TEXT, type ClearedGroup, type DutyReport } from './report';
 import { Store } from '../storage';
 import { fillStatCell, type StatRows } from '../stat-cell';
 
@@ -66,26 +66,29 @@ export function stackRows(counts: readonly number[], tile: number): number[][] {
 
 /** One cleared group as the game's overlapping stacks, drawn at 2x. */
 function stackCanvas(group: ClearedGroup): HTMLCanvasElement | null {
-  const icons = group.items.map((item) => ICONS[item.icon] ?? null);
-  if (!group.items.some((item) => item.count > 0) || icons.some((icon) => !icon)) return null;
+  const pictured = group.items.filter((item) => item.icon !== TEXT);
+  const icons = pictured.map((item) => ICONS[item.icon] ?? null);
+  if (!pictured.some((item) => item.count > 0) || icons.some((icon) => !icon)) return null;
   const tile = Math.max(...icons.map((icon) => iconWidth(icon!)));
   const height = Math.max(...icons.map((icon) => icon!.height));
-  const rows = stackRows(group.items.map((item) => item.count), tile).slice(0, STACK_ROWS);
+  const rows = stackRows(pictured.map((item) => item.count), tile).slice(0, STACK_ROWS);
   const canvas = el('canvas', 'duty-stack');
   canvas.width = STACK_WIDTH;
   canvas.height = (height + 2) * rows.length - 2;
   canvas.title = `${group.label}: ${group.items.filter((i) => i.count).map((i) => `${i.count} ${i.label}`).join(', ')}`;
-  void Promise.all(icons.map((icon) => loadIcon(icon!.url))).then((images) => {
+  void Promise.all(icons.map((icon) => Promise.all([loadIcon(icon!.url), icon!.under ? loadIcon(icon!.under.url) : null]))).then((images) => {
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     let y = 0;
     for (const row of rows) {
       let x = 0;
       row.forEach((n, i) => {
-        const icon = icons[i]!;
-        const img = images[i];
-        const w = iconWidth(icon);
+        const w = iconWidth(icons[i]!);
         for (let k = 0; k < n; k++) {
+          // Each group in a row shows its icon in front; the copies behind may use a plainer one.
+          const under = k < n - 1 ? icons[i]!.under : undefined;
+          const icon = under ?? icons[i]!;
+          const img = images[i][under ? 1 : 0];
           if (img) ctx.drawImage(img, ...icon.area, Math.floor(x), y + height - icon.height, w, icon.height);
           x += STEP;
         }

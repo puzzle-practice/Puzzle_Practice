@@ -10,7 +10,9 @@ export interface NavigationSettings { mode: 'normal' | 'ww' | 'ww-test'; difficu
   /** Freeplay mode paints the board, with no timer, quota or history, and each star waits for Drop. */
   create: boolean;
   /** Replays saved before a Dennav booch dealt a new board: the booch ends the run, as it did then. */
-  boochEnds?: boolean }
+  boochEnds?: boolean;
+  /** Replays saved while a Dennav booch dealt a board opening on 1/2/1 again: it still does. */
+  boochOpens?: boolean }
 export const DEFAULT_SETTINGS: NavigationSettings = { mode: 'ww-test', difficulty: 4, extraRing: true, wildTargets: true, timerMs: 120000, clears: false, dismissDelayMs: 1000, slowDrop: false, create: false };
 /** How long Dismiss holds play before the next board is dealt. */
 export const DISMISS_DELAYS = [0, 500, 1000, 1500, 2000, 3000];
@@ -22,9 +24,9 @@ export function readSettings(value: unknown): NavigationSettings | null {
       (s.clears !== undefined && typeof s.clears !== 'boolean') || (s.clears && s.timerMs !== 0) ||
       (s.dismissDelayMs !== undefined && !DISMISS_DELAYS.includes(s.dismissDelayMs)) ||
       (s.slowDrop !== undefined && typeof s.slowDrop !== 'boolean') || (s.create !== undefined && typeof s.create !== 'boolean') ||
-      (s.boochEnds !== undefined && typeof s.boochEnds !== 'boolean')) return null;
+      (s.boochEnds !== undefined && typeof s.boochEnds !== 'boolean') || (s.boochOpens !== undefined && typeof s.boochOpens !== 'boolean')) return null;
   return { mode: s.mode, difficulty: s.difficulty, extraRing: s.extraRing, wildTargets: s.wildTargets, timerMs: s.timerMs, clears: s.clears ?? false,
-    dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false, ...(s.boochEnds ? { boochEnds: true } : {}) };
+    dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false, ...(s.boochEnds ? { boochEnds: true } : {}), ...(s.boochOpens ? { boochOpens: true } : {}) };
 }
 export const isWerewolf = (mode: NavigationSettings['mode']): boolean => mode === 'ww' || mode === 'ww-test';
 export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal';
@@ -77,10 +79,13 @@ export class NavigationGame {
   readonly moons = [0, 0, 0];
   finished = false;
   booched = false;
-  /** `goal` is what this board must chart to end the run; a later board in a quota run gets what's left. */
-  constructor(readonly settings: NavigationSettings, readonly seed: number, readonly goal = runGoal(settings)) {
+  /**
+   * `goal` is what this board must chart to end the run; a later board in a quota run gets what's left.
+   * `opening` starts a Dennav board on its 1/2/1 constellation: every board but one dealt after a booch.
+   */
+  constructor(readonly settings: NavigationSettings, readonly seed: number, readonly goal = runGoal(settings), opening = true) {
     const rings = isWerewolf(settings.mode) && settings.extraRing ? 4 : 3;
-    this.board = settings.mode === 'ww-test' ? new NaviTestBoard(rings, settings.difficulty, seed) : new NaviBoard(rings, settings.difficulty, seed, isWerewolf(settings.mode));
+    this.board = settings.mode === 'ww-test' ? new NaviTestBoard(rings, settings.difficulty, seed, opening) : new NaviBoard(rings, settings.difficulty, seed, isWerewolf(settings.mode));
     this.wild = settings.mode === 'ww-test' ? new TestWildTargets(settings.wildTargets, rings) : new WildTargets(isWerewolf(settings.mode) && settings.wildTargets, rings);
     this.targets = this.board.nextConstellation();
     this.entry = this.board.nextEntry();

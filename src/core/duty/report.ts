@@ -3,7 +3,10 @@
 import { currentPirate, sanitizeProfile, type PirateProfile } from './profile';
 import { PERFORMANCE } from './ratings';
 
-/** One kind of thing cleared, e.g. small chests. `icon` names a picture in icons.ts; SPACE is a gap in a row. */
+/**
+ * One kind of thing cleared, e.g. small chests. `icon` names a picture in icons.ts; SPACE is a gap in a row,
+ * and TEXT an item with no picture: only its count shows, in the brackets.
+ */
 export interface ClearedItem {
   icon: string;
   label: string;
@@ -11,6 +14,7 @@ export interface ClearedItem {
 }
 
 export const SPACE = 'space';
+export const TEXT = 'text';
 
 /** A row of cleared things under one heading, e.g. 'Crates collected': small, medium, large. */
 export interface ClearedGroup {
