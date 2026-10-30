@@ -76,17 +76,19 @@ function stackCanvas(group: ClearedGroup): HTMLCanvasElement | null {
   canvas.width = STACK_WIDTH;
   canvas.height = (height + 2) * rows.length - 2;
   canvas.title = `${group.label}: ${group.items.filter((i) => i.count).map((i) => `${i.count} ${i.label}`).join(', ')}`;
-  void Promise.all(icons.map((icon) => loadIcon(icon!.url))).then((images) => {
+  void Promise.all(icons.map((icon) => Promise.all([loadIcon(icon!.url), icon!.under ? loadIcon(icon!.under.url) : null]))).then((images) => {
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     let y = 0;
     for (const row of rows) {
       let x = 0;
       row.forEach((n, i) => {
-        const icon = icons[i]!;
-        const img = images[i];
-        const w = iconWidth(icon);
+        const w = iconWidth(icons[i]!);
         for (let k = 0; k < n; k++) {
+          // Each group in a row shows its icon in front; the copies behind may use a plainer one.
+          const under = k < n - 1 ? icons[i]!.under : undefined;
+          const icon = under ?? icons[i]!;
+          const img = images[i][under ? 1 : 0];
           if (img) ctx.drawImage(img, ...icon.area, Math.floor(x), y + height - icon.height, w, icon.height);
           x += STEP;
         }

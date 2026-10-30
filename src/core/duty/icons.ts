@@ -37,6 +37,8 @@ export interface Icon {
   area: [number, number, number, number];
   /** Drawn this tall in a tally (the game's chest tiles are 12). */
   height: number;
+  /** In a stack, every copy but the last of each group is drawn as this instead. */
+  under?: Icon;
 }
 
 const frame = (url: string, w: number, h: number, index = 0, height = 12): Icon => ({ url, area: [index * w, 0, w, h], height });
@@ -69,10 +71,11 @@ export const ICONS: Record<string, Icon> = {
   'moon-half': frame(moons, 12, 12, 1),
   'moon-full': frame(moons, 12, 12, 2),
   // Past a triple, a full moon with a black plus per step: bingo, donkey, vegas, then a 7-chain.
-  'moon-bingo': frame(moonStars, 12, 12, 0),
-  'moon-donkey': frame(moonStars, 12, 12, 1),
-  'moon-vegas': frame(moonStars, 12, 12, 2),
-  'moon-seven': frame(moonStars, 12, 12, 3),
+  // Only the front moon of a stack shows its pluses; the ones behind are plain full moons.
+  'moon-bingo': { ...frame(moonStars, 12, 12, 0), under: frame(moons, 12, 12, 2) },
+  'moon-donkey': { ...frame(moonStars, 12, 12, 1), under: frame(moons, 12, 12, 2) },
+  'moon-vegas': { ...frame(moonStars, 12, 12, 2), under: frame(moons, 12, 12, 2) },
+  'moon-seven': { ...frame(moonStars, 12, 12, 3), under: frame(moons, 12, 12, 2) },
   'haul-coin': frame(haulCoin, 23, 23, 0, 14),
   'haul-ruby': frame(haulRuby, 16, 23, 0, 14),
   'haul-emerald': frame(haulEmerald, 16, 23, 0, 14),
