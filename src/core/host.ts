@@ -39,6 +39,14 @@ export async function runPuzzle(
   }
   start = performance.now();
   input.drain();
+  // A hidden tab gets no animation frames. Leave that time out of the game clock, or on return
+  // the simulation would play the whole gap back as fast catch-up steps at up to 240x speed.
+  let hiddenAt = document.hidden ? start : null;
+  const onVisibility = () => {
+    if (document.hidden) hiddenAt ??= performance.now();
+    else if (hiddenAt !== null) { start += performance.now() - hiddenAt; hiddenAt = null; }
+  };
+  document.addEventListener('visibilitychange', onVisibility);
   const catchUp = () => simulation.advance(performance.now() - start, time => clock.frame(() => instance.frame(input.drain(time))));
   // Panel actions use the same logical time even if a display has not painted yet.
   for (const event of ['click', 'change', 'input']) panelRoot.addEventListener(event, catchUp, true);
@@ -58,6 +66,7 @@ export async function runPuzzle(
       stopped = true;
       cancelAnimationFrame(handle);
       input.dispose();
+      document.removeEventListener('visibilitychange', onVisibility);
       for (const event of ['click', 'change', 'input']) panelRoot.removeEventListener(event, catchUp, true);
       instance.dispose?.();
     },
