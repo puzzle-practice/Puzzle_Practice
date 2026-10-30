@@ -2237,6 +2237,29 @@ describe('Navigation sessions and replay', () => {
     instance.dispose?.();
   });
 
+  it('counts a chain that ends on a constellation, and charts in a bingo, donkey or vegas', async () => {
+    const { NavigationGame } = await import('./navigation/game');
+    const clears = [['run',1],['run',2],['target',3],['target',4],['target',4],['target',6],['target',7]] as const;
+    const drop = vi.spyOn(NavigationGame.prototype,'drop').mockImplementationOnce(function (this: InstanceType<typeof NavigationGame>) {
+      return clears.map(([kind,chain]) => ({ ...this.scene(10), clear: { kind, cells: [], points: 1, chain } }));
+    });
+    const store=new Store('navigation');
+    store.set('settings',{ ...(await import('./navigation/game')).DEFAULT_SETTINGS, mode:'ww-test' });
+    const { panel,buttons,results }=panelHarness();let now=0;
+    const screen=new Proxy({ ctx:canvasContext() },{ get:(target,key)=>key==='ctx'?target.ctx:()=>({ width:0,height:0 }) });
+    const factory=(await import('./navigation/index')).default;
+    const instance=await factory({ screen,input:{ mouse:[-1,-1] },panel,store,ticks:()=>now } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    buttons.get('Controls:Controls:Drop star')!();
+    for (now=100;now<=600;now+=100) instance.frame([]);
+    instance.dispose?.();await replayWrites.idle();
+    drop.mockRestore();
+    const result=results()[0] as { rows:string[][]; report:DutyReport };
+    expect(result.rows).toContainEqual(['Longest chain','7']);
+    expect(result.report.cleared[0].items.slice(3)).toEqual([
+      { icon:'text', label:'bingos', count:2 }, { icon:'text', label:'donkeys', count:0 }, { icon:'text', label:'vegas', count:2 }]);
+  });
+
   it('records button controls and saves a stopped run once when leaving', async () => {
     const store=new Store('navigation');
     const { panel,buttons,results }=panelHarness();let now=0;
