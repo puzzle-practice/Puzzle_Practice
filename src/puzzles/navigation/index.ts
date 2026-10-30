@@ -11,8 +11,9 @@ import { EndHold } from '../../core/end-hold';
 import { LEARNING } from '../../core/duty/ratings';
 import { TEXT } from '../../core/duty/report';
 
-/** What the game calls a 4, 5 and 6-chain. */
-const CHAIN_NAMES = ['bingo', 'donkey', 'vegas'];
+/** A constellation charted in a chain of each length, from none. */
+const CHAIN_NAMES = ['single', 'double', 'triple', 'bingo', 'donkey', 'vegas'];
+const MOONS = ['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-donkey', 'moon-vegas', 'moon-seven'];
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { InputEvent } from '../../core/input';
@@ -139,14 +140,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const run = totals();
     const report = duty.end({ mode: modeLabel(liveSettings.mode), performance: LEARNING,
       score: { label: 'Points', value: String(run.points) },
-      // Werewolf Isle's report shows each constellation by its chain: a moon up to a triple, then
-      // only a count in the brackets, one place per chain length, as far as the longest chain charted.
-      cleared: isWerewolf(liveSettings.mode) ? [{ label: 'Constellations Charted', inScore: true, items: [
-        { icon: 'moon-crescent', label: 'crescent moons, charted with no chain', count: charts[0] ?? 0 },
-        { icon: 'moon-half', label: 'half moons, charted in a double chain', count: charts[1] ?? 0 },
-        { icon: 'moon-full', label: 'full moons, charted in a triple chain', count: charts[2] ?? 0 },
-        ...charts.slice(3).map((count, i) => ({ icon: TEXT, label: `charted in a ${CHAIN_NAMES[i] ?? `${i + 4}-chain`}`, count })),
-      ] }] : [] });
+      // Werewolf Isle's report shows each constellation as a moon by its chain, one bracket place per
+      // chain length, ending at the longest chain charted. Past a 7-chain there's only the count.
+      cleared: isWerewolf(liveSettings.mode) ? [{ label: 'Constellations Charted', inScore: true,
+        items: (charts.length ? charts : [0]).map((count, i) => ({ icon: MOONS[i] ?? TEXT, label: `charted in a ${CHAIN_NAMES[i] ?? `${i + 1}-chain`}`, count })) }] : [] });
     const tape = replays.finish(`${reason} · ${run.points} points`, report);
     // Freeplay is a sandbox and keeps no history.
     if (!replays.isPlaying && !liveSettings.create) store.addHistory(settingsKey(liveSettings), {

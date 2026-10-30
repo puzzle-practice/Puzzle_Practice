@@ -2239,7 +2239,7 @@ describe('Navigation sessions and replay', () => {
 
   it('reports constellations by chain length, the longest chain and the longest cascade', async () => {
     const { NavigationGame, DEFAULT_SETTINGS } = await import('./navigation/game');
-    const clears = [['run',1],['run',2],['run',3],['run',4],['target',5],['target',1],['run',1],['target',2],['target',4],['target',7],['target',7]] as const;
+    const clears = [['run',1],['run',2],['run',3],['run',4],['target',5],['target',1],['run',1],['target',2],['target',4],['target',7],['target',7],['target',9]] as const;
     const drop = vi.spyOn(NavigationGame.prototype,'drop').mockImplementationOnce(function (this: InstanceType<typeof NavigationGame>) {
       return clears.map(([kind,chain]) => ({ ...this.scene(10), clear: { kind, cells: [], points: 1, chain } }));
     });
@@ -2255,11 +2255,11 @@ describe('Navigation sessions and replay', () => {
     instance.dispose?.();await replayWrites.idle();
     drop.mockRestore();
     const result=results()[0] as { rows:string[][]; report:DutyReport };
-    expect(result.rows).toContainEqual(['Longest chain','7']);
+    expect(result.rows).toContainEqual(['Longest chain','9']);
     expect(result.rows).toContainEqual(['Longest cascade','4']);
-    // One place per chain length, 1-based: a moon up to a triple, then counts only.
-    expect(result.report.cleared[0].items.map(item => item.count)).toEqual([1, 1, 0, 1, 1, 0, 2]);
-    expect(result.report.cleared[0].items.slice(3).map(item => item.icon)).toEqual(['text', 'text', 'text', 'text']);
+    // One place per chain length, 1-based, ending at the longest chain charted; moons up to a 7-chain, then counts only.
+    expect(result.report.cleared[0].items.map(item => item.count)).toEqual([1, 1, 0, 1, 1, 0, 2, 0, 1]);
+    expect(result.report.cleared[0].items.map(item => item.icon)).toEqual(['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-donkey', 'moon-vegas', 'moon-seven', 'text', 'text']);
   });
 
   it('records button controls and saves a stopped run once when leaving', async () => {
