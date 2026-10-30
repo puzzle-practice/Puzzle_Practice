@@ -148,8 +148,9 @@ export class NaviBoard {
 
 /** Keep the original board's state shape unchanged for existing replay fingerprints. */
 export class NaviTestBoard extends NaviBoard {
-  private dealt = 0;
-  constructor(rings: number, difficulty: number, seed: number) { super(rings, difficulty, seed, true); }
+  private dealt: number;
+  /** `opening` deals the 1/2/1 constellation first; a board dealt after a booch goes straight to 3/2/1. */
+  constructor(rings: number, difficulty: number, seed: number, opening = true) { super(rings, difficulty, seed, true); this.dealt = opening ? 0 : 1; }
   protected override denseDistribution(): number[] { return this.dealt++ === 0 ? FIRST_TEST_DISTRIBUTION : DENSE_DISTRIBUTION; }
 }
 

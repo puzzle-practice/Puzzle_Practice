@@ -160,6 +160,8 @@ describe('navigation sessions', () => {
     expect(readSettings({ ...DEFAULT_SETTINGS,boochEnds:true })).toMatchObject({ boochEnds: true });
     expect(readSettings({ ...DEFAULT_SETTINGS,boochEnds:false })).toEqual(DEFAULT_SETTINGS);
     expect(readSettings({ ...DEFAULT_SETTINGS,boochEnds:1 })).toBeNull();
+    expect(readSettings({ ...DEFAULT_SETTINGS,boochOpens:true })).toMatchObject({ boochOpens: true });
+    expect(readSettings({ ...DEFAULT_SETTINGS,boochOpens:'yes' })).toBeNull();
     expect(settingsKey({ ...DEFAULT_SETTINGS,timerMs:0 })).not.toBe(settingsKey({ ...DEFAULT_SETTINGS,timerMs:0,clears:true }));
     const { slowDrop: ___, ...beforeSlowDrop } = DEFAULT_SETTINGS;
     expect(readSettings(beforeSlowDrop)).toMatchObject({ slowDrop: false });

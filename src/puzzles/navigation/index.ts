@@ -108,12 +108,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (!running || !game || game.finished || timeUp()) return;
     deal('New board');
   }
-  function deal(note: string): void {
+  /** `opening` is false after a booch: Dennav's next board carries on at 3/2/1 rather than opening on 1/2/1. */
+  function deal(note: string, opening = true): void {
     if (!game) return;
     banked = totals();
     board++;
     // A quota run's count carries on; a timed WW board has its own quota.
-    game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0));
+    game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0), opening);
     selected = game.board.rings - 1;
     scenes = []; fastDrop = false; incomingRadius = 220;
     message = note; messageAt = ticks(); messagePx = gameFont(3); messageFill = TEXT_WHITE;
@@ -146,7 +147,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   /** A finished board ends the run, except a Dennav or Old Dennav booch, which deals a fresh board in the same run while time is left. */
   function boardDone(): void {
     if (!running || !game) return;
-    if (game.booched && isWerewolf(liveSettings.mode) && !liveSettings.create && !liveSettings.boochEnds && !timeUp()) { sounds.play('booched'); deal('Booched! New board'); }
+    if (game.booched && isWerewolf(liveSettings.mode) && !liveSettings.create && !liveSettings.boochEnds && !timeUp()) { sounds.play('booched'); deal('Booched! New board', !!liveSettings.boochOpens); }
     else end(game.booched ? 'Booched!' : 'Level complete');
   }
   function startScene(scene: Scene): void {
@@ -486,10 +487,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   } : null);
   // Version 1 had no looping: an untimed run then ended at the quota, as a quota run does now.
   // Before version 4 a booch ended every run, Dennav and Old Dennav included.
-  const codec: ReplaySettingsCodec = { currentVersion: 4, simulatorVersion: 1, migrate: (version, value) => {
-    const read = version <= 4 ? readSettings(value) : null;
+  // In version 4 the Dennav board a booch dealt opened on 1/2/1 again.
+  const codec: ReplaySettingsCodec = { currentVersion: 5, simulatorVersion: 1, migrate: (version, value) => {
+    const read = version <= 5 ? readSettings(value) : null;
     if (read?.mode === 'ww-test' && version < 3) return null;
-    if (!read || version === 4) return read;
+    if (!read || version === 5) return read;
+    if (version === 4) return { ...read, boochOpens: true };
     // Version 1 dealt Dismissed boards at once.
     return version === 1 ? { ...read, clears: !read.timerMs, dismissDelayMs: 0, boochEnds: true } : { ...read, boochEnds: true };
   } };
@@ -513,7 +516,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Freeplay and games with no timer have no end of their own: their replays are kept however they stop.
   replays.openEnded = () => running && (liveSettings.create || !liveSettings.timerMs);
   // An old replay's booch rule stays with the run taken over, not with the next one started.
-  replays.onTakeOver = () => { savedSettings = null; delete settings.boochEnds; };
+  replays.onTakeOver = () => { savedSettings = null; delete settings.boochEnds; delete settings.boochOpens; };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(game, running, finished, selected, runSeed, board, banked, startTime, timerElapsedBeforeBoard,
     incomingRadius, fastDrop, dealAt, scenes, sceneStart);
