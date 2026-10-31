@@ -10,6 +10,8 @@ import { advanceVirtualTime, endVirtualTime, frameRunner, realNow, startVirtualT
 
 /** How long the duty report stays on screen at the end of the video, in seconds. */
 export const REPORT_SECONDS = 5;
+/** The longest a frame is left on screen before it's added again (see the frame loop). */
+const MAX_GAP_SECONDS = 0.25;
 const SAMPLE_RATE = 48_000;
 /** With a size limit: sound at 128 kbps (64 under 15 MB), the video between these bitrates, aiming 12% under the limit. */
 const CAPPED_AUDIO_BITRATE = 128_000, SMALL_CAPPED_AUDIO_BITRATE = 64_000, SMALL_CAP_BYTES = 15_000_000;
@@ -123,6 +125,7 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
   try {
     await options.begin();
     startedAt = realNow();
+    const maxGap = Math.max(1, Math.round(fps * MAX_GAP_SECONDS));
     const frameMs = 1000 / fps, maxFrames = Math.ceil((options.maxMs ?? 30 * 60_000) / frameMs);
     while (frames < maxFrames) {
       if (options.cancelled()) throw new VideoExportCancelled();
@@ -132,7 +135,10 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
       if (options.cancelled()) throw new VideoExportCancelled();
       // The frame that ended the replay has already put the board back: it isn't part of the video.
       if (!options.playing()) break;
+      // Some players only show a frame once the next one arrives, so a still stretch is never left
+      // empty for long: the last frame is added again every quarter second. Repeats cost next to nothing.
       if (drawing.changed()) { copy(); await video.add(frames / fps, 1 / fps); lastAdded = frames; }
+      else if (frames - lastAdded >= maxGap) { await video.add(frames / fps, 1 / fps); lastAdded = frames; }
       frames++;
       // Let the page paint the progress note and stay responsive.
       if (frames % 30 === 0) { options.onProgress?.(frames / fps); await new Promise(resolve => setTimeout(resolve, 0)); }
@@ -156,8 +162,12 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
     await new Promise(resolve => setTimeout(resolve, 300));
     // The report covers the whole board. It's painted over the last frame, at the video's size.
     const paint = () => drawElement(sourceCtx, card, game.getBoundingClientRect(), source.width);
-    paint(); await video.add(seconds, 1 / fps);
-    await video.add(seconds + REPORT_SECONDS - 1 / fps, 1 / fps);
+    paint();
+    // One frame then a long gap would show the board until the very end in many players: it's added
+    // again every quarter second through the hold.
+    const step = Math.max(1, Math.round(fps * MAX_GAP_SECONDS)), holdFrames = Math.round(REPORT_SECONDS * fps);
+    for (let f = 0; f < holdFrames; f += step) await video.add(seconds + f / fps, 1 / fps);
+    await video.add(seconds + (holdFrames - 1) / fps, 1 / fps);
     seconds += REPORT_SECONDS;
   }
 
