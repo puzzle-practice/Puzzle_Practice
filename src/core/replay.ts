@@ -495,6 +495,9 @@ export class ReplayRecorder {
       disabled: () => typeof VideoEncoder === 'undefined' || !this.tapes.length || this.loading || !!this.exporting || !!this.playback || !!this.recording
         || !this.canPlay(this.tapes[this.selected]) || !this.canStartPlayback(),
     });
+    if (VIDEO_PUZZLES.has(puzzle)) group.select('Video size limit', [
+      { value: 8, label: '8 MB' }, { value: 25, label: '25 MB' }, { value: 50, label: '50 MB' }, { value: 0, label: 'No limit' },
+    ], () => this.preferences.get<number>('videoMaxMb', 8), (mb) => this.preferences.set('videoMaxMb', mb));
     if (VIDEO_PUZZLES.has(puzzle)) group.select('Video frame rate', [
       { value: 60, label: '60 fps' }, { value: 30, label: '30 fps (quicker to make)' },
     ], () => this.preferences.get<number>('videoFps', 60), (fps) => this.preferences.set('videoFps', fps));
@@ -1138,12 +1141,15 @@ export class ReplayRecorder {
         // The duty report the replay ends on, if it shows one, closes the video.
         endCard: () => this.panel.reportView ?? null,
         fps: this.preferences.get<number>('videoFps', 60),
+        // Sharing sites count a megabyte as a million bytes. The report adds a few seconds at the end.
+        maxBytes: this.preferences.get<number>('videoMaxMb', 8) * 1_000_000 || undefined,
+        expectedSeconds: entry.duration / 1000 / this.replaySpeed + (END_HOLD_MS + 5000) / 1000,
       });
       const url = URL.createObjectURL(video.blob); const a = document.createElement('a');
       a.href = url; a.download = replayFileName(entry).replace(/\.[^.]*(\.gz)?$/, '') + '.mp4';
       a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       this.videoNote = 'Video saved: ' + formatSeconds(video.seconds) + ' made in ' + formatSeconds(video.renderMs / 1000) +
-        ' (' + (video.blob.size / 1024 / 1024).toFixed(1) + ' MB)';
+        ' (' + (video.blob.size / 1_000_000).toFixed(1) + ' MB)';
     } catch (error) {
       this.videoNote = error instanceof Error && error.name === 'VideoExportCancelled' ? 'Video cancelled' : 'The video could not be made: ' + (error instanceof Error ? error.message : String(error));
       if (this.playback) this.stopPlayback();

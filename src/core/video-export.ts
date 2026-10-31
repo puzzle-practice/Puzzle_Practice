@@ -2,9 +2,10 @@
 // at a time, so the video is smooth whatever the computer's speed, and renders as fast as the encoder
 // allows rather than at playing speed. Frames are encoded with WebCodecs and muxed by Mediabunny; sounds
 // the game played are mixed offline into an audio track.
-import { AudioBufferSource, BufferTarget, CanvasSource, Mp4OutputFormat, Output, QUALITY_HIGH, getFirstEncodableAudioCodec, getFirstEncodableVideoCodec } from 'mediabunny';
+import { AudioBufferSource, BufferTarget, CanvasSource, Mp4OutputFormat, Output, QUALITY_HIGH, type Quality, getFirstEncodableAudioCodec, getFirstEncodableVideoCodec } from 'mediabunny';
 import { captureSounds, type CapturedSound } from './audio';
 import { drawElement } from './dom-raster';
+import { watchDrawing } from './draw-fingerprint';
 import { advanceVirtualTime, endVirtualTime, frameRunner, realNow, startVirtualTime } from './realtime';
 
 /** Frame rates a video can be made at: 30 is about twice as quick to make, 60 matches the game. */
@@ -12,6 +13,13 @@ export const VIDEO_FRAME_RATES = [30, 60] as const;
 /** How long the duty report stays on screen at the end of the video, in seconds. */
 export const REPORT_SECONDS = 5;
 const SAMPLE_RATE = 48_000;
+/** With a size limit: sound at 64 kbps, the video between these bitrates, aiming 12% under the limit. */
+const CAPPED_AUDIO_BITRATE = 64_000;
+const MIN_VIDEO_BITRATE = 100_000;
+const MAX_VIDEO_BITRATE = 4_000_000;
+const SIZE_MARGIN = 0.88;
+/** The codec checks take a Quality as `quality` but a number only as `bitrate`. */
+const rate = (value: number | Quality) => typeof value === 'number' ? { bitrate: value } : { quality: value };
 
 export interface VideoExportOptions {
   /** Starts the replay; resolves once it is playing (or failed to start). Runs on the virtual clock. */
@@ -26,6 +34,10 @@ export interface VideoExportOptions {
   endCard?(): HTMLElement | null;
   /** Frames a second; 60 by default. */
   fps?: number;
+  /** Largest file to make, in bytes: the video's bitrate is set so it fits. No limit if left out. */
+  maxBytes?: number;
+  /** How long the video is expected to run, in seconds, to share `maxBytes` out over. */
+  expectedSeconds?: number;
   /** Longest video to make, in ms of real time, in case a replay never ends. */
   maxMs?: number;
 }
@@ -41,33 +53,27 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
   const game = runner.canvas;
   const { width, height } = game;
   const fps = options.fps ?? 60;
-  const videoCodec = await getFirstEncodableVideoCodec(['avc', 'vp9', 'av1', 'vp8'], { width, height, quality: QUALITY_HIGH, frameRate: fps });
+  // A size limit is shared out over the expected length, with some room spare: encoders only aim at a bitrate.
+  const capped = !!options.maxBytes && !!options.expectedSeconds;
+  const audioBitrate: number | Quality = capped ? CAPPED_AUDIO_BITRATE : QUALITY_HIGH;
+  const videoBitrate: number | Quality = capped
+    ? Math.round(Math.max(MIN_VIDEO_BITRATE, Math.min(MAX_VIDEO_BITRATE,
+      options.maxBytes! * 8 * SIZE_MARGIN / options.expectedSeconds! - CAPPED_AUDIO_BITRATE)))
+    : QUALITY_HIGH;
+  const videoCodec = await getFirstEncodableVideoCodec(['avc', 'vp9', 'av1', 'vp8'], { width, height, frameRate: fps, ...rate(videoBitrate) });
   if (!videoCodec) throw new Error('This browser cannot encode video');
   const audioCodec = typeof AudioEncoder === 'undefined' ? null
-    : await getFirstEncodableAudioCodec(['aac', 'opus'], { numberOfChannels: 2, sampleRate: SAMPLE_RATE, quality: QUALITY_HIGH });
+    : await getFirstEncodableAudioCodec(['aac', 'opus'], { numberOfChannels: 2, sampleRate: SAMPLE_RATE, ...rate(audioBitrate) });
 
-  // A half-size copy of each frame, compared with the last one: a frame that didn't change is left out
-  // (the one before is simply shown longer), which skips most of the encoding while the board sits
-  // still. Halving averages each 2x2 block, so any change that shows is still caught, for a quarter of
-  // the pixels to read back. It also about halves the file size.
-  const sample = document.createElement('canvas');
-  sample.width = Math.ceil(width / 2); sample.height = Math.ceil(height / 2);
-  const sampleCtx = sample.getContext('2d', { willReadFrequently: true, alpha: false })!;
-  let previous: Uint32Array | null = null;
-  const changed = (): boolean => {
-    sampleCtx.drawImage(game, 0, 0, sample.width, sample.height);
-    const pixels = new Uint32Array(sampleCtx.getImageData(0, 0, sample.width, sample.height).data.buffer);
-    const last = previous;
-    previous = pixels;
-    if (!last) return true;
-    for (let i = 0; i < pixels.length; i++) if (pixels[i] !== last[i]) return true;
-    return false;
-  };
+  // A frame drawn exactly like the one before is left out (the one before is simply shown longer), which
+  // skips most of the encoding while the board sits still and about halves the file. It's told from
+  // what the game drew rather than by reading pixels back, which would stall the graphics card.
+  const drawing = watchDrawing(game.getContext('2d')!);
 
   const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
-  const video = new CanvasSource(game, { codec: videoCodec, bitrate: QUALITY_HIGH, keyFrameInterval: 2 });
+  const video = new CanvasSource(game, { codec: videoCodec, bitrate: videoBitrate, keyFrameInterval: 2 });
   output.addVideoTrack(video, { frameRate: fps });
-  const audio = audioCodec ? new AudioBufferSource({ codec: audioCodec, bitrate: QUALITY_HIGH }) : null;
+  const audio = audioCodec ? new AudioBufferSource({ codec: audioCodec, bitrate: audioBitrate }) : null;
   if (audio) output.addAudioTrack(audio);
   await output.start();
 
@@ -87,7 +93,7 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
       if (options.cancelled()) throw new VideoExportCancelled();
       // The frame that ended the replay has already put the board back: it isn't part of the video.
       if (!options.playing()) break;
-      if (changed()) { await video.add(frames / fps, 1 / fps); lastAdded = frames; }
+      if (drawing.changed()) { await video.add(frames / fps, 1 / fps); lastAdded = frames; }
       frames++;
       // Let the page paint the progress note and stay responsive.
       if (frames % 30 === 0) { options.onProgress?.(frames / fps); await new Promise(resolve => setTimeout(resolve, 0)); }
@@ -96,6 +102,7 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
     await output.cancel().catch(() => {});
     throw error;
   } finally {
+    drawing.dispose();
     sounds = stopCapture();
     endVirtualTime();
   }
