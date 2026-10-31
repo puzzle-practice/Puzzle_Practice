@@ -2,6 +2,7 @@ import { setReplayPirate } from './duty/profile';
 import { readReport, showsDutyReport, type DutyReport } from './duty/report';
 import type { InputEvent, Point } from './input';
 import { END_HOLD_MS } from './end-hold';
+import { realNow } from './realtime';
 import { isTyping, type Panel } from './panel';
 import { showsReplayClicks, Store } from './storage';
 import { deleteReplay, readArchivedReplay, readReplayArchive, REPLAY_REMOVED, replayRetentionLimit } from './data-backups';
@@ -369,6 +370,9 @@ interface Playback {
   check: number; divergedAt: number | null;
 }
 
+/** Puzzles whose replays can be saved as MP4 videos (an experiment, starting with Navigation). */
+const VIDEO_PUZZLES = new Set(['navigation']);
+
 /** How often an open-ended game's recording is saved as it stands, in ms of play. */
 export const CHECKPOINT_MS = 60_000;
 
@@ -402,6 +406,9 @@ export class ReplayRecorder {
   private replaySpeed = 1;
   private compressRecording = true;
   private replayStorageError = '';
+  /** A video being made of the selected replay: how far it has got, and whether Stop gave it up. */
+  private exporting: { seconds: number; cancelled: boolean } | null = null;
+  private videoNote = '';
   private lastAt = 0;
   private readonly preferences = new Store('global');
   private readonly mouseButtonsDown = new Set<number>();
@@ -460,13 +467,13 @@ export class ReplayRecorder {
     group.button('Play', () => {
       if (!this.playback) void this.playSelected(); else this.togglePause();
     }, { label: () => this.loading ? 'Loading…' : !this.playback ? 'Play' : this.playback.paused ? 'Resume' : 'Pause',
-      disabled: () => this.loading || !this.tapes.length || !!this.recording || (!this.playback && (!this.canPlay(this.tapes[this.selected]) || !this.canStartPlayback())) })
-    .button('Stop', () => this.stopPlayback(), { disabled: () => !this.playback && !this.loading })
+      disabled: () => this.loading || !!this.exporting || !this.tapes.length || !!this.recording || (!this.playback && (!this.canPlay(this.tapes[this.selected]) || !this.canStartPlayback())) })
+    .button('Stop', () => { if (this.exporting) this.exporting.cancelled = true; this.stopPlayback(); }, { disabled: () => !this.playback && !this.loading })
     // One button: Take over while watching; after a take-over, Resume replay goes back to watching.
     .button('Take over', () => { if (this.playback) this.takeOver(); else void this.resumeReplay(); }, {
       label: () => !this.playback && this.takeOverFrom ? 'Resume replay' : 'Take over',
       title: 'Take over: play on from this point yourself; the game saves as your own. Resume replay: the replay plays on from where you took over (the game you played from there is not saved).',
-      disabled: () => this.playback
+      disabled: () => this.exporting ? true : this.playback
         ? this.loading || this.seeking || this.advancing || this.playback.finishPending
         : !this.takeOverFrom || this.loading || !this.tapeIndices.has(this.takeOverFrom.id),
     })
@@ -474,11 +481,17 @@ export class ReplayRecorder {
       this.jumpSeconds = seconds; this.scrubSeconds = seconds;
     }, { min: 0, maxValue: () => (this.currentTape()?.duration ?? 0) / 1000, step: 0.1,
       formatValue: (seconds) => String(Math.round(seconds)), outputWidth: 4,
-      disabled: () => !this.tapes.length || !!this.recording || this.loading,
+      disabled: () => !this.tapes.length || !!this.recording || this.loading || !!this.exporting,
       onCommit: () => { void this.jumpSelected(); this.scrubSeconds = null; } })
     .button('Save replay file', () => void this.download(), { disabled: () => !this.tapes.length || this.loading })
     .button('Report', () => void this.showSelectedReport(), {
       title: 'Show the duty report this replay ended with; click again to hide it', disabled: () => !this.tapes.length || this.loading,
+    });
+    if (VIDEO_PUZZLES.has(puzzle)) group.button('Save as MP4', () => void this.saveVideo(), {
+      label: () => this.exporting ? `Saving video… ${Math.floor(this.exporting.seconds)}s` : 'Save as MP4',
+      title: 'Make a video of the selected replay at the playback speed chosen below, with its sounds. Stop gives it up.',
+      disabled: () => typeof VideoEncoder === 'undefined' || !this.tapes.length || this.loading || !!this.exporting || !!this.playback || !!this.recording
+        || !this.canPlay(this.tapes[this.selected]) || !this.canStartPlayback(),
     });
     group.select('Playback speed', [
       { value: 0.25, label: '0.25×' }, { value: 0.5, label: '0.5×' }, { value: 1, label: '1×' },
@@ -489,7 +502,7 @@ export class ReplayRecorder {
     group.number('Jump to (s)', () => this.jumpSeconds, (seconds) => {
       this.jumpSeconds = Math.max(0, Math.min((this.currentTape()?.duration ?? 0) / 1000, seconds));
     }, { min: 0, step: 0.1, disabled: () => !this.tapes.length || this.loading });
-    group.button('Jump', () => void this.jumpSelected(), { disabled: () => !this.tapes.length || this.loading || !!this.recording || !this.stepFrame || !this.setReplayTime || !this.canStartPlayback() || !this.canPlay(this.tapes[this.selected]) });
+    group.button('Jump', () => void this.jumpSelected(), { disabled: () => !this.tapes.length || this.loading || !!this.exporting || !!this.recording || !this.stepFrame || !this.setReplayTime || !this.canStartPlayback() || !this.canPlay(this.tapes[this.selected]) });
     this.file.type = 'file'; this.file.accept = '.gz,application/gzip'; this.file.hidden = true;
     this.file.addEventListener('change', () => void this.importFile());
     group.button('Open replay file', () => this.file.click()).append(this.file);
@@ -497,9 +510,9 @@ export class ReplayRecorder {
       const tape = this.currentTape();
       if (!tape) return this.replayStorageError || 'No replays recorded yet.';
       const drift = this.playback?.divergedAt ?? null;
-      const warning = (this.replayStorageError ? ' · ' + this.replayStorageError : '') +
+      const warning = (this.replayStorageError ? ' · ' + this.replayStorageError : '') + (this.videoNote ? ' · ' + this.videoNote : '') +
         (drift !== null ? ' · This replay drifted from the game it recorded at ' + (drift / 1000).toFixed(1) + 's' : '') +
-        (this.playback ? ' · ← → skip a second' : '');
+        (this.playback && !this.exporting ? ' · ← → skip a second' : '');
       return (tape.duration / 1000).toFixed(1) + 's · ' + (tape.bytes / 1024).toFixed(1) + ' KB · ' +
         (this.totalBytes / 1024).toFixed(1) + ' KB archived (' + this.tapes.length + ' replays)' + warning;
     });
@@ -516,7 +529,7 @@ export class ReplayRecorder {
 
   /** While a replay plays, Left and Right skip back and forward a second; held, they keep skipping. */
   private readonly arrowKeys = (event: KeyboardEvent): void => {
-    if (!this.playback || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || isTyping(event.target)) return;
+    if (!this.playback || this.exporting || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || isTyping(event.target)) return;
     const step = event.key === 'ArrowLeft' ? -1000 : event.key === 'ArrowRight' ? 1000 : 0;
     if (!step) return;
     event.preventDefault();
@@ -695,16 +708,16 @@ export class ReplayRecorder {
         if (p.tape.report && showsDutyReport(p.tape.report)) this.panel.showReport?.(p.tape.report);
         return this.routed([], p.mouse, p.elapsed);
       }
-      const realNow = performance.now();
-      const target = p.paused ? p.elapsed : Math.min(p.tape.duration, p.elapsed + Math.max(0, realNow - p.lastReal) * p.speed);
-      p.lastReal = realNow;
+      const now = realNow();
+      const target = p.paused ? p.elapsed : Math.min(p.tape.duration, p.elapsed + Math.max(0, now - p.lastReal) * p.speed);
+      p.lastReal = now;
       this.advancePlayback(target);
       this.setReplayTime?.(p.start + p.elapsed);
       if (!p.paused && p.elapsed >= p.tape.duration && p.frame >= p.tape.frames.length) {
-        p.endedAt ??= realNow;
+        p.endedAt ??= now;
         // The clock runs on through the hold, so whatever the board was finishing can finish drawing.
-        this.setReplayTime?.(p.start + p.elapsed + Math.min(END_HOLD_MS, realNow - p.endedAt));
-        if (realNow - p.endedAt >= END_HOLD_MS) p.finishPending = true;
+        this.setReplayTime?.(p.start + p.elapsed + Math.min(END_HOLD_MS, now - p.endedAt));
+        if (now - p.endedAt >= END_HOLD_MS) p.finishPending = true;
       } else p.endedAt = undefined;
       // Inputs were applied inside individual simulation steps; the caller paints the final state.
       return { ...this.routed([], p.mouse, p.elapsed), renderOnly: true };
@@ -754,7 +767,7 @@ export class ReplayRecorder {
       this.seeking = true;
       try { this.advancePlayback(target); } finally { this.seeking = false; }
       this.setReplayTime?.(p.start + p.elapsed);
-      p.lastReal = performance.now();
+      p.lastReal = realNow();
       return;
     }
     this.jumpSeconds = target / 1000;
@@ -903,7 +916,7 @@ export class ReplayRecorder {
       const base = tape?.clockStart ?? 0; this.setReplayTime?.(base);
       if (!tape || !this.restoreTape(tape)) { this.setReplayTime?.(null); return; }
       this.divergedAt = null;
-      this.playback = { tape, start: base, elapsed: 0, lastReal: performance.now(), paused: false,
+      this.playback = { tape, start: base, elapsed: 0, lastReal: realNow(), paused: false,
         speed: this.replaySpeed, frame: 0, step: 0, mouse: [-1, -1], finishPending: false, clicks: [], check: 0, divergedAt: null };
       this.jumpSeconds = 0; this.syncPicker();
     } catch { this.replayStorageError = 'This replay could not be loaded. Check browser storage or folder access.'; }
@@ -940,7 +953,7 @@ export class ReplayRecorder {
     if (!this.playback) return;
     this.takeOverFrom = null;
     // Carry straight on watching from the take-over.
-    this.playback.paused = false; this.playback.lastReal = performance.now();
+    this.playback.paused = false; this.playback.lastReal = realNow();
   }
   private async jumpSelected(resuming = false): Promise<void> {
     // Resuming leaves a game of the player's in progress; the replay's restore replaces it.
@@ -959,10 +972,10 @@ export class ReplayRecorder {
       this.setReplayTime(base);
       if (!this.restoreTape(tape)) { this.setReplayTime(null); return; }
       this.divergedAt = null;
-      this.playback = { tape, start: base, elapsed: 0, lastReal: performance.now(), paused,
+      this.playback = { tape, start: base, elapsed: 0, lastReal: realNow(), paused,
         speed: this.replaySpeed, frame: 0, step: 0, mouse: [-1, -1], finishPending: false, clicks: [], check: 0, divergedAt: null };
       this.setReplayTime(base); this.advancePlayback(target);
-      this.playback.lastReal = performance.now(); this.jumpSeconds = target / 1000; this.syncPicker();
+      this.playback.lastReal = realNow(); this.jumpSeconds = target / 1000; this.syncPicker();
     } catch { this.replayStorageError = 'This replay could not be loaded or reconstructed.'; }
     finally { this.seeking = false; if (request === this.request) this.loading = false; }
   }
@@ -1079,7 +1092,7 @@ export class ReplayRecorder {
   private togglePause(): void {
     const p = this.playback;
     if (!p) return;
-    p.paused = !p.paused; p.lastReal = performance.now();
+    p.paused = !p.paused; p.lastReal = realNow();
   }
   private syncPicker(): void {
     this.picker.replaceChildren(...this.tapes.map((entry, index) => {
@@ -1102,6 +1115,30 @@ export class ReplayRecorder {
       a.href = url; a.download = replayFileName(entry);
       a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch { this.replayStorageError = 'The replay file could not be exported.'; }
+  }
+  /** Plays the selected replay on a virtual clock and saves what the canvas shows, with its sounds, as an MP4. */
+  private async saveVideo(): Promise<void> {
+    const entry = this.tapes[this.selected];
+    if (!entry || this.exporting || this.playback || this.loading || this.recording) return;
+    const job = { seconds: 0, cancelled: false };
+    this.exporting = job; this.videoNote = '';
+    try {
+      // The video encoder is only loaded the first time a video is made.
+      const { exportReplayVideo } = await import('./video-export');
+      const blob = await exportReplayVideo({
+        begin: () => this.playSelected(),
+        playing: () => !!this.playback && !this.disposed,
+        cancelled: () => job.cancelled || this.disposed,
+        onProgress: (seconds) => { job.seconds = seconds; },
+      });
+      const url = URL.createObjectURL(blob); const a = document.createElement('a');
+      a.href = url; a.download = replayFileName(entry).replace(/\.[^.]*(\.gz)?$/, '') + '.mp4';
+      a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      this.videoNote = 'Video saved (' + (blob.size / 1024 / 1024).toFixed(1) + ' MB)';
+    } catch (error) {
+      this.videoNote = error instanceof Error && error.name === 'VideoExportCancelled' ? 'Video cancelled' : 'The video could not be made: ' + (error instanceof Error ? error.message : String(error));
+      if (this.playback) this.stopPlayback();
+    } finally { this.exporting = null; }
   }
   private async importFile(): Promise<void> {
     const chosen = this.file.files?.[0]; this.file.value = '';
