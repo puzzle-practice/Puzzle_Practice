@@ -375,6 +375,21 @@ const formatSeconds = (seconds: number) => Math.floor(seconds / 60) + ':' + Stri
 /** Puzzles whose replays can be saved as MP4 videos (an experiment, starting with Navigation). */
 const VIDEO_PUZZLES = new Set(['navigation']);
 
+/**
+ * Fitting a video to a size limit (see saveVideo): aim at 93% of it, accept 80% to 97%, and make it at most
+ * three times. The first video's guess comes from a 5-minute Navigation replay at 2x size, which came to
+ * 18 MB at quantizer 29 at 30 fps and 19.3 MB at quantizer 30 at 60 fps; after that, the last video that
+ * fitted at that frame rate is the guess.
+ */
+const FIT_TARGET = 0.93, FIT_LEAST = 0.8, FIT_MOST = 0.97, FIT_PASSES = 3;
+const FIT_GUESS: Record<number, { quantizer: number; bytesPerSecond: number }> = {
+  30: { quantizer: 29, bytesPerSecond: 59_000 }, 60: { quantizer: 30, bytesPerSecond: 63_200 },
+};
+const MIN_QUANTIZER = 18, MAX_QUANTIZER = 51;
+/** The quantizer expected to turn a video of `size` bytes into one of `target`: H.264 sizes halve about every 8 steps. */
+const fitQuantizer = (quantizer: number, size: number, target: number) =>
+  Math.max(MIN_QUANTIZER, Math.min(MAX_QUANTIZER, Math.round(quantizer + 11.5 * Math.log(size / target))));
+
 /** How often an open-ended game's recording is saved as it stands, in ms of play. */
 export const CHECKPOINT_MS = 60_000;
 
@@ -496,8 +511,8 @@ export class ReplayRecorder {
         || !this.canPlay(this.tapes[this.selected]) || !this.canStartPlayback(),
     });
     if (VIDEO_PUZZLES.has(puzzle)) group.select('Video size limit', [
-      { value: 8, label: '8 MB' }, { value: 25, label: '25 MB' }, { value: 50, label: '50 MB' }, { value: 0, label: 'No limit' },
-    ], () => this.preferences.get<number>('videoMaxMb', 8), (mb) => this.preferences.set('videoMaxMb', mb));
+      { value: 8, label: '8 MB' }, { value: 20, label: '20 MB' }, { value: 25, label: '25 MB' }, { value: 50, label: '50 MB' }, { value: 0, label: 'No limit' },
+    ], () => this.preferences.get<number>('videoMaxMb', 20), (mb) => this.preferences.set('videoMaxMb', mb));
     if (VIDEO_PUZZLES.has(puzzle)) group.select('Video frame rate', [
       { value: 30, label: '30 fps (sharper, quicker)' }, { value: 60, label: '60 fps (smoother)' },
     ], () => this.preferences.get<number>('videoFrameRate', 30), (fps) => this.preferences.set('videoFrameRate', fps));
@@ -1134,28 +1149,54 @@ export class ReplayRecorder {
     try {
       // The video encoder is only loaded the first time a video is made.
       const { exportReplayVideo } = await import('./video-export');
-      const maxBytes = this.preferences.get<number>('videoMaxMb', 8) * 1_000_000 || undefined;
-      const make = (retry: { scale?: number; videoQuality?: number } = {}) => exportReplayVideo({
+      const maxBytes = this.preferences.get<number>('videoMaxMb', 20) * 1_000_000 || undefined;
+      const fps = this.preferences.get<number>('videoFrameRate', 30);
+      // Sharing sites count a megabyte as a million bytes. The report adds a few seconds at the end.
+      const expectedSeconds = entry.duration / 1000 / this.replaySpeed + (END_HOLD_MS + 5000) / 1000;
+      const make = (retry: { scale?: number; videoQuality?: number; quantizer?: number } = {}) => exportReplayVideo({
         begin: () => this.playSelected(),
         playing: () => !!this.playback && !this.disposed,
         cancelled: () => job.cancelled || this.disposed,
         onProgress: (seconds) => { job.seconds = seconds; },
         // The duty report the replay ends on, if it shows one, closes the video.
         endCard: () => this.panel.reportView ?? null,
-        fps: this.preferences.get<number>('videoFrameRate', 30),
-        // Sharing sites count a megabyte as a million bytes. The report adds a few seconds at the end.
-        maxBytes,
-        expectedSeconds: entry.duration / 1000 / this.replaySpeed + (END_HOLD_MS + 5000) / 1000,
+        fps, maxBytes, expectedSeconds,
         ...retry,
       });
-      let video = await make();
-      // Encoders only aim at a bitrate, and some can't go below a floor at the doubled size. Over the
-      // limit, it's made again at the game's own size, then with the bitrate cut to fit.
-      for (let tries = 0; maxBytes && video.blob.size > maxBytes && video.videoBitrate && tries < 2; tries++) {
-        job.seconds = 0; this.videoNote = 'Over ' + maxBytes / 1_000_000 + ' MB: making it again smaller';
-        video = await make(tries === 0 ? { scale: 1, videoQuality: video.videoBitrate }
-          : { scale: 1, videoQuality: Math.round(video.videoBitrate * 0.9 * maxBytes / video.blob.size) });
+      let video: Awaited<ReturnType<typeof make>>;
+      if (!maxBytes) video = await make();
+      else {
+        // With a size limit the video is made at a constant quality, which looks the same all through and
+        // spends the bits where the picture changes. (A bitrate is badly undershot: the encoder shares it out
+        // per frame, and most frames are left out while the board sits still.) The quality that fits isn't
+        // known until the video is made, so it's guessed from the last one, and the video is made again
+        // with a better guess if it came out over the limit or well under it.
+        const target = maxBytes * FIT_TARGET;
+        const learned = this.preferences.get<{ quantizer: number; bytesPerSecond: number } | null>('videoFit' + fps, null) ?? FIT_GUESS[fps] ?? FIT_GUESS[30]!;
+        let quantizer = fitQuantizer(learned.quantizer, learned.bytesPerSecond * expectedSeconds, target);
+        video = await make({ quantizer });
+        for (let pass = 2; pass <= FIT_PASSES; pass++) {
+          const size = video.blob.size;
+          if (size <= maxBytes * FIT_MOST && (size >= maxBytes * FIT_LEAST || quantizer <= MIN_QUANTIZER)) break;
+          job.seconds = 0;
+          this.videoNote = (size > maxBytes * FIT_MOST ? 'Over ' : 'Well under ') + maxBytes / 1_000_000 + ' MB: making it again';
+          if (video.quantizer !== undefined) {
+            // Always a step at least, the right way.
+            const next = fitQuantizer(quantizer, size, target);
+            quantizer = size > target ? Math.max(next, quantizer + 1) : Math.min(next, quantizer - 1);
+            video = await make({ quantizer });
+          } else if (video.videoBitrate) {
+            // An encoder without constant quality: the bitrate, scaled by how far off it came out.
+            video = await make({ videoQuality: Math.round(video.videoBitrate * Math.min(4, target / size)) });
+          } else break;
+        }
+        if (video.quantizer !== undefined && video.blob.size <= maxBytes)
+          this.preferences.set('videoFit' + fps, { quantizer: video.quantizer, bytesPerSecond: video.blob.size / video.seconds });
+        // Still over: the game's own size, at a bitrate well under the limit.
+        if (video.blob.size > maxBytes)
+          video = await make({ scale: 1, videoQuality: Math.round(maxBytes * 8 * FIT_TARGET / video.seconds * 0.7) });
       }
+      this.videoNote = '';
       const url = URL.createObjectURL(video.blob); const a = document.createElement('a');
       a.href = url; a.download = replayFileName(entry).replace(/\.[^.]*(\.gz)?$/, '') + '.mp4';
       a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);

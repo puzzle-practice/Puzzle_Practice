@@ -11,8 +11,8 @@ import { advanceVirtualTime, endVirtualTime, frameRunner, realNow, startVirtualT
 /** How long the duty report stays on screen at the end of the video, in seconds. */
 export const REPORT_SECONDS = 5;
 const SAMPLE_RATE = 48_000;
-/** With a size limit: sound at 64 kbps, the video between these bitrates, aiming 12% under the limit. */
-const CAPPED_AUDIO_BITRATE = 64_000;
+/** With a size limit: sound at 128 kbps (64 under 15 MB), the video between these bitrates, aiming 12% under the limit. */
+const CAPPED_AUDIO_BITRATE = 128_000, SMALL_CAPPED_AUDIO_BITRATE = 64_000, SMALL_CAP_BYTES = 15_000_000;
 const MIN_VIDEO_BITRATE = 100_000;
 const MAX_VIDEO_BITRATE = 4_000_000;
 const SIZE_MARGIN = 0.88;
@@ -40,7 +40,11 @@ export interface VideoExportOptions {
   codecs?: VideoCodec[];
   /** Overrides the video bitrate or quality worked out from the size limit. */
   videoQuality?: number | Quality;
-  /** Constant quality instead of a bitrate (lower is better; H.264 takes 0 to 51): same look all through, size varies. */
+  /**
+   * Constant quality instead of a bitrate (lower is better; H.264 takes 0 to 51): same look all through, size
+   * varies. Encoders that can't do it fall back to the bitrate the size limit gives; `ReplayVideo.quantizer`
+   * says whether it was used.
+   */
   quantizer?: number;
   /** Seconds between key frames (full pictures the player can seek to); 10 by default. Each costs a lot of a small file. */
   keyFrameSeconds?: number;
@@ -58,6 +62,8 @@ export interface ReplayVideo {
   blob: Blob; seconds: number; renderMs: number;
   /** The video bitrate aimed at, when it was set from a size limit. */
   videoBitrate?: number;
+  /** The constant quality the video was made at, if the encoder could do it. */
+  quantizer?: number;
 }
 
 export class VideoExportCancelled extends Error { override name = 'VideoExportCancelled'; }
@@ -72,12 +78,15 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
   const fps = options.fps ?? 60;
   // A size limit is shared out over the expected length, with some room spare: encoders only aim at a bitrate.
   const capped = !!options.maxBytes && !!options.expectedSeconds;
-  const audioBitrate: number | Quality = capped ? CAPPED_AUDIO_BITRATE : QUALITY_HIGH;
+  const cappedAudio = (options.maxBytes ?? 0) < SMALL_CAP_BYTES ? SMALL_CAPPED_AUDIO_BITRATE : CAPPED_AUDIO_BITRATE;
+  const audioBitrate: number | Quality = capped ? cappedAudio : QUALITY_HIGH;
   const videoBitrate: number | Quality = capped
     ? Math.round(Math.max(MIN_VIDEO_BITRATE, Math.min(MAX_VIDEO_BITRATE,
-      options.maxBytes! * 8 * SIZE_MARGIN / options.expectedSeconds! - CAPPED_AUDIO_BITRATE)))
+      options.maxBytes! * 8 * SIZE_MARGIN / options.expectedSeconds! - cappedAudio)))
     : QUALITY_HIGH;
-  const videoQuality = options.videoQuality ?? (options.quantizer !== undefined ? new Quality({ quantizer: options.quantizer }) : videoBitrate);
+  const fallbackBitrate = typeof videoBitrate === 'number' ? videoBitrate : undefined;
+  const videoQuality = options.videoQuality ?? (options.quantizer !== undefined
+    ? new Quality({ quantizer: options.quantizer, bitrate: fallbackBitrate }) : videoBitrate);
   const videoCodec = await getFirstEncodableVideoCodec(options.codecs ?? ['avc', 'vp9', 'av1', 'vp8'],
     { width: width * scale, height: height * scale, frameRate: fps, ...rate(videoQuality) });
   if (!videoCodec) throw new Error('This browser cannot encode video');
@@ -97,7 +106,11 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
   const sourceCtx = source.getContext('2d')!;
   sourceCtx.imageSmoothingEnabled = false;
   const copy = () => sourceCtx.drawImage(game, 0, 0, source.width, source.height);
-  const video = new CanvasSource(source, { codec: videoCodec, bitrate: videoQuality, keyFrameInterval: options.keyFrameSeconds ?? 10 });
+  let byQuantizer = false;
+  const video = new CanvasSource(source, {
+    codec: videoCodec, bitrate: videoQuality, keyFrameInterval: options.keyFrameSeconds ?? 10,
+    onEncoderConfig: (config) => { byQuantizer = config.bitrateMode === 'quantizer'; },
+  });
   output.addVideoTrack(video, { frameRate: fps });
   const audio = audioCodec ? new AudioBufferSource({ codec: audioCodec, bitrate: audioBitrate }) : null;
   if (audio) output.addAudioTrack(audio);
@@ -152,7 +165,8 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
   await output.finalize();
   const buffer = (output.target as BufferTarget).buffer!;
   return { blob: new Blob([buffer], { type: 'video/mp4' }), seconds, renderMs: performance.now() - began,
-    videoBitrate: typeof videoQuality === 'number' ? videoQuality : undefined };
+    videoBitrate: typeof videoQuality === 'number' ? videoQuality : byQuantizer ? undefined : fallbackBitrate,
+    quantizer: byQuantizer ? options.quantizer : undefined };
 }
 
 /** Mixes the captured sounds into one stereo track of the video's length, each at its moment. */
