@@ -499,8 +499,8 @@ export class ReplayRecorder {
       { value: 8, label: '8 MB' }, { value: 25, label: '25 MB' }, { value: 50, label: '50 MB' }, { value: 0, label: 'No limit' },
     ], () => this.preferences.get<number>('videoMaxMb', 8), (mb) => this.preferences.set('videoMaxMb', mb));
     if (VIDEO_PUZZLES.has(puzzle)) group.select('Video frame rate', [
-      { value: 60, label: '60 fps' }, { value: 30, label: '30 fps (quicker to make)' },
-    ], () => this.preferences.get<number>('videoFps', 60), (fps) => this.preferences.set('videoFps', fps));
+      { value: 30, label: '30 fps (sharper, quicker)' }, { value: 60, label: '60 fps (smoother)' },
+    ], () => this.preferences.get<number>('videoFrameRate', 30), (fps) => this.preferences.set('videoFrameRate', fps));
     group.select('Playback speed', [
       { value: 0.25, label: '0.25×' }, { value: 0.5, label: '0.5×' }, { value: 1, label: '1×' },
       { value: 2, label: '2×' }, { value: 4, label: '4×' },
@@ -1130,25 +1130,36 @@ export class ReplayRecorder {
     if (!entry || this.exporting || this.playback || this.loading || this.recording) return;
     const job = { seconds: 0, cancelled: false };
     this.exporting = job; this.videoNote = '';
+    const started = performance.now();
     try {
       // The video encoder is only loaded the first time a video is made.
       const { exportReplayVideo } = await import('./video-export');
-      const video = await exportReplayVideo({
+      const maxBytes = this.preferences.get<number>('videoMaxMb', 8) * 1_000_000 || undefined;
+      const make = (retry: { scale?: number; videoQuality?: number } = {}) => exportReplayVideo({
         begin: () => this.playSelected(),
         playing: () => !!this.playback && !this.disposed,
         cancelled: () => job.cancelled || this.disposed,
         onProgress: (seconds) => { job.seconds = seconds; },
         // The duty report the replay ends on, if it shows one, closes the video.
         endCard: () => this.panel.reportView ?? null,
-        fps: this.preferences.get<number>('videoFps', 60),
+        fps: this.preferences.get<number>('videoFrameRate', 30),
         // Sharing sites count a megabyte as a million bytes. The report adds a few seconds at the end.
-        maxBytes: this.preferences.get<number>('videoMaxMb', 8) * 1_000_000 || undefined,
+        maxBytes,
         expectedSeconds: entry.duration / 1000 / this.replaySpeed + (END_HOLD_MS + 5000) / 1000,
+        ...retry,
       });
+      let video = await make();
+      // Encoders only aim at a bitrate, and some can't go below a floor at the doubled size. Over the
+      // limit, it's made again at the game's own size, then with the bitrate cut to fit.
+      for (let tries = 0; maxBytes && video.blob.size > maxBytes && video.videoBitrate && tries < 2; tries++) {
+        job.seconds = 0; this.videoNote = 'Over ' + maxBytes / 1_000_000 + ' MB: making it again smaller';
+        video = await make(tries === 0 ? { scale: 1, videoQuality: video.videoBitrate }
+          : { scale: 1, videoQuality: Math.round(video.videoBitrate * 0.9 * maxBytes / video.blob.size) });
+      }
       const url = URL.createObjectURL(video.blob); const a = document.createElement('a');
       a.href = url; a.download = replayFileName(entry).replace(/\.[^.]*(\.gz)?$/, '') + '.mp4';
       a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      this.videoNote = 'Video saved: ' + formatSeconds(video.seconds) + ' made in ' + formatSeconds(video.renderMs / 1000) +
+      this.videoNote = 'Video saved: ' + formatSeconds(video.seconds) + ' made in ' + formatSeconds((performance.now() - started) / 1000) +
         ' (' + (video.blob.size / 1_000_000).toFixed(1) + ' MB)';
     } catch (error) {
       this.videoNote = error instanceof Error && error.name === 'VideoExportCancelled' ? 'Video cancelled' : 'The video could not be made: ' + (error instanceof Error ? error.message : String(error));
