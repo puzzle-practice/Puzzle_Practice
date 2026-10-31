@@ -370,6 +370,8 @@ interface Playback {
   check: number; divergedAt: number | null;
 }
 
+const formatSeconds = (seconds: number) => Math.floor(seconds / 60) + ':' + String(Math.round(seconds % 60)).padStart(2, '0');
+
 /** Puzzles whose replays can be saved as MP4 videos (an experiment, starting with Navigation). */
 const VIDEO_PUZZLES = new Set(['navigation']);
 
@@ -489,10 +491,13 @@ export class ReplayRecorder {
     });
     if (VIDEO_PUZZLES.has(puzzle)) group.button('Save as MP4', () => void this.saveVideo(), {
       label: () => this.exporting ? `Saving video… ${Math.floor(this.exporting.seconds)}s` : 'Save as MP4',
-      title: 'Make a video of the selected replay at the playback speed chosen below, with its sounds. Stop gives it up.',
+      title: 'Make a video of the selected replay at the playback speed chosen below, with its sounds and its duty report at the end. Stop gives it up.',
       disabled: () => typeof VideoEncoder === 'undefined' || !this.tapes.length || this.loading || !!this.exporting || !!this.playback || !!this.recording
         || !this.canPlay(this.tapes[this.selected]) || !this.canStartPlayback(),
     });
+    if (VIDEO_PUZZLES.has(puzzle)) group.select('Video frame rate', [
+      { value: 60, label: '60 fps' }, { value: 30, label: '30 fps (quicker to make)' },
+    ], () => this.preferences.get<number>('videoFps', 60), (fps) => this.preferences.set('videoFps', fps));
     group.select('Playback speed', [
       { value: 0.25, label: '0.25×' }, { value: 0.5, label: '0.5×' }, { value: 1, label: '1×' },
       { value: 2, label: '2×' }, { value: 4, label: '4×' },
@@ -1125,16 +1130,20 @@ export class ReplayRecorder {
     try {
       // The video encoder is only loaded the first time a video is made.
       const { exportReplayVideo } = await import('./video-export');
-      const blob = await exportReplayVideo({
+      const video = await exportReplayVideo({
         begin: () => this.playSelected(),
         playing: () => !!this.playback && !this.disposed,
         cancelled: () => job.cancelled || this.disposed,
         onProgress: (seconds) => { job.seconds = seconds; },
+        // The duty report the replay ends on, if it shows one, closes the video.
+        endCard: () => this.panel.reportView ?? null,
+        fps: this.preferences.get<number>('videoFps', 60),
       });
-      const url = URL.createObjectURL(blob); const a = document.createElement('a');
+      const url = URL.createObjectURL(video.blob); const a = document.createElement('a');
       a.href = url; a.download = replayFileName(entry).replace(/\.[^.]*(\.gz)?$/, '') + '.mp4';
       a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      this.videoNote = 'Video saved (' + (blob.size / 1024 / 1024).toFixed(1) + ' MB)';
+      this.videoNote = 'Video saved: ' + formatSeconds(video.seconds) + ' made in ' + formatSeconds(video.renderMs / 1000) +
+        ' (' + (video.blob.size / 1024 / 1024).toFixed(1) + ' MB)';
     } catch (error) {
       this.videoNote = error instanceof Error && error.name === 'VideoExportCancelled' ? 'Video cancelled' : 'The video could not be made: ' + (error instanceof Error ? error.message : String(error));
       if (this.playback) this.stopPlayback();
