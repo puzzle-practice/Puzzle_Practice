@@ -2106,6 +2106,75 @@ describe('Navigation sessions and replay', () => {
     instance.dispose?.();
   });
 
+  it.each([
+    ['Normal', { mode: 'normal' as const, extraRing: false }, 3],
+    ['WW', { mode: 'ww' as const, extraRing: false }, 3],
+    ['WW with the extra ring', { mode: 'ww' as const, extraRing: true }, 4],
+    ['Freeplay', { mode: 'ww' as const, extraRing: true, create: true }, 4],
+  ])('%s starts every session, restart and new board on the inner ring', async (_name, overrides, rings) => {
+    const { DEFAULT_SETTINGS } = await import('./navigation/game');
+    const settings = { ...DEFAULT_SETTINGS, ...overrides, timerMs: 120000, dismissDelayMs: 0 };
+    const store = new Store('navigation');
+    store.set('settings', settings);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    // The ring highlight sheet has one frame per ring, innermost first: frame 0 means the inner ring is selected.
+    const highlight = rings === 4 ? 414 : 350;
+    let frame = -1;
+    const ctx = new Proxy({ drawImage: (_image: unknown, sx: number, _sy: number, sw: number) => { if (sw === highlight) frame = sx / highlight; } },
+      { get: (target, key) => key in target ? target[key as keyof typeof target] : canvasContext()[key as never] });
+    const screen = new Proxy({ ctx }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    const innerRingAfter = (action: () => void) => {
+      // Move the selection to the outer ring first, so only the action can bring it back.
+      for (let i = 0; i < rings; i++) instance.frame([{ type: 'keydown', key: 'arrowup' }]);
+      frame = -1; instance.frame([]);
+      expect(frame).toBe(rings - 1);
+      action();
+      now += 100; frame = -1; instance.frame([]);
+      expect(frame).toBe(0);
+    };
+    frame = -1; instance.frame([]);
+    expect(frame).toBe(0);
+    buttons.get('Play::Start')!();
+    now += 100; frame = -1; instance.frame([]);
+    expect(frame).toBe(0);
+    innerRingAfter(() => buttons.get('Play::Dismiss')!());
+    if (settings.create) innerRingAfter(() => [...buttons].find(([name]) => name.endsWith(':Board:Generate'))![1]!());
+    innerRingAfter(() => { buttons.get('Play::Start')!(); buttons.get('Play::Start')!(); });
+    instance.dispose?.();
+  });
+
+  it.each([
+    ['Normal', { mode: 'normal' as const, extraRing: false }, 3],
+    ['WW with the extra ring', { mode: 'ww' as const, extraRing: true }, 4],
+    ['Freeplay', { mode: 'ww' as const, extraRing: true, create: true }, 4],
+  ])('%s: the first click on a new board only focuses it', async (_name, overrides, rings) => {
+    const { DEFAULT_SETTINGS } = await import('./navigation/game');
+    const settings = { ...DEFAULT_SETTINGS, ...overrides, timerMs: 120000, dismissDelayMs: 0 };
+    const store = new Store('navigation');
+    store.set('settings', settings);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const highlight = rings === 4 ? 414 : 350;
+    let frame = -1;
+    const ctx = new Proxy({ drawImage: (_image: unknown, sx: number, _sy: number, sw: number) => { if (sw === highlight) frame = sx / highlight; } },
+      { get: (target, key) => key in target ? target[key as keyof typeof target] : canvasContext()[key as never] });
+    const screen = new Proxy({ ctx }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    // A click on the outer ring, which would select it.
+    const outer = { type: 'mousedown', button: 1, pos: [225, 300 - (55 + (rings - 1) * (rings === 4 ? 47 : 55))] } as InputEvent;
+    const click = () => { now += 100; frame = -1; instance.frame([outer, { ...outer, type: 'mouseup' } as InputEvent]); return frame; };
+    for (const restart of [() => buttons.get('Play::Start')!(), () => buttons.get('Play::Dismiss')!()]) {
+      restart();
+      expect(click()).toBe(0);
+      expect(click()).toBe(rings - 1);
+    }
+    instance.dispose?.();
+  });
+
   it('Slow drop holds each star at the top until Drop is pressed', async () => {
     const { DEFAULT_SETTINGS } = await import('./navigation/game');
     const settings = { ...DEFAULT_SETTINGS, mode: 'normal' as const, timerMs: 0, slowDrop: true };

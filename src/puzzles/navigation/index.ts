@@ -61,6 +61,15 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    */
   let charts: number[] = [], longestChain = 0, longestCascade = 0;
   let running = false, finished = false, selected = 0;
+  /**
+   * The rules a game is played by (the replay format's simulatorVersion). 2: the first click on a
+   * new board only focuses it and never selects or turns a ring. Replays play by the rules they
+   * were recorded with.
+   */
+  const RULES = 2;
+  let rules = RULES;
+  /** Set on each new board: the next click on the board is the one that focuses it. */
+  let focusClick = false;
   let startTime = 0, endTime = 0;
   let timerElapsedBeforeBoard = 0;
   let incomingRadius = 220, lastTick = 0;
@@ -78,6 +87,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const duty = dutyDesk(panel, store, 'navigation', 'Navigation', []);
   const busy = () => running || (replays?.isPlaying ?? false);
   const history = () => store.history(settingsKey(settings));
+  const settingsRings = () => isWerewolf(settings.mode) && settings.extraRing ? 4 : 3;
+  /** Every session, board and Freeplay setup starts with the innermost ring selected (selected counts from the outside). */
+  const selectInnerRing = (rings = game?.board.rings ?? settingsRings()) => { selected = rings - 1; };
   const radius = (ring: number) => 55 + ((game?.board.rings ?? (isWerewolf(settings.mode) && settings.extraRing ? 4 : 3)) - 1 - ring) * ((game?.board.rings ?? (isWerewolf(settings.mode) && settings.extraRing ? 4 : 3)) === 4 ? 47 : 55);
   const position = (octant: number, r: number): [number, number] => [CX + Math.cos(octant * Math.PI / 4) * r, CY - Math.sin(octant * Math.PI / 4) * r];
   const elapsed = () => Math.max(0, (running ? ticks() : endTime) - startTime);
@@ -94,8 +106,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   const seedMode = seedControls(panel, store, () => running || !!replays?.isPlaying);
 
-  function start(seed?: number, timerElapsedMs = 0): void {
+  function start(seed?: number, timerElapsedMs = 0, tapeRules = RULES): void {
     pause.resume();
+    rules = tapeRules;
     if (seed === undefined) seed = seedMode.next(); seedMode.remember(seed);
     // Freeplay has no timer or quota, and each star waits at the top for Drop.
     liveSettings = settings.create ? { ...settings, timerMs: 0, clears: false, slowDrop: true } : { ...settings };
@@ -104,7 +117,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     runSeed = seed; board = 0; banked = NO_TOTALS; charts = []; longestChain = longestCascade = 0;
     dealAt = 0; pendingStart = null;
     game = new NavigationGame(liveSettings, seed);
-    selected = game.board.rings - 1;
+    selectInnerRing(); focusClick = rules >= 2;
     running = true; finished = false; hold.clear();
     startTime = endTime = sceneStart = ticks();
     timerElapsedBeforeBoard = timerElapsedMs;
@@ -126,7 +139,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     board++;
     // A quota run's count carries on; a timed WW board has its own quota.
     game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0), opening);
-    selected = game.board.rings - 1;
+    selectInnerRing(); focusClick = rules >= 2;
     scenes = []; fastDrop = false; incomingRadius = 220;
     message = note; messageAt = ticks(); messagePx = gameFont(3); messageFill = TEXT_WHITE;
     dealAt = liveSettings.dismissDelayMs ? ticks() + liveSettings.dismissDelayMs : 0;
@@ -230,6 +243,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       board++;
       game = new NavigationGame(liveSettings, boardSeed(runSeed, board));
     } else return;
+    selectInnerRing();
     setup = boardCode(game); incomingRadius = 220;
   }
   function star(colour: number, octant: number, r: number, highlighted = false, target = false, alpha = 1): void {
@@ -348,6 +362,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     lastMouse = [mouse[0], mouse[1]];
     for (const event of routed.events) {
       if (!running || timeUp()) continue;
+      // The first click on a new board focuses it: it never selects or turns a ring.
+      const focusing = event.type === 'mousedown' && focusClick;
+      if (event.type === 'mousedown') focusClick = false;
       if (creating()) {
         const paintKey = event.type === 'keydown' || event.type === 'keyup' ? PAINT_KEYS.find(k => key(event.key, k.id, k.defaultKey)) : undefined;
         if (paintKey) {
@@ -369,7 +386,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
           const ring = [1, 2, 3, 4].findIndex(n => key(event.key, `selectRing${n}`, String(n)));
           if (ring >= 0 && ring < (game?.board.rings ?? 3)) selected = (game?.board.rings ?? 3) - 1 - ring;
         }
-      } else if (event.type === 'mousedown' && (event.button === 1 || event.button === 3)) {
+      } else if (event.type === 'mousedown' && !focusing && (event.button === 1 || event.button === 3)) {
         const distance = Math.hypot(event.pos[0]-CX,event.pos[1]-CY);
         if (distance >= 30 && distance <= radius(0)+28) {
           let closest = 0;
@@ -388,7 +405,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const session = panel.session();
   // Freeplay keeps the last rule set chosen; the Rules setting changes it.
   session.select('Mode', MODE_OPTIONS, () => settings.create ? 'create' : settings.mode, value => {
-    settings.create = value === 'create'; if (value !== 'create') settings.mode = value; saveSettings(); selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
+    settings.create = value === 'create'; if (value !== 'create') settings.mode = value; saveSettings(); selectInnerRing(settingsRings());
   }, { disabled: busy, title: 'Freeplay lets you paint the stars, targets and incoming star' });
   session.button('Start', () => {
     if (replays.isPlaying) replays.stop();
@@ -456,7 +473,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return issues.length ? `Not a board the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => !creating() });
   const options = panel.settings.group('Game');
-  options.select('Rules', RULE_OPTIONS, () => settings.mode, mode => { settings.mode = mode; saveSettings(); selected = isWerewolf(mode) && settings.extraRing ? 3 : 2; },
+  options.select('Rules', RULE_OPTIONS, () => settings.mode, mode => { settings.mode = mode; saveSettings(); selectInnerRing(settingsRings()); },
     { disabled: busy, hidden: () => !settings.create, title: 'The rules a Freeplay board is painted and played under' });
   options.select('Difficulty', Array.from({ length: 10 }, (_, value) => ({ value, label: String(value) })), () => settings.difficulty, difficulty => { settings.difficulty = difficulty; saveSettings(); }, { disabled: busy });
   // A quota run is untimed, so it sits with the timers: No timer loops, the quota run ends at the difficulty's quota.
@@ -469,9 +486,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   options.select('Dismiss delay', DISMISS_DELAYS.map(value => ({ value, label: value ? `${value / 1000} s` : 'None' })), () => settings.dismissDelayMs, delay => { settings.dismissDelayMs = delay; saveSettings(); }, { disabled: busy });
   options.toggle('Slow drop', () => settings.slowDrop, on => { settings.slowDrop = on; saveSettings(); }, { disabled: busy, title: 'Each star waits at the top until you press Drop.' });
   options.toggle('Wild targets', () => settings.wildTargets, on => { settings.wildTargets = on; saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
-  options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selected = on ? 3 : 2; saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
+  options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
   options.hint(() => settings.mode === 'ww-test' ? 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
-  options.button('Reset to defaults', () => { settings = { ...DEFAULT_SETTINGS }; selected = 3; saveSettings(); }, { disabled: busy });
+  options.button('Reset to defaults', () => { settings = { ...DEFAULT_SETTINGS }; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy });
   panel.controls('navigation', [
     { id: 'ringOut', label: 'Select outer ring', defaultKey: 'arrowup' },
     { id: 'ringIn', label: 'Select inner ring', defaultKey: 'arrowdown' },
@@ -503,7 +520,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Version 1 had no looping: an untimed run then ended at the quota, as a quota run does now.
   // Before version 4 a booch ended every run, Dennav and Old Dennav included.
   // In version 4 the Dennav board a booch dealt opened on 1/2/1 again.
-  const codec: ReplaySettingsCodec = { currentVersion: 5, simulatorVersion: 1, migrate: (version, value) => {
+  const codec: ReplaySettingsCodec = { currentVersion: 5, simulatorVersion: RULES, migrate: (version, value) => {
     const read = version <= 5 ? readSettings(value) : null;
     if (read?.mode === 'ww-test' && version < 3) return null;
     if (!read || version === 5) return read;
@@ -515,16 +532,16 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     savedSettings ??= { ...settings };
     settings = readSettings(tape.settings)!;
     const seed = readNavigationSeed(tape.seed)!;
-    start(seed.boardSeed, seed.timerElapsedMs);
+    start(seed.boardSeed, seed.timerElapsedMs, tape.simulatorVersion ?? 1);
   }, () => {
     running = false; scenes = []; game = null; finished = false; duty.clear();
     dealAt = 0; pendingStart = null;
     board = 0; banked = NO_TOTALS;
     if (savedSettings) { settings = savedSettings; savedSettings = null; }
-    selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
+    selectInnerRing(settingsRings());
   }, seed => readNavigationSeed(seed) !== null,
   setReplayTime, () => frame([]), codec, () => !running || replays.isPlaying);
-  selected = isWerewolf(settings.mode) && settings.extraRing ? 3 : 2;
+  selectInnerRing(settingsRings());
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (running) end('Stopped'); });
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
