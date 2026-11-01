@@ -458,6 +458,17 @@ export class ReplayRecorder {
   private checkpointed: string | null = null;
   /** When the game being recorded was taken over from a replay, in ms into it; null for a game played from the start. */
   private takenOverAt: number | null = null;
+  /**
+   * The game being recorded was taken over from a replay. It's practice on someone's (or an old) game,
+   * not a fresh one: its replay is kept, under Replays, but the store stays read-only until it ends,
+   * so it adds no History row, session game or best.
+   */
+  private takenOver = false;
+  /**
+   * Taken over, and the player hasn't pressed a key, clicked or given a command since: the game is
+   * still exactly the replay's, so ending like this keeps no copy of the replay either.
+   */
+  private untouched = false;
   /** The replay last taken over and where, so Resume replay can go back to watching it there. */
   private takeOverFrom: { id: string; at: number } | null = null;
   private readonly picker = document.createElement('select');
@@ -575,7 +586,7 @@ export class ReplayRecorder {
    * the game stops. The recording carries on; when it ends, its save replaces this copy.
    */
   private readonly checkpoint = (): void => {
-    if (!this.recording || this.isPlaying || this.disposed || !this.openEnded()) return;
+    if (!this.recording || this.isPlaying || this.disposed || this.untouched || !this.openEnded()) return;
     this.checkpointAt = this.ticks();
     const copy = structuredClone(this.recording);
     copy.duration = Math.max(copy.duration, this.checkpointAt - this.recordStart);
@@ -650,7 +661,9 @@ export class ReplayRecorder {
       ...[...keys].map((key): InputEvent => ({ type: 'keyup', key }))];
     this.playback = null;
     ++this.request;
-    this.store.setReadOnly(false);
+    // Read-only until this game ends (see `takenOver`).
+    this.takenOver = true; this.untouched = true;
+    this.store.setReadOnly(true);
     this.store.setScoresEnabled(!tape.practice);
     // The clock carries on from the replay's time instead of jumping back.
     this.setReplayTime?.(null);
@@ -667,6 +680,7 @@ export class ReplayRecorder {
     ++this.request;
     this.loading = false;
     if (this.recording) this.finish('Stopped');
+    this.release();
     this.takenOverAt = null;
     // A new game of the player's own: there's no taken-over replay to go back to.
     this.takeOverFrom = null;
@@ -687,6 +701,14 @@ export class ReplayRecorder {
   /** Ends the recording; the report, if given, is saved with it. */
   finish(result: string, report?: DutyReport | null): PuzzleReplay | null {
     if (!this.recording || this.isPlaying) return null;
+    // A taken-over game: the store stays read-only until the caller has finished saving (history,
+    // bests) for this ending, so none of it is saved; then saving comes back on for what follows.
+    if (this.takenOver) queueMicrotask(() => this.release());
+    if (this.untouched) {
+      // Nothing of the player's since the take-over: the game is the replay's own, already saved.
+      this.dropRecording(); this.takenOverAt = null;
+      return null;
+    }
     this.recording.duration = Math.max(this.recording.duration, this.ticks() - this.recordStart);
     this.recording.result = this.takenOverAt === null ? result : `${result} (taken over at ${Math.round(this.takenOverAt / 1000)}s)`;
     this.takenOverAt = null;
@@ -713,6 +735,7 @@ export class ReplayRecorder {
   updateSeed(seed: unknown): void { if (this.recording) this.recording.seed = structuredClone(seed); }
   command(command: string, now = this.ticks()): void {
     if (!this.recording) return;
+    this.claim();
     this.pendingMouse = null;
     const t = Math.max(0, now - this.recordStart);
     this.recording.duration = Math.max(this.recording.duration, t);
@@ -746,6 +769,7 @@ export class ReplayRecorder {
       return { ...this.routed([], p.mouse, p.elapsed), renderOnly: true };
     }
     if (this.recording) {
+      if (events.some((event) => event.type === 'keydown' || event.type === 'mousedown')) this.claim();
       if (this.releases.length) events = [...this.releases.splice(0), ...events];
       const t = Math.max(0, now - this.recordStart);
       // The frame before has finished: hash the state its inputs left, before this frame changes it.
@@ -847,6 +871,7 @@ export class ReplayRecorder {
   }
   action(action: ReplayAction, now = this.ticks()): void {
     if (!this.recording) return;
+    this.claim();
     this.pendingMouse = null;
     const t = Math.max(0, now - this.recordStart);
     this.pendingCheck = t;
@@ -856,7 +881,15 @@ export class ReplayRecorder {
     if (frame !== last) this.recording.frames.push(frame);
     (frame.actions ??= []).push(structuredClone(action));
   }
-  cancel(): void { if (this.recording) this.dropRecording(); }
+  cancel(): void { if (this.recording) this.dropRecording(); this.release(); }
+  /** The player has given input after a take-over: from here its replay is worth keeping. */
+  private claim(): void { this.untouched = false; }
+  /** A taken-over game ended or was dropped: saving comes back on for what follows. */
+  private release(): void {
+    if (!this.takenOver) return;
+    this.takenOver = false; this.untouched = false;
+    if (!this.playback && !this.restoring) this.store.setReadOnly(false);
+  }
   get isPlaying(): boolean { return !!this.playback || this.restoring; }
   /** Whether the game being recorded has any input yet: a key, a click, an action or a command other than `except`. */
   hasInput(except?: string): boolean {
@@ -955,6 +988,7 @@ export class ReplayRecorder {
     if (this.recording && this.openEnded()) this.finish('Stopped');
     else this.dropRecording();
     this.takenOverAt = null; this.releases = [];
+    this.takenOver = false; this.untouched = false;
     this.store.setReadOnly(true);
     try { this.stopRestored?.(); }
     finally { this.store.setReadOnly(false); }
@@ -971,6 +1005,7 @@ export class ReplayRecorder {
     if (!from || index === undefined || this.loading) return;
     if (this.playback) this.stopPlayback();
     this.dropRecording(); this.takenOverAt = null; this.releases = [];
+    this.release();
     this.selected = index; this.jumpSeconds = from.at / 1000;
     await this.jumpSelected(true);
     if (!this.playback) return;

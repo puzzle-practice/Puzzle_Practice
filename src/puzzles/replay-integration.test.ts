@@ -2018,6 +2018,55 @@ describe('Navigation sessions and replay', () => {
     instance.dispose?.();
   });
 
+  it.each([false, true])('keeps a game taken over from a replay out of the history, and its replay only if the player plays on (input: %s)', async (playsOn) => {
+    const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
+    const settings = { ...DEFAULT_SETTINGS };
+    const key = settingsKey(settings);
+    const store = new Store('navigation');
+    store.set('settings', settings);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    for (now = 100; !store.history(key).length && now < 200000; now += 100) instance.frame([]);
+    expect(store.history(key)).toHaveLength(1);
+    const original = store.history(key)[0];
+    await replayWrites.idle();
+    const [tape] = await listReplayFiles('navigation');
+    const recorder = captured.recorders[0];
+    // Watch it again, take over just before time runs out, and either leave it or play on.
+    for (let round = 0; round < 3; round++) {
+      const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+      expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+      perf.mockReturnValue(tape.duration - 50); instance.frame([]);
+      expect(recorder.takeOver()).toBe(true);
+      perf.mockRestore();
+      if (playsOn) buttons.get('Controls:Controls:Drop star')!();
+      for (let i = 0; i < 10; i++) { now += 100; instance.frame([]); }
+      await Promise.resolve();
+    }
+    await replayWrites.idle();
+    // A taken-over game is never a new History row.
+    expect(store.history(key)).toEqual([original]);
+    const replays = await listReplayFiles('navigation');
+    if (playsOn) {
+      // Played on from, each keeps its own replay, under Replays.
+      expect(replays).toHaveLength(4);
+      expect(replays.filter((replay) => /taken over at/.test(replay.result))).toHaveLength(3);
+    } else {
+      // Left to run out untouched, it's the same game: no copy of its replay either.
+      expect(replays).toHaveLength(1);
+    }
+    // Saving is back on for the next game.
+    buttons.get('Play::Start')!();
+    for (now += 100; store.history(key).length < 2 && now < 600000; now += 100) instance.frame([]);
+    expect(store.history(key)).toHaveLength(2);
+    instance.dispose?.();
+  });
+
   it.each(['normal', 'ww', 'ww-test'] as const)('%s Dismiss restarts a paused board and a finished board without duplicating history', async mode => {
     const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
     const settings = { ...DEFAULT_SETTINGS, mode, timerMs: 120000, dismissDelayMs: 0 };
@@ -2693,7 +2742,7 @@ describe('taking over a replay', () => {
   it.each([
     ['forage', { settings: { mode: 'ci', roundSeconds: 30 } }, 33000],
     ['treasure-haul', { round: 30, gemRates: [50, 50] }, 34000],
-  ] as const)('%s plays on from the jump point, saves as a game and replays through the take-over', async (puzzle, settings, end) => {
+  ] as const)('%s plays on from the jump point, keeps its replay (not a History row) and replays through the take-over', async (puzzle, settings, end) => {
     vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new Random(21)));
     const store = new Store(puzzle);
     for (const [key, value] of Object.entries(settings)) store.set(key, value);
@@ -2750,7 +2799,8 @@ describe('taking over a replay', () => {
     const mine = (await listReplayFiles(puzzle)).find((entry) => entry.id !== theirs.id)!;
     expect(mine.result).toMatch(/taken over at 10s/);
     const histories = Object.entries(JSON.parse(exportAll()).data).filter(([key]) => key.includes(':history:'));
-    expect((histories[0][1] as unknown[]).length).toBe(2);
+    // A taken-over game keeps its replay but isn't one of the player's own games in the History.
+    expect((histories[0][1] as unknown[]).length).toBe(1);
     // The saved game replays from the start, through the take-over, to the same end.
     const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
     expect(await recorder.playAt(mine.at, mine.runId)).toBe(true);
