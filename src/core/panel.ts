@@ -443,6 +443,8 @@ export class Panel {
 
   /** The saved report being shown, if any. */
   get shownReport(): DutyReport | null { return this.viewing; }
+  /** The saved report's card over the board while it is shown, e.g. for a video's last frames. */
+  get reportView(): HTMLElement | null { return this.viewing && this.viewer && !this.viewer.hidden ? this.viewer : null; }
 
   /**
    * The clock below session controls. Null readings and Hide timer hide the card.

@@ -4,6 +4,7 @@
 // Ship sounds as MP3: Safari can't decode Ogg Vorbis everywhere.
 import { byName, type UrlGlob } from './assets';
 import { Store } from './storage';
+import { realNow } from './realtime';
 
 const preferences = new Store('global');
 let globalVolume = Math.max(0, Math.min(100, preferences.get<number>('volume', 50)));
@@ -36,6 +37,19 @@ export function unlockAudio(): void {
 function withContext(callback: (ctx: AudioContext) => void): void {
   if (context) callback(context);
   else waiting.push(callback);
+}
+
+/** A sound a video export heard instead of playing: what, when (realNow ms) and how loud. */
+export interface CapturedSound { buffer: AudioBuffer; at: number; volume: number }
+let captured: CapturedSound[] | null = null;
+/**
+ * From now until the returned function is called, sounds are written down instead of played, so a
+ * video export can mix them into its soundtrack at the moments they were due. Loops stay silent.
+ */
+export function captureSounds(): () => CapturedSound[] {
+  const sounds: CapturedSound[] = [];
+  captured = sounds;
+  return () => { if (captured === sounds) captured = null; return sounds; };
 }
 
 export class SoundBank<Name extends string = string> {
@@ -71,6 +85,10 @@ export class SoundBank<Name extends string = string> {
   play(name: Name, volume = 1): void {
     if (this.isMuted()) return;
     const buffer = this.buffers.get(name);
+    if (captured) {
+      if (buffer && !this.disposed) captured.push({ buffer, at: realNow(), volume: Math.max(0, Math.min(1, volume)) * this.volume });
+      return;
+    }
     if (!context || !this.gain || !buffer || this.disposed) return;
     const source = context.createBufferSource();
     source.buffer = buffer;
@@ -89,7 +107,7 @@ export class SoundBank<Name extends string = string> {
     let source: AudioBufferSourceNode | null = null;
     let stopped = false;
     const begin = (): void => {
-      if (stopped || this.disposed) return;
+      if (stopped || this.disposed || captured) return;
       const buffer = this.buffers.get(name);
       if (!context || !this.gain || !buffer) { this.pendingLoops.add(begin); return; }
       source = context.createBufferSource();
