@@ -77,6 +77,8 @@ export interface TextOptions extends ControlOptions {
   inputMode?: string;
 }
 
+type Rows = readonly (readonly string[])[];
+
 /** What a puzzle shows when a session ends. */
 export interface SessionResults {
   /** Heading for the plain table, when there's no report. */
@@ -85,6 +87,8 @@ export interface SessionResults {
   headline?: string;
   /** Sessions so far with these settings: shown below the report, apart from this session's rows. */
   averages?: readonly (readonly string[])[];
+  /** The last ten sessions with these settings, from the saved history: shown below the averages. */
+  recent?: readonly (readonly string[])[];
   /** The session's duty report; `rows` then become its folded-away details. */
   report?: DutyReport | null;
   rows: StatRows;
@@ -263,7 +267,7 @@ export class Panel {
     pirateSettings(this.globalSettings);
     this.globalSettings.group('Display').toggle('Extra Ratings', extraRatings, (on) => {
       this.preferences.set('extraRatings', on);
-      if (this.viewing) this.showReport(this.viewing, this.viewerAverages);
+      if (this.viewing) this.showReport(this.viewing, this.viewerAverages, this.viewerRecent);
     }, { title: 'Allow ratings above Frenetic in Foraging and Vampire Carpentry.' }).toggle('Hide timer', () => this.hideTimer, (on) => {
       this.hideTimer = on;
       this.preferences.set('hideTimer', on);
@@ -412,23 +416,25 @@ export class Panel {
       if (!result) return;
       heading.textContent = result.report ? result.headline ?? '' : result.title ?? 'Session results';
       heading.hidden = !heading.textContent;
-      const key = JSON.stringify([result.report ?? null, result.rows, result.averages ?? [], extraRatings()]);
+      const key = JSON.stringify([result.report ?? null, result.rows, result.averages ?? [], result.recent ?? [], extraRatings()]);
       if (key === shown) return;
       shown = key;
-      content.replaceChildren(result.report ? renderReport(result.report, result.rows, result.averages) : rowsTable(result.rows));
+      content.replaceChildren(result.report ? renderReport(result.report, result.rows, result.averages, undefined, result.recent) : rowsTable(result.rows));
       if (!result.report && result.averages) content.append(foldTable('averages', 'Session averages', result.averages.length ? result.averages : [['Sessions', 'No completed sessions yet']]));
     });
   }
 
   private viewing: DutyReport | null = null;
   private viewer: HTMLElement | null = null;
-  private viewerAverages: readonly (readonly string[])[] | (() => readonly (readonly string[])[]) = [];
+  private viewerAverages: Rows | (() => Rows) = [];
+  private viewerRecent: Rows | (() => Rows) = [];
 
   /** Shows a saved report over the board (from History or a replay) until it's closed; null closes it. */
-  showReport(report: DutyReport | null, averages: readonly (readonly string[])[] | (() => readonly (readonly string[])[]) = []): void {
+  showReport(report: DutyReport | null, averages: Rows | (() => Rows) = [], recent: Rows | (() => Rows) = []): void {
     if (report && !showsDutyReport(report)) report = null;
     this.viewing = report;
     this.viewerAverages = averages;
+    this.viewerRecent = recent;
     if (!this.canvas?.parentElement) return;
     if (!this.viewer) {
       this.viewer = el('section', 'game-results duty-viewer');
@@ -437,7 +443,7 @@ export class Panel {
     }
     this.viewer.hidden = !report;
     this.viewer.replaceChildren(...(report ? [renderReport(report, [], typeof averages === 'function' ? averages() : averages,
-      () => { this.showReport(null); this.used(); })] : []));
+      () => { this.showReport(null); this.used(); }, typeof recent === 'function' ? recent() : recent)] : []));
     this.sync();
   }
 

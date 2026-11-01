@@ -1370,6 +1370,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     report: duty.last,
     averages: duty.averages(timed() ? store.sessionHistory(bestKey()) : null,
       { scoreLabel: scoreLabel() }),
+    recent: duty.recent(timed() ? store.history(bestKey()) : null, { scoreLabel: scoreLabel() }),
     rows: resultRows(),
   } : null);
 

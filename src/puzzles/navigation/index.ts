@@ -494,7 +494,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   });
   panel.results(() => finished && !running && !hold.holding && game && !liveSettings.create ? {
     title: 'Navigation results', report: duty.last,
-    averages: duty.averages(store.history(settingsKey(liveSettings)), { scoreLabel: 'Points' }),
+    averages: duty.averages(store.sessionHistory(settingsKey(liveSettings)), { scoreLabel: 'Points' }),
+    recent: duty.recent(store.history(settingsKey(liveSettings)), { scoreLabel: 'Points' }),
     rows: [['Points', String(totals().points)],
       ['Constellations', board && !liveSettings.clears ? String(totals().constellations) : `${totals().constellations}${of(runGoal(liveSettings))}`],
       ...(board ? [['Boards', String(board + 1)]] : []),

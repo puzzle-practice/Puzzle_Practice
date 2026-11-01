@@ -2,7 +2,7 @@
 // settings, and the most recent ones, newest first. The games come from Store.history / Store.addHistory.
 // A game saved with a duty report (its `duty` field) has a button that shows the report again.
 import { decodeReport, showsDutyReport, type DutyReport } from './duty/report';
-import { sessionAverages } from './duty/desk';
+import { recentAverages, sessionAverages } from './duty/desk';
 import type { Panel, RowAction } from './panel';
 import { removeGame, type GameRecord } from './storage';
 import { deleteReplay } from './data-backups';
@@ -71,10 +71,14 @@ export function historyGroup(
             const game = shownGames()[index];
             // Its session's games: the browser session it was played in (older games have none).
             const session = (games() ?? []).filter((g) => g === game || (game.session !== undefined && g.session === game.session));
-            if (report) panel.showReport(report, () => sessionAverages(session, {
-              scoreLabel: report.score.label,
-              lowerIsBetter: report.puzzle === 'forage' && report.score.label === 'Moves',
-            }));
+            const options = {
+              scoreLabel: report?.score.label,
+              lowerIsBetter: report?.puzzle === 'forage' && report.score.label === 'Moves',
+            };
+            // The ten sessions up to and including this one.
+            const all = games() ?? [];
+            const upTo = all.slice(0, all.indexOf(game) + 1);
+            if (report) panel.showReport(report, () => sessionAverages(session, options), () => recentAverages(upTo, options));
           },
           disabled: (index: number) => !reportOf(shownGames()[index]),
         }] : []),

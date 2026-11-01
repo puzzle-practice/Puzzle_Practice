@@ -6,7 +6,8 @@ import { DEFAULT_NAME, loadProfile, saveProfile, sanitizeName, setReplayPirate }
 import { cutoffsFor, cutoffWords, LEARNING, moodFor, performanceWord, rate, rateOn, type RatingScale } from './ratings';
 import { decodeReport, encodeReport, makeReport, readReport, showsDutyReport, SPACE } from './report';
 import { stackRows } from './view';
-import { sessionAverages } from './desk';
+import { recentAverages, sessionAverages } from './desk';
+import type { GameRecord } from '../storage';
 
 function fakeStorage() {
   const values = new Map<string, string>();
@@ -228,5 +229,13 @@ describe('report visibility', () => {
       const report = makeReport({ puzzle: 'distilling', station: 'Distilling', mode, performance: LEARNING, score: { label: 'Score', value: '0' } });
       expect(showsDutyReport(decodeReport(encodeReport(report))!)).toBe(mode === 'Standard' || mode === 'Seeded');
     }
+  });
+});
+
+describe('last sessions', () => {
+  it('averages only the latest ten games', () => {
+    const games = Array.from({ length: 25 }, (_, i) => ({ at: i, score: i + 1 }) as GameRecord);
+    expect(recentAverages(games)).toEqual([['Sessions', '10'], ['Average score', '20.5'], ['Best score', '25']]);
+    expect(recentAverages(games.slice(0, 3))[0]).toEqual(['Sessions', '3']);
   });
 });

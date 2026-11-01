@@ -14,6 +14,9 @@ export interface AverageOptions {
   digits?: number;
 }
 
+/** How many of the latest sessions a report's Last sessions fold averages. */
+export const RECENT_SESSIONS = 10;
+
 const round = (n: number, digits = 2) => String(Number(n.toFixed(digits)));
 
 /**
@@ -69,12 +72,27 @@ export interface DutyDesk {
   fields(report: DutyReport | null | undefined): { rating?: string; duty?: string };
   /** Session averages for a history (worked out again only when it changes). */
   averages(games: readonly GameRecord[] | null | undefined, options?: AverageOptions): string[][];
+  /** The same rows for the last ten sessions of a saved history (every browser session). */
+  recent(games: readonly GameRecord[] | null | undefined, options?: AverageOptions): string[][];
+}
+
+/** Session averages over a history's latest sessions, oldest first like the history. */
+export function recentAverages(games: readonly GameRecord[], options: AverageOptions = {}): string[][] {
+  return sessionAverages(games.slice(-RECENT_SESSIONS), options);
 }
 
 export function dutyDesk(_panel: Panel, store: Store, puzzle: string, station: string, scales: readonly RatingScale[],
   _options: { shown?: (scale: string) => boolean; disabled?: () => boolean } = {}): DutyDesk {
   let last: DutyReport | null = null;
-  let averaged: { games: readonly GameRecord[]; length: number; key: string; rows: string[][] } | null = null;
+  type Cached = { games: readonly GameRecord[]; length: number; last: GameRecord | undefined; key: string; rows: string[][] } | null;
+  let averaged: Cached = null;
+  let recent: Cached = null;
+  // Worked out again only when the history or the options change.
+  const cached = (old: Cached, games: readonly GameRecord[], opts: AverageOptions, make: (g: readonly GameRecord[], o: AverageOptions) => string[][]): NonNullable<Cached> => {
+    const key = JSON.stringify([opts, extraRatings()]);
+    if (old && old.games === games && old.length === games.length && old.last === games.at(-1) && old.key === key) return old;
+    return { games, length: games.length, last: games.at(-1), key, rows: make(games, opts) };
+  };
   return {
     get last() { return last; },
     clear() { last = null; },
@@ -83,11 +101,11 @@ export function dutyDesk(_panel: Panel, store: Store, puzzle: string, station: s
     fields(report) { return report ? { rating: performanceWord(report.performance), duty: encodeReport(report) } : {}; },
     averages(games, opts = {}) {
       if (!games?.length) return [];
-      const key = JSON.stringify([opts, extraRatings()]);
-      if (!averaged || averaged.games !== games || averaged.length !== games.length || averaged.key !== key) {
-        averaged = { games, length: games.length, key, rows: sessionAverages(games, opts) };
-      }
-      return averaged.rows;
+      return (averaged = cached(averaged, games, opts, sessionAverages)).rows;
+    },
+    recent(games, opts = {}) {
+      if (!games?.length) return [];
+      return (recent = cached(recent, games, opts, recentAverages)).rows;
     },
   };
 }
