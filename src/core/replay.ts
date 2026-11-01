@@ -376,12 +376,13 @@ const formatSeconds = (seconds: number) => Math.floor(seconds / 60) + ':' + Stri
 const VIDEO_PUZZLES = new Set(['navigation']);
 
 /**
- * Fitting a video to a size limit (see saveVideo): aim at 93% of it, accept 80% to 97%, and make it at most
- * three times. The first video's guess comes from a 5-minute Navigation replay at 2x size, which came to
- * 18 MB at quantizer 29 at 30 fps and 19.3 MB at quantizer 30 at 60 fps; after that, the last video that
- * fitted at that frame rate is the guess.
+ * Fitting a video to a size limit (see saveVideo): the guess aims at 93% of it, and the video is made at the
+ * guess and FIT_STEP either side of it in one go; the biggest that's at most 97% of the limit is kept. It's
+ * made again (at most three times in all) only if every one came out over, or under half the limit. The
+ * first video's guess comes from a 5-minute Navigation replay at 2x size, which came to 18 MB at quantizer
+ * 29 at 30 fps and 19.3 MB at quantizer 30 at 60 fps; after that, the video last kept at that frame rate.
  */
-const FIT_TARGET = 0.93, FIT_LEAST = 0.8, FIT_MOST = 0.97, FIT_PASSES = 3;
+const FIT_TARGET = 0.93, FIT_LEAST = 0.5, FIT_MOST = 0.97, FIT_PASSES = 3, FIT_STEP = 3;
 const FIT_GUESS: Record<number, { quantizer: number; bytesPerSecond: number }> = {
   30: { quantizer: 29, bytesPerSecond: 59_000 }, 60: { quantizer: 30, bytesPerSecond: 63_200 },
 };
@@ -1153,7 +1154,7 @@ export class ReplayRecorder {
       const fps = this.preferences.get<number>('videoFrameRate', 30);
       // Sharing sites count a megabyte as a million bytes. The report adds a few seconds at the end.
       const expectedSeconds = entry.duration / 1000 / this.replaySpeed + (END_HOLD_MS + 5000) / 1000;
-      const make = (retry: { scale?: number; videoQuality?: number; quantizer?: number } = {}) => exportReplayVideo({
+      const make = (retry: { scale?: number; videoQuality?: number; quantizers?: number[] } = {}) => exportReplayVideo({
         begin: () => this.playSelected(),
         playing: () => !!this.playback && !this.disposed,
         cancelled: () => job.cancelled || this.disposed,
@@ -1171,20 +1172,29 @@ export class ReplayRecorder {
         // per frame, and most frames are left out while the board sits still.) The quality that fits isn't
         // known until the video is made, so it's guessed from the last one, and the video is made again
         // with a better guess if it came out over the limit or well under it.
-        const target = maxBytes * FIT_TARGET;
+        const target = maxBytes * FIT_TARGET, most = maxBytes * FIT_MOST;
         const learned = this.preferences.get<{ quantizer: number; bytesPerSecond: number } | null>('videoFit' + fps, null) ?? FIT_GUESS[fps] ?? FIT_GUESS[30]!;
         let quantizer = fitQuantizer(learned.quantizer, learned.bytesPerSecond * expectedSeconds, target);
-        video = await make({ quantizer });
+        // Making several at once costs some encoding time but plays the replay once, where a second
+        // guess means playing it all again. Sizes go down as the quantizer goes up.
+        const spread = (q: number) => [...new Set([q - FIT_STEP, q, q + FIT_STEP]
+          .map(n => Math.max(MIN_QUANTIZER, Math.min(MAX_QUANTIZER, n))))];
+        const pick = (made: Awaited<ReturnType<typeof make>>) => {
+          const all = made.alternatives ?? [made];
+          return all.filter(v => v.blob.size <= most).sort((a, b) => b.blob.size - a.blob.size)[0]
+            ?? all.reduce((a, b) => a.blob.size <= b.blob.size ? a : b);
+        };
+        video = pick(await make({ quantizers: spread(quantizer) }));
         for (let pass = 2; pass <= FIT_PASSES; pass++) {
           const size = video.blob.size;
-          if (size <= maxBytes * FIT_MOST && (size >= maxBytes * FIT_LEAST || quantizer <= MIN_QUANTIZER)) break;
+          if (size <= most && (size >= maxBytes * FIT_LEAST || video.quantizer === undefined || video.quantizer <= MIN_QUANTIZER)) break;
           job.seconds = 0;
-          this.videoNote = (size > maxBytes * FIT_MOST ? 'Over ' : 'Well under ') + maxBytes / 1_000_000 + ' MB: making it again';
+          this.videoNote = (size > most ? 'Over ' : 'Well under ') + maxBytes / 1_000_000 + ' MB: making it again';
           if (video.quantizer !== undefined) {
             // Always a step at least, the right way.
-            const next = fitQuantizer(quantizer, size, target);
-            quantizer = size > target ? Math.max(next, quantizer + 1) : Math.min(next, quantizer - 1);
-            video = await make({ quantizer });
+            const next = fitQuantizer(video.quantizer, size, target);
+            quantizer = size > target ? Math.max(next, video.quantizer + 1) : Math.min(next, video.quantizer - 1);
+            video = pick(await make({ quantizers: spread(quantizer) }));
           } else if (video.videoBitrate) {
             // An encoder without constant quality: the bitrate, scaled by how far off it came out.
             video = await make({ videoQuality: Math.round(video.videoBitrate * Math.min(4, target / size)) });
