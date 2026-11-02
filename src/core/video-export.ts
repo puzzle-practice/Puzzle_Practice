@@ -48,6 +48,12 @@ export interface VideoExportOptions {
    * says whether it was used.
    */
   quantizer?: number;
+  /**
+   * Several constant qualities at once: the replay plays once and each frame goes to one encoder per
+   * quantizer, so a size limit can be met by picking from the results instead of playing it again.
+   * Overrides `quantizer`; each result comes back in `ReplayVideo.alternatives`, in this order.
+   */
+  quantizers?: number[];
   /** Seconds between key frames (full pictures the player can seek to); 10 by default. Each costs a lot of a small file. */
   keyFrameSeconds?: number;
   /**
@@ -66,6 +72,8 @@ export interface ReplayVideo {
   videoBitrate?: number;
   /** The constant quality the video was made at, if the encoder could do it. */
   quantizer?: number;
+  /** With `quantizers`: every video made, in the order asked (this one among them). */
+  alternatives?: ReplayVideo[];
 }
 
 export class VideoExportCancelled extends Error { override name = 'VideoExportCancelled'; }
@@ -87,10 +95,12 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
       options.maxBytes! * 8 * SIZE_MARGIN / options.expectedSeconds! - cappedAudio)))
     : QUALITY_HIGH;
   const fallbackBitrate = typeof videoBitrate === 'number' ? videoBitrate : undefined;
-  const videoQuality = options.videoQuality ?? (options.quantizer !== undefined
-    ? new Quality({ quantizer: options.quantizer, bitrate: fallbackBitrate }) : videoBitrate);
+  const quantizers: (number | undefined)[] = options.videoQuality !== undefined ? [undefined]
+    : options.quantizers?.length ? options.quantizers : [options.quantizer];
+  const qualities = quantizers.map(quantizer => options.videoQuality
+    ?? (quantizer !== undefined ? new Quality({ quantizer, bitrate: fallbackBitrate }) : videoBitrate));
   const videoCodec = await getFirstEncodableVideoCodec(options.codecs ?? ['avc', 'vp9', 'av1', 'vp8'],
-    { width: width * scale, height: height * scale, frameRate: fps, ...rate(videoQuality) });
+    { width: width * scale, height: height * scale, frameRate: fps, ...rate(qualities[0]!) });
   if (!videoCodec) throw new Error('This browser cannot encode video');
   const audioCodec = typeof AudioEncoder === 'undefined' ? null
     : await getFirstEncodableAudioCodec(['aac', 'opus'], { numberOfChannels: 2, sampleRate: SAMPLE_RATE, ...rate(audioBitrate) });
@@ -100,7 +110,6 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
   // what the game drew rather than by reading pixels back, which would stall the graphics card.
   const drawing = watchDrawing(game.getContext('2d')!);
 
-  const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
   // Each frame that goes in the video is copied to its own canvas (scaled up, if asked, with the pixels
   // kept square and sharp), so it still holds the last frame after the game has moved on.
   const source = document.createElement('canvas');
@@ -108,15 +117,25 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
   const sourceCtx = source.getContext('2d')!;
   sourceCtx.imageSmoothingEnabled = false;
   const copy = () => sourceCtx.drawImage(game, 0, 0, source.width, source.height);
-  let byQuantizer = false;
-  const video = new CanvasSource(source, {
-    codec: videoCodec, bitrate: videoQuality, keyFrameInterval: options.keyFrameSeconds ?? 10,
-    onEncoderConfig: (config) => { byQuantizer = config.bitrateMode === 'quantizer'; },
+  // One file per quality asked for, all fed the same frames.
+  const files = qualities.map((quality, index) => {
+    const file = {
+      quantizer: quantizers[index], quality, byQuantizer: false,
+      output: new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() }),
+      video: new CanvasSource(source, {
+        codec: videoCodec, bitrate: quality, keyFrameInterval: options.keyFrameSeconds ?? 10,
+        onEncoderConfig: (config) => { file.byQuantizer = config.bitrateMode === 'quantizer'; },
+      }),
+      audio: audioCodec ? new AudioBufferSource({ codec: audioCodec, bitrate: audioBitrate }) : null,
+    };
+    file.output.addVideoTrack(file.video, { frameRate: fps });
+    if (file.audio) file.output.addAudioTrack(file.audio);
+    return file;
   });
-  output.addVideoTrack(video, { frameRate: fps });
-  const audio = audioCodec ? new AudioBufferSource({ codec: audioCodec, bitrate: audioBitrate }) : null;
-  if (audio) output.addAudioTrack(audio);
-  await output.start();
+  // The encoders work side by side; a frame is added once they've all taken it.
+  const add = (timestamp: number, duration: number) => Promise.all(files.map(file => file.video.add(timestamp, duration)));
+  const cancel = () => Promise.all(files.map(file => file.output.cancel().catch(() => {})));
+  await Promise.all(files.map(file => file.output.start()));
 
   startVirtualTime();
   const stopCapture = captureSounds();
@@ -137,23 +156,23 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
       if (!options.playing()) break;
       // Some players only show a frame once the next one arrives, so a still stretch is never left
       // empty for long: the last frame is added again every quarter second. Repeats cost next to nothing.
-      if (drawing.changed()) { copy(); await video.add(frames / fps, 1 / fps); lastAdded = frames; }
-      else if (frames - lastAdded >= maxGap) { await video.add(frames / fps, 1 / fps); lastAdded = frames; }
+      if (drawing.changed()) { copy(); await add(frames / fps, 1 / fps); lastAdded = frames; }
+      else if (frames - lastAdded >= maxGap) { await add(frames / fps, 1 / fps); lastAdded = frames; }
       frames++;
       // Let the page paint the progress note and stay responsive.
       if (frames % 30 === 0) { options.onProgress?.(frames / fps); await new Promise(resolve => setTimeout(resolve, 0)); }
     }
   } catch (error) {
-    await output.cancel().catch(() => {});
+    await cancel();
     throw error;
   } finally {
     drawing.dispose();
     sounds = stopCapture();
     endVirtualTime();
   }
-  if (!frames) { await output.cancel().catch(() => {}); throw new Error('The replay showed no frames'); }
+  if (!frames) { await cancel(); throw new Error('The replay showed no frames'); }
   // A still ending: show the last frame again so the video runs to the end of the replay.
-  if (lastAdded < frames - 1) { await video.add((frames - 1) / fps, 1 / fps); }
+  if (lastAdded < frames - 1) { await add((frames - 1) / fps, 1 / fps); }
   let seconds = frames / fps;
 
   // The duty report shown when the replay ended: give its face and icons a moment to draw, then hold it.
@@ -166,17 +185,22 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
     // One frame then a long gap would show the board until the very end in many players: it's added
     // again every quarter second through the hold.
     const step = Math.max(1, Math.round(fps * MAX_GAP_SECONDS)), holdFrames = Math.round(REPORT_SECONDS * fps);
-    for (let f = 0; f < holdFrames; f += step) await video.add(seconds + f / fps, 1 / fps);
-    await video.add(seconds + (holdFrames - 1) / fps, 1 / fps);
+    for (let f = 0; f < holdFrames; f += step) await add(seconds + f / fps, 1 / fps);
+    await add(seconds + (holdFrames - 1) / fps, 1 / fps);
     seconds += REPORT_SECONDS;
   }
 
-  if (audio) await audio.add(await mixSounds(sounds, startedAt, seconds));
-  await output.finalize();
-  const buffer = (output.target as BufferTarget).buffer!;
-  return { blob: new Blob([buffer], { type: 'video/mp4' }), seconds, renderMs: performance.now() - began,
-    videoBitrate: typeof videoQuality === 'number' ? videoQuality : byQuantizer ? undefined : fallbackBitrate,
-    quantizer: byQuantizer ? options.quantizer : undefined };
+  const mixed = audioCodec ? await mixSounds(sounds, startedAt, seconds) : null;
+  const videos = await Promise.all(files.map(async (file): Promise<ReplayVideo> => {
+    if (file.audio && mixed) await file.audio.add(mixed);
+    await file.output.finalize();
+    const buffer = (file.output.target as BufferTarget).buffer!;
+    return { blob: new Blob([buffer], { type: 'video/mp4' }), seconds, renderMs: performance.now() - began,
+      videoBitrate: typeof file.quality === 'number' ? file.quality : file.byQuantizer ? undefined : fallbackBitrate,
+      quantizer: file.byQuantizer ? file.quantizer : undefined };
+  }));
+  if (videos.length > 1) for (const video of videos) video.alternatives = videos;
+  return videos[0]!;
 }
 
 /** Mixes the captured sounds into one stereo track of the video's length, each at its moment. */
