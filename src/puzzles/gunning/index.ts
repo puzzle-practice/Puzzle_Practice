@@ -42,6 +42,8 @@ const SELECT:Record<string,number>={arrUp:UP,arrRight:RIGHT,arrDown:DOWN,arrLeft
 const SOUNDS:Record<string,string[]>={place_arrow:['place_arrow','place_arrow2']};
 /** How far the mouse has to be dragged before it picks the arrow's direction. */
 const DRAG=4;
+/** The game's puzzle area, which takes clicks off the deck too. */
+const VIEW_W=450, VIEW_H=600;
 const validSeed=(s:unknown):s is number=>Number.isInteger(s)&&Number(s)>=0&&Number(s)<=0xffffffff;
 /** The speed slider runs fast to the right, like the game's: its value is 600 less the tick time. */
 const sliderOf=(ms:number)=>MIN_TICK+MAX_TICK-ms;
@@ -73,6 +75,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const play=(name:string)=>{const files=SOUNDS[name]??[name];sounds.play(files[soundTurn++%files.length]);};
   const cellAt=([x,y]:Point)=>{const v=boardView(game);return {x:Math.floor((x-v.left)/v.cell),y:Math.floor((y-v.top)/v.cell)};};
   const onBoard=(p:Point)=>{const c=cellAt(p);return c.x>=0&&c.x<WIDTH&&c.y>=0&&c.y<game.board.height;};
+  /** The game takes the mouse anywhere over the puzzle, not just the deck: the cursor goes to the nearest cell. */
+  const inView=([x,y]:Point)=>x>=0&&x<VIEW_W&&y>=0&&y<VIEW_H;
 
   const seedMode = seedControls(panel, store, () => running || !!replays?.isPlaying);
 
@@ -130,6 +134,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   }
   /** Dragging away from where the button went down picks the arrow: the way the mouse went. */
   function dragArrow([x,y]:Point):number {
+    if(!liveSettings.clickDrag)return game.nextArrow;
     const dx=dragFrom![0]-x, dy=dragFrom![1]-y;
     if(Math.hypot(dx,dy)<=DRAG)return game.nextArrow;
     if(dx===0)return dy<0?DOWN:UP;
@@ -164,7 +169,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
       const mouse=routed.mouse;
       if(timeUp){/* The deck has stopped. */}
       else if(dragFrom)game.selectArrow(dragArrow(mouse));
-      else if((mouse[0]!==lastMouse[0]||mouse[1]!==lastMouse[1])&&onBoard(mouse)){
+      else if((mouse[0]!==lastMouse[0]||mouse[1]!==lastMouse[1])&&inView(mouse)){
         const c=cellAt(mouse);game.pointAt(c.x,c.y);
         const paint=paintWith??(painting?palette:null);
         if(creating()&&paint)paintAt(mouse,paint);
@@ -183,11 +188,11 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
             else{paintWith=paintKey.paint;paintAt(mouse,paintKey.paint);}
             continue;
           }
-          if(event.type==='mousedown'&&event.button===1&&palette&&onBoard(event.pos)){painting=true;paintAt(event.pos,palette);continue;}
+          if(event.type==='mousedown'&&event.button===1&&palette){if(onBoard(event.pos)){painting=true;paintAt(event.pos,palette);}continue;}
           if(event.type==='mouseup'&&event.button===1&&painting){painting=false;continue;}
         }
         if(event.type==='mousedown'){
-          if(event.button===1&&onBoard(event.pos)){const c=cellAt(event.pos);game.pointAt(c.x,c.y);dragFrom=event.pos;}
+          if(event.button===1&&inView(event.pos)){const c=cellAt(event.pos);game.pointAt(c.x,c.y);dragFrom=event.pos;}
           else if(event.button===3)dragFrom=null;
           else if(event.button===4||event.button===5)game.turnArrow(event.button===5?1:-1);
           continue;
@@ -270,6 +275,8 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   options.select('Cannonballs',BALL,()=>settings.balls,value=>{settings.balls=value;save();preview();},{disabled:busy,hidden:hideInDrill});
   options.select('Holes in the deck',HOLE,()=>settings.holes,value=>{settings.holes=value;save();preview();},{disabled:busy,hidden:hideInDrill});
   options.toggle('Ship moves',()=>settings.shipMoves,on=>{settings.shipMoves=on;save();preview();},{disabled:busy,hidden:hideInDrill});
+  options.toggle('Click and drag',()=>settings.clickDrag,on=>{settings.clickDrag=on;save();preview();},{disabled:busy,
+    title:'Drag from a cell to pick the arrow’s direction. Off, a click lays the selected arrow even if the mouse moves.'});
   options.select('Timer',TIMER,()=>settings.timerMs,value=>{settings.timerMs=value;save();},{disabled:busy});
   options.hint(()=>settings.mode==='loop'?'Practise either mirrored side. Point an arrow towards a muzzle to load it; Down keeps pieces circulating. Darkened guns cannot accept pieces; they brighten when ready. Place arrows on any open cell; the three newest remain. A powder, wad, shot load fires, then leaves the gun clean. Swabs clear mistakes. Each barrel keeps three of each piece on its side and returns consumed pieces in delayed, shuffled batches.':'Pieces come out of the barrel and follow your arrows. Load each cannon through its open end with powder, then wad, then shot. Swab a cannon after it fires, or to clear a wrong load. Only your three newest arrows stay on the deck.');
   const approximations=panel.settings.group('Approximations');
@@ -288,7 +295,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
     ['Stuck and removed',String(game.stats.stuck)],['Washes',String(game.stats.washes)],['Swabs into clean cannons',String(game.stats.wastedSwabs)],
     ['Arrows placed',String(game.stats.arrows)],
   ]}:null);
-  const codec:ReplaySettingsCodec={currentVersion:6,simulatorVersion:6,migrate:(version,value)=>version>=1&&version<=6?readSettings(value):null};
+  const codec:ReplaySettingsCodec={currentVersion:7,simulatorVersion:7,migrate:(version,value)=>version>=1&&version<=7?readSettings(value):null};
   replays=new ReplayRecorder('gunning',store,panel,ticks,tape=>{
     savedSettings??={...settings};settings=readSettings(tape.settings)!;start(tape.seed as number);
   },()=>{
