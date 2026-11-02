@@ -1203,6 +1203,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     title: 'Distilling results',
     report: duty.last,
     averages: duty.averages(historyKey(startedMode) ? store.sessionHistory(historyKey(startedMode)!) : null),
+    recent: duty.recent(historyKey(startedMode) ? store.history(historyKey(startedMode)!) : null),
     rows: resultRows,
   } : null);
 

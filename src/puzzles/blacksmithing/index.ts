@@ -1130,6 +1130,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     averages: mode === 'classic'
       ? duty.averages(store.sessionHistory(`classic:${difficulty}`), { scoreLabel: 'Strikes' })
       : duty.averages(store.sessionHistory(runHistoryKey()), { scoreLabel: 'Points' }),
+    recent: mode === 'classic'
+      ? duty.recent(store.history(`classic:${difficulty}`), { scoreLabel: 'Strikes' })
+      : duty.recent(store.history(runHistoryKey()), { scoreLabel: 'Points' }),
     rows: mode === 'perfect' ? [
       ['Points', String(run.points)], ['Boards', String(run.boards)],
       ['Perfect / One off / Too far off', `${run.perfect} / ${run.oneOff} / ${run.farOff}`],

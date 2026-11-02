@@ -9,6 +9,7 @@ import { loadProfile, NAME_LIMIT, saveProfile, type PirateProfile } from './prof
 import { LEARNING, moodFor, MOODS, performanceWord } from './ratings';
 import { SPACE, TEXT, type ClearedGroup, type DutyReport } from './report';
 import { Store } from '../storage';
+import { RECENT_SESSIONS } from './desk';
 import { fillStatCell, type StatRows } from '../stat-cell';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
@@ -127,7 +128,7 @@ export function faceCanvas(face: FaceSpec, mood: Parameters<typeof drawFaceInto>
 
 /** Which folds of a report the player last had open, the same for every puzzle. */
 const prefs = new Store('global');
-type Fold = 'details' | 'averages';
+type Fold = 'details' | 'averages' | 'recent';
 const foldOpen = (fold: Fold) => prefs.get<Partial<Record<Fold, boolean>>>('reportFolds', {})[fold] ?? false;
 function setFoldOpen(fold: Fold, open: boolean): void {
   prefs.set('reportFolds', { ...prefs.get<Partial<Record<Fold, boolean>>>('reportFolds', {}), [fold]: open });
@@ -194,11 +195,12 @@ function rowCanvas(group: ClearedGroup): HTMLCanvasElement | null {
 const counts = (group: ClearedGroup) => `[${group.items.map((item) => item.count).join(', ')}]`;
 
 /**
- * A report as a card. `details` is the session's full table of numbers and `averages` the
- * sessions so far with these settings, each folded away (and left open if the player opened it).
+ * A report as a card. `details` is the session's full table of numbers, `averages` the sessions
+ * so far this browser session with these settings and `recent` the last ten sessions with these
+ * settings, each folded away (and left open if the player opened it).
  */
 export function renderReport(report: DutyReport, details: StatRows = [],
-  averages: readonly (readonly string[])[] = [], onClose?: () => void): HTMLElement {
+  averages: readonly (readonly string[])[] = [], onClose?: () => void, recent: readonly (readonly string[])[] = []): HTMLElement {
   const card = el('div', 'duty-report');
   card.dataset.puzzle = report.puzzle;
 
@@ -233,6 +235,7 @@ export function renderReport(report: DutyReport, details: StatRows = [],
 
   if (details.length) card.append(foldTable('details', 'This session', details));
   card.append(foldTable('averages', 'Session averages', averages.length ? averages : [['Sessions', 'No session averages available']]));
+  if (recent.length) card.append(foldTable('recent', `Last ${RECENT_SESSIONS} sessions`, recent));
   if (onClose) {
     const close = el('button', 'panel-button duty-close', 'Close');
     close.type = 'button';

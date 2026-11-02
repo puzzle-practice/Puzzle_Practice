@@ -934,6 +934,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const duty = dutyDesk(panel, store, 'forage', 'Foraging', RATING_SCALES, {
     shown: (id) => (id === 'normal' ? settings.mode === 'normal' : settings.mode === 'ci' || settings.mode === 'chaos'),
   });
+  const averageOptions = () => isPuzzle()
+    ? { scoreLabel: 'Moves', lowerIsBetter: true, digits: 1 }
+    : { scoreLabel: normalMode() ? 'Points a move' : 'Score' };
   panel.results(() => ended && !flight && !hold.holding ? {
     title: 'Foraging results',
     report: duty.last,
@@ -946,9 +949,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       ...(normalMode() ? [['Points', String(score)]] : []),
       ...(unrated() ? [['Rating', excludesUnlikelyReplays() ? 'Unrated: not saved' : 'Unrated: replay only']] : []),
     ],
-    averages: duty.averages(historyKey() ? store.sessionHistory(historyKey()!) : null, isPuzzle()
-      ? { scoreLabel: 'Moves', lowerIsBetter: true, digits: 1 }
-      : { scoreLabel: normalMode() ? 'Points a move' : 'Score' }),
+    averages: duty.averages(historyKey() ? store.sessionHistory(historyKey()!) : null, averageOptions()),
+    recent: duty.recent(historyKey() ? store.history(historyKey()!) : null, averageOptions()),
   } : null);
 
   // Every scored game, kept per settings key as the desktop version's score lists were.
