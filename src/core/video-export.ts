@@ -6,6 +6,7 @@ import { AudioBufferSource, BufferTarget, CanvasSource, Mp4OutputFormat, Output,
 import { captureSounds, type CapturedSound } from './audio';
 import { drawElement } from './dom-raster';
 import { watchDrawing } from './draw-fingerprint';
+import { waitForReportArt } from './duty/view';
 import { advanceVirtualTime, endVirtualTime, frameRunner, realNow, startVirtualTime } from './realtime';
 
 /** How long the duty report stays on screen at the end of the video, in seconds. */
@@ -30,6 +31,8 @@ export interface VideoExportOptions {
   cancelled(): boolean;
   /** Replay time reached so far, in seconds, for a progress note. */
   onProgress?(seconds: number): void;
+  /** The saved duty report, shown for one frame before playback so shared videos open on the result. */
+  startCard?(): Promise<HTMLElement | null>;
   /** What's shown over the board once the replay has ended (its duty report), if anything: it ends the video. */
   endCard?(): HTMLElement | null;
   /** Frames a second; 60 by default. */
@@ -140,8 +143,18 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
   startVirtualTime();
   const stopCapture = captureSounds();
   let sounds: CapturedSound[] = [];
-  let startedAt = 0, frames = 0, lastAdded = -1;
+  let startedAt = 0, frames = 0, lastAdded = -1, openingSeconds = 0;
   try {
+    const openingCard = await options.startCard?.();
+    if (openingCard) {
+      await waitForReportArt(openingCard);
+      if (options.cancelled()) throw new VideoExportCancelled();
+      copy();
+      drawElement(sourceCtx, openingCard, game.getBoundingClientRect(), source.width);
+      await add(0, 1 / fps);
+      openingSeconds = 1 / fps;
+    }
+    if (options.cancelled()) throw new VideoExportCancelled();
     await options.begin();
     startedAt = realNow();
     const maxGap = Math.max(1, Math.round(fps * MAX_GAP_SECONDS));
@@ -156,8 +169,8 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
       if (!options.playing()) break;
       // Some players only show a frame once the next one arrives, so a still stretch is never left
       // empty for long: the last frame is added again every quarter second. Repeats cost next to nothing.
-      if (drawing.changed()) { copy(); await add(frames / fps, 1 / fps); lastAdded = frames; }
-      else if (frames - lastAdded >= maxGap) { await add(frames / fps, 1 / fps); lastAdded = frames; }
+      if (drawing.changed() || frames === 0) { copy(); await add(openingSeconds + frames / fps, 1 / fps); lastAdded = frames; }
+      else if (frames - lastAdded >= maxGap) { await add(openingSeconds + frames / fps, 1 / fps); lastAdded = frames; }
       frames++;
       // Let the page paint the progress note and stay responsive.
       if (frames % 30 === 0) { options.onProgress?.(frames / fps); await new Promise(resolve => setTimeout(resolve, 0)); }
@@ -172,13 +185,13 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
   }
   if (!frames) { await cancel(); throw new Error('The replay showed no frames'); }
   // A still ending: show the last frame again so the video runs to the end of the replay.
-  if (lastAdded < frames - 1) { await add((frames - 1) / fps, 1 / fps); }
-  let seconds = frames / fps;
+  if (lastAdded < frames - 1) { await add(openingSeconds + (frames - 1) / fps, 1 / fps); }
+  let seconds = openingSeconds + frames / fps;
 
-  // The duty report shown when the replay ended: give its face and icons a moment to draw, then hold it.
+  // The duty report shown when the replay ended: wait for its face and icons, then hold it.
   const card = options.endCard?.();
   if (card) {
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await waitForReportArt(card);
     // The report covers the whole board. It's painted over the last frame, at the video's size.
     const paint = () => drawElement(sourceCtx, card, game.getBoundingClientRect(), source.width);
     paint();
@@ -190,7 +203,7 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
     seconds += REPORT_SECONDS;
   }
 
-  const mixed = audioCodec ? await mixSounds(sounds, startedAt, seconds) : null;
+  const mixed = audioCodec ? await mixSounds(sounds, startedAt, seconds, openingSeconds) : null;
   const videos = await Promise.all(files.map(async (file): Promise<ReplayVideo> => {
     if (file.audio && mixed) await file.audio.add(mixed);
     await file.output.finalize();
@@ -204,7 +217,7 @@ export async function exportReplayVideo(options: VideoExportOptions): Promise<Re
 }
 
 /** Mixes the captured sounds into one stereo track of the video's length, each at its moment. */
-async function mixSounds(sounds: CapturedSound[], startedAt: number, durationS: number): Promise<AudioBuffer> {
+async function mixSounds(sounds: CapturedSound[], startedAt: number, durationS: number, openingSeconds: number): Promise<AudioBuffer> {
   const mix = new OfflineAudioContext(2, Math.max(1, Math.ceil(durationS * SAMPLE_RATE)), SAMPLE_RATE);
   for (const sound of sounds) {
     const when = (sound.at - startedAt) / 1000;
@@ -214,7 +227,7 @@ async function mixSounds(sounds: CapturedSound[], startedAt: number, durationS: 
     const gain = mix.createGain();
     gain.gain.value = sound.volume;
     source.connect(gain); gain.connect(mix.destination);
-    source.start(when);
+    source.start(when + openingSeconds);
   }
   return mix.startRendering();
 }

@@ -12,6 +12,14 @@ import { Store } from '../storage';
 import { RECENT_SESSIONS } from './desk';
 import { fillStatCell, type StatRows } from '../stat-cell';
 
+const canvasReady = new WeakMap<HTMLCanvasElement, Promise<unknown>>();
+
+/** Wait for a report's face, icons and fonts before capturing it in a video. */
+export async function waitForReportArt(card: HTMLElement): Promise<void> {
+  await Promise.all([...card.querySelectorAll('canvas')].map(canvas => canvasReady.get(canvas)));
+  await document.fonts.ready;
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -77,7 +85,7 @@ function stackCanvas(group: ClearedGroup): HTMLCanvasElement | null {
   canvas.width = STACK_WIDTH;
   canvas.height = (height + 2) * rows.length - 2;
   canvas.title = `${group.label}: ${group.items.filter((i) => i.count).map((i) => `${i.count} ${i.label}`).join(', ')}`;
-  void Promise.all(icons.map((icon) => Promise.all([loadIcon(icon!.url), icon!.under ? loadIcon(icon!.under.url) : null]))).then((images) => {
+  canvasReady.set(canvas, Promise.all(icons.map((icon) => Promise.all([loadIcon(icon!.url), icon!.under ? loadIcon(icon!.under.url) : null]))).then((images) => {
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     let y = 0;
@@ -97,7 +105,7 @@ function stackCanvas(group: ClearedGroup): HTMLCanvasElement | null {
       });
       y += height + 2;
     }
-  });
+  }));
   return canvas;
 }
 
@@ -108,12 +116,12 @@ function iconImage(icon: Icon, scale = 2): HTMLCanvasElement {
   canvas.height = icon.height;
   canvas.style.width = `${w * scale}px`;
   canvas.style.height = `${icon.height * scale}px`;
-  void loadIcon(icon.url).then((img) => {
+  canvasReady.set(canvas, loadIcon(icon.url).then((img) => {
     if (!img) return;
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(img, ...icon.area, 0, 0, w, icon.height);
-  });
+  }));
   return canvas;
 }
 
@@ -122,7 +130,7 @@ export function faceCanvas(face: FaceSpec, mood: Parameters<typeof drawFaceInto>
   const canvas = el('canvas', className);
   canvas.width = FACE;
   canvas.height = FACE;
-  void drawFaceInto(canvas, face, mood);
+  canvasReady.set(canvas, drawFaceInto(canvas, face, mood));
   return canvas;
 }
 
@@ -184,11 +192,11 @@ function rowCanvas(group: ClearedGroup): HTMLCanvasElement | null {
   canvas.width = STACK_WIDTH;
   canvas.height = y + height;
   canvas.title = `${group.label}: ${items.filter((i) => i.icon !== SPACE).map((i) => `${i.count} ${i.label}`).join(', ')}`;
-  void Promise.all(placed.map((p) => loadIcon(p.icon.url))).then((images) => {
+  canvasReady.set(canvas, Promise.all(placed.map((p) => loadIcon(p.icon.url))).then((images) => {
     const ctx = canvas.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     placed.forEach((p, i) => { if (images[i]) ctx.drawImage(images[i]!, ...p.icon.area, p.x, p.y + height - p.icon.height, iconWidth(p.icon), p.icon.height); });
-  });
+  }));
   return canvas;
 }
 

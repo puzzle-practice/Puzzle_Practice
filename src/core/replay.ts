@@ -518,7 +518,7 @@ export class ReplayRecorder {
     });
     if (VIDEO_PUZZLES.has(puzzle)) group.button('Save as MP4', () => void this.saveVideo(), {
       label: () => this.exporting ? `Saving video… ${Math.floor(this.exporting.seconds)}s` : 'Save as MP4',
-      title: 'Make a video of the selected replay at the playback speed chosen below, with its sounds and its duty report at the end. Stop gives it up.',
+      title: 'Make a video of the selected replay at the playback speed chosen below, with its sounds and its duty report as the first frame and at the end. Stop gives it up.',
       disabled: () => typeof VideoEncoder === 'undefined' || !this.tapes.length || this.loading || !!this.exporting || !!this.playback || !!this.recording
         || !this.canPlay(this.tapes[this.selected]) || !this.canStartPlayback(),
     });
@@ -1184,16 +1184,22 @@ export class ReplayRecorder {
     const started = performance.now();
     try {
       // The video encoder is only loaded the first time a video is made.
-      const { exportReplayVideo } = await import('./video-export');
+      const { exportReplayVideo, REPORT_SECONDS } = await import('./video-export');
       const maxBytes = this.preferences.get<number>('videoMaxMb', 20) * 1_000_000 || undefined;
       const fps = this.preferences.get<number>('videoFrameRate', 30);
-      // Sharing sites count a megabyte as a million bytes. The report adds a few seconds at the end.
-      const expectedSeconds = entry.duration / 1000 / this.replaySpeed + (END_HOLD_MS + 5000) / 1000;
+      // Sharing sites count a megabyte as a million bytes. Include the report at both ends.
+      const expectedSeconds = entry.duration / 1000 / this.replaySpeed + END_HOLD_MS / 1000 + REPORT_SECONDS + 1 / fps;
       const make = (retry: { scale?: number; videoQuality?: number; quantizers?: number[] } = {}) => exportReplayVideo({
         begin: () => this.playSelected(),
         playing: () => !!this.playback && !this.disposed,
         cancelled: () => job.cancelled || this.disposed,
         onProgress: (seconds) => { job.seconds = seconds; },
+        startCard: async () => {
+          const tape = await this.loadTape(entry);
+          if (!tape?.report || !showsDutyReport(tape.report) || job.cancelled || this.disposed) return null;
+          this.panel.showReport?.(tape.report);
+          return this.panel.reportView ?? null;
+        },
         // The duty report the replay ends on, if it shows one, closes the video.
         endCard: () => this.panel.reportView ?? null,
         fps, maxBytes, expectedSeconds,
