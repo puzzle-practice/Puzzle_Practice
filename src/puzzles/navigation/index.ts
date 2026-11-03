@@ -12,7 +12,8 @@ import { LEARNING } from '../../core/duty/ratings';
 import { TEXT } from '../../core/duty/report';
 
 /** A constellation charted in a chain of each length, from none. */
-const CHAIN_NAMES = ['single', 'double', 'triple', 'bingo', 'donkey', 'vegas'];
+const CHAIN_NAMES = ['—', 'Single', 'Double', 'Triple', 'Bingo', 'Donkey'];
+const chainName = (chain: number): string => chain > 5 ? `Vegas ${chain - 5}` : CHAIN_NAMES[chain];
 const MOONS = ['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-donkey', 'moon-vegas', 'moon-seven'];
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
@@ -156,7 +157,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       // Werewolf Isle's report shows each constellation as a moon by its chain, one bracket place per
       // chain length: always up to a triple, then on to the longest chain charted. Past a 7-chain there's only the count.
       cleared: isWerewolf(liveSettings.mode) ? [{ label: 'Constellations Charted', inScore: true,
-        items: [...charts, 0, 0, 0].slice(0, Math.max(3, charts.length)).map((count, i) => ({ icon: MOONS[i] ?? TEXT, label: `charted in a ${CHAIN_NAMES[i] ?? `${i + 1}-chain`}`, count })) }] : [] });
+          items: [...charts, 0, 0, 0].slice(0, Math.max(3, charts.length)).map((count, i) => ({ icon: MOONS[i] ?? TEXT, label: `charted in a ${chainName(i + 1).toLowerCase()}`, count })) }] : [] });
     const tape = replays.finish(`${reason} · ${run.points} points`, report);
     // Freeplay is a sandbox and keeps no history.
     if (!replays.isPlaying && !liveSettings.create) store.addHistory(settingsKey(liveSettings), {
@@ -175,7 +176,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function startScene(scene: Scene): void {
     if (!scene.clear) return;
     const clear = scene.clear;
-    message = clear.kind === 'target' ? `${clear.chain > 1 ? `${clear.chain}× chain! ` : ''}Constellation! +${clear.points}` : `${clear.chain > 1 ? `${clear.chain}× chain! ` : ''}+${clear.points}`;
+    message = `${chainName(clear.chain)}! ${clear.kind === 'target' ? 'Constellation! ' : ''}+${clear.points}`;
     messageAt = sceneStart;
     // Chains are 30px yellow; other clears are white and grow with their points (GameFonts.get(points, 300)).
     messagePx = clear.chain > 1 ? gameFont(1) : gameFontFor(clear.points, 300);
@@ -516,7 +517,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     rows: [['Points', String(totals().points)],
       ['Constellations', board && !liveSettings.clears ? String(totals().constellations) : `${totals().constellations}${of(runGoal(liveSettings))}`],
       ...(board ? [['Boards', String(board + 1)]] : []),
-      ['Stars dropped', String(totals().stars)], ['Ring rotations', String(totals().moves)], ['Longest chain', String(longestChain)], ['Longest cascade', String(longestCascade)], ['Time', `${(elapsed()/1000).toFixed(2)}s`]],
+      ['Stars dropped', String(totals().stars)], ['Ring rotations', String(totals().moves)], ['Longest chain', chainName(longestChain)], ['Longest cascade', chainName(longestCascade)], ['Time', `${(elapsed()/1000).toFixed(2)}s`]],
   } : null);
   // Version 1 had no looping: an untimed run then ended at the quota, as a quota run does now.
   // Before version 4 a booch ended every run, Dennav and Old Dennav included.
