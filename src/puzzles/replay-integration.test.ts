@@ -2375,11 +2375,15 @@ describe('Navigation sessions and replay', () => {
     instance.dispose?.();await replayWrites.idle();
     drop.mockRestore();
     const result=results()[0] as { rows:string[][]; report:DutyReport };
-    expect(result.rows).toContainEqual(['Longest chain','9']);
-    expect(result.rows).toContainEqual(['Longest cascade','4']);
+    expect(result.rows).toContainEqual(['Longest chain','Vegas 4']);
+    expect(result.rows).toContainEqual(['Longest cascade','Bingo']);
     // One place per chain length, 1-based, ending at the longest chain charted; moons up to a 7-chain, then counts only.
     expect(result.report.cleared[0].items.map(item => item.count)).toEqual([1, 1, 0, 1, 1, 0, 2, 0, 1]);
     expect(result.report.cleared[0].items.map(item => item.icon)).toEqual(['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-donkey', 'moon-vegas', 'moon-seven', 'text', 'text']);
+    expect(result.report.cleared[0].items.map(item => item.label)).toEqual([
+      'charted in a single', 'charted in a double', 'charted in a triple', 'charted in a bingo', 'charted in a donkey',
+      'charted in a vegas 1', 'charted in a vegas 2', 'charted in a vegas 3', 'charted in a vegas 4',
+    ]);
   });
 
   it('records button controls and saves a stopped run once when leaving', async () => {
