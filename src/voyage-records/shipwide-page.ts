@@ -1,6 +1,6 @@
 // Global records: every standing record for Woodhallow, Cursed Isles and Vampire Lairs, with screenshots
 // kept in this repository rather than on image hosts.
-// Crew-size records sit in one table with a column per record; a row opens to show who holds each one.
+// Crew-size records sit in one table with a column per record, each with who holds it.
 // Everything else goes in one table of other records, with tied holders on one line.
 import { CHEST_ICONS, chestIcon } from './page';
 import { expeditions, type ExpeditionId } from './records';
@@ -14,7 +14,7 @@ const shortDateFormat = new Intl.DateTimeFormat(undefined, { month: 'short', yea
 /** Names shown before the rest are tucked behind "+N more". */
 const NAMES_SHOWN = 8;
 
-const state = { voyage: 'woodhallow' as ExpeditionId, ocean: null as string | null, openCrew: null as number | null };
+const state = { voyage: 'woodhallow' as ExpeditionId, ocean: null as string | null };
 let renderPage = () => {};
 
 /** One record as the page shows it, whichever table it came from. */
@@ -42,7 +42,7 @@ const SHORT_LABELS: Record<string, string> = {
   'Best score in one duty report': 'Best duty report',
   'Most cursed chests in one forage': 'Most in one forage',
   'Most cursed chests in one forage, cursed chests only': 'Most in one forage, cursed chests only',
-  'Most frays in a row': 'Frays in a row',
+  'Most frays in one entry': 'Frays in one entry',
 };
 const POINTS_PER_FORAGE = 'Most points in one forage, one pirate';
 
@@ -129,9 +129,20 @@ function openViewer(shots: Shot[], start: number): void {
   dialog.showModal();
 }
 
+/** A small picture icon, drawn inline so it follows the text colour. */
+function imageIcon(): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('width', '15');
+  svg.setAttribute('height', '15');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = '<rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5.5" cy="6.5" r="1.3" fill="currentColor"/><path d="M2.5 12l3.8-3.8 2.7 2.7 1.8-1.8 2.7 2.9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>';
+  return svg;
+}
+
 /**
- * A record's proof: the first screenshot as a thumbnail and a count of the rest, which the viewer steps
- * through. A screenshot not saved here yet links to where it was hosted instead.
+ * A record's proof: a small image icon, with a count when there are several, which opens a viewer that
+ * steps through them. A screenshot not saved here yet links to where it was hosted instead.
  */
 function proof(cells: Cell[]): HTMLElement {
   const box = el('div', 'rp-shots');
@@ -153,18 +164,15 @@ function proof(cells: Cell[]): HTMLElement {
     }
   }
   if (shots.length) {
-    const img = el('img');
-    img.alt = shots[0].label;
-    img.loading = 'lazy';
-    img.src = shots[0].src;
-    box.append(button(img, 'rp-thumb', () => openViewer(shots, 0)));
-    if (shots.length > 1) {
-      const more = button(`+${shots.length - 1}`, 'rp-more', () => openViewer(shots, 1));
-      more.setAttribute('aria-label', `${shots.length - 1} more screenshots`);
-      box.append(more);
-    }
+    const open = button(imageIcon(), 'rp-proof', () => openViewer(shots, 0));
+    const what = shots.length > 1 ? `${shots.length} screenshots` : 'Screenshot';
+    open.title = what;
+    open.setAttribute('aria-label', `${what}: ${shots[0].label}`);
+    if (shots.length > 1) open.append(el('span', 'rp-proof-count', String(shots.length)));
+    box.append(open);
   }
   box.append(...(shots.length ? links.filter((link) => link.classList.contains('rp-video')) : links));
+  if (!box.childElementCount) box.remove();
   return box;
 }
 
@@ -219,63 +227,33 @@ function crewColumns(voyage: ExpeditionId, ocean: string): Column[] {
 
 function crewTable(voyage: ExpeditionId, columns: Column[]): HTMLElement {
   const sizes = [...new Set(columns.flatMap((column) => [...column.cells.keys()]))].sort((a, b) => a - b);
-  const rows = sizes.flatMap((crew) => {
-    const open = state.openCrew === crew;
-    const toggle = () => {
-      state.openCrew = open ? null : crew;
-      renderPage();
-    };
-    const row = el(
-      'tr',
-      `vr-row${open ? ' is-open' : ''}`,
-      el('td', 'rp-crew', String(crew)),
-      ...columns.map((column) => {
-        const cell = column.cells.get(crew);
-        if (!cell) return el('td', 'rp-cell rp-none', '—');
-        const hasProof = Boolean(cell.screenshot || cell.videoUrl);
-        return el(
-          'td',
-          'rp-cell',
-          el('strong', '', cell.value),
-          hasProof ? el('span', 'rp-proof-dot', '●') : null,
-          cell.date ? el('small', '', formatDate(cell.date, true)) : null,
-        );
-      }),
-      el('td', 'vr-action', el('span', 'vr-expand', open ? 'Hide' : 'Who')),
-    );
-    row.tabIndex = 0;
-    row.setAttribute('aria-expanded', String(open));
-    row.addEventListener('click', toggle);
-    row.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        toggle();
-      }
-    });
-    if (!open) return [row];
-    const cells = columns.flatMap((column) => (column.cells.get(crew) ? [column.cells.get(crew)!] : []));
-    const holders = el('td', '', el('div', 'rp-holders', ...cells.map((cell) => el(
-      'div',
-      'rp-holder',
-      el('div', 'rp-holder-head', el('span', 'rp-holder-label', labelNode(cell.label, voyage)), el('strong', '', cell.value), cell.date ? el('span', 'rp-date', formatDate(cell.date)) : null),
-      names(cell.pirates, cell.pirateScores, cell.everyone),
-      cell.notes ? el('p', 'rp-notes', cell.notes) : null,
-      proof([cell]),
-    ))));
-    holders.colSpan = columns.length + 2;
-    return [row, el('tr', 'vr-detail', holders)];
-  });
+  const rows = sizes.map((crew) => el(
+    'tr',
+    '',
+    el('td', 'rp-crew', String(crew)),
+    ...columns.map((column) => {
+      const cell = column.cells.get(crew);
+      if (!cell) return el('td', 'rp-cell rp-none', '—');
+      return el(
+        'td',
+        'rp-cell',
+        el('div', 'rp-cell-head', el('strong', 'rp-cell-value', cell.value), proof([cell]), cell.date ? el('span', 'rp-cell-date', formatDate(cell.date, true)) : null),
+        names(cell.pirates, cell.pirateScores, cell.everyone),
+        cell.notes ? el('small', 'rp-notes', cell.notes) : null,
+      );
+    }),
+  ));
   return el(
     'section',
     'vr-section',
-    el('header', 'vr-section-head', el('h3', '', 'By crew size'), el('span', 'rp-hint', '● has a screenshot · click a row to see who holds each record')),
+    el('header', 'vr-section-head', el('h3', '', 'By crew size')),
     el(
       'div',
       'vr-table-wrap',
       el(
         'table',
         `vr-table rp-table rp-crew-table${columns.length < 3 ? ' is-narrow' : ''}`,
-        el('thead', '', el('tr', '', el('th', '', 'Crew'), ...columns.map((column) => el('th', 'rp-cell', labelNode(column.label, voyage))), el('th', '', ''))),
+        el('thead', '', el('tr', '', el('th', '', 'Crew'), ...columns.map((column) => el('th', 'rp-cell', labelNode(column.label, voyage))))),
         el('tbody', '', ...rows),
       ),
     ),
@@ -291,15 +269,14 @@ function otherTable(voyage: ExpeditionId, categories: [string, SheetRecord[]][])
       const key = `${record.value}|${record.notes ?? ''}`;
       groups.set(key, [...(groups.get(key) ?? []), record]);
     }
-    const onePirate = category.endsWith(', one pirate');
-    const label = onePirate ? category.slice(0, -', one pirate'.length) : category;
+    const label = category.replace(/, one pirate$/, '');
     for (const tied of groups.values()) {
       const [first] = tied;
       const pirates = tied.flatMap((record) => record.pirates ?? []);
       rows.push(el(
         'tr',
         '',
-        el('td', 'rp-record', labelNode(label, voyage), onePirate ? el('small', '', 'One pirate') : null),
+        el('td', 'rp-record', labelNode(label, voyage)),
         el('td', 'rp-value', first.value, tied.length > 1 ? el('small', '', `${tied.length}-way tie`) : null),
         el('td', 'rp-pirates', names(pirates, tied.length === 1 ? first.pirateScores : [], first.everyone), first.notes ? el('small', 'rp-notes', first.notes) : null),
         el('td', 'rp-date', formatDate(first.date)),
@@ -334,14 +311,13 @@ function forageGrid(records: SheetRecord[]): HTMLElement {
       'div',
       'rp-forage',
       el('span', 'rp-forage-number', `Forage ${number}`),
-      el('strong', '', record.value),
-      el('span', 'rp-forage-name', record.pirates?.join(', ') ?? ''),
-      record.screenshot || record.videoUrl ? proof([toCell(`Forage ${number}`, record)]) : null,
+      el('strong', 'rp-forage-value', record.value),
+      el('span', 'rp-forage-name', record.pirates?.join(', ') ?? '', proof([toCell(`Forage ${number}`, record)])),
     ));
   return el(
     'section',
     'vr-section',
-    el('header', 'vr-section-head', el('h3', '', 'Most points in one forage'), el('span', 'rp-hint', 'One pirate, for each forage of the voyage')),
+    el('header', 'vr-section-head', el('h3', '', 'Most points in one forage')),
     el('div', 'rp-forages', ...tiles),
   );
 }
@@ -354,7 +330,6 @@ function voyageTabs(): HTMLElement {
       () => {
         state.voyage = id;
         state.ocean = null;
-        state.openCrew = null;
         renderPage();
       },
     );
@@ -368,7 +343,6 @@ function oceanPills(oceans: string[], selected: string): HTMLElement | null {
   return el('div', 'vr-pills', ...oceans.map((ocean) => {
     const pill = button(oceanName(ocean), `vr-pill${ocean === selected ? ' is-active' : ''}`, () => {
       state.ocean = ocean;
-      state.openCrew = null;
       renderPage();
     });
     pill.setAttribute('aria-pressed', String(ocean === selected));

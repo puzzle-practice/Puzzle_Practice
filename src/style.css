@@ -1999,3 +1999,112 @@ a {
 .rp-crew-table.is-narrow .vr-action {
   width: auto;
 }
+
+/* ---- Global records: names on screen, icon for proof, forage grid ---- */
+
+.rp-crew-table td.rp-cell {
+  vertical-align: top;
+  min-width: 150px;
+}
+
+.rp-cell-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  margin-bottom: 2px;
+}
+
+.rp-cell-value {
+  font-size: 1.02rem;
+}
+
+.rp-cell-date {
+  color: var(--faint);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.rp-cell .rp-names {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.rp-cell .rp-notes {
+  display: block;
+  color: var(--faint);
+  font-size: 0.72rem;
+}
+
+.rp-shots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rp-proof {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: zoom-in;
+}
+
+.rp-proof:hover,
+.rp-proof:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.rp-proof-count {
+  font-weight: 600;
+}
+
+.rp-forages {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .rp-forages {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.rp-forage {
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  padding: 10px 14px;
+}
+
+.rp-forage-number {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.rp-forage .rp-forage-value {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: var(--gold);
+  font-size: 1.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.rp-forage-name {
+  grid-column: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.9rem;
+}
