@@ -7,8 +7,8 @@
 // On Windows, drag the file onto add-voyage-records.bat in the repo folder instead.
 //
 // It saves the records on a new branch off the latest main, pushes it, and opens a pull request: with the
-// GitHub CLI (gh) when it's installed and signed in, otherwise on GitHub's page in the browser. --no-pr just
-// saves them here; --dry-run only shows what would change.
+// GitHub CLI (gh) when it's installed and signed in, else through GitHub's API with the sign-in git pushes with,
+// else on GitHub's page in the browser. --no-pr just saves them here; --dry-run only shows what would change.
 //
 // Each record it replaces is kept, with the one that beat it, in voyage-records-history.jsonl next to this
 // repo's package.json. That file stays on this computer: git ignores it.
@@ -167,18 +167,60 @@ function openInBrowser(url) {
   }
 }
 
-/** Opens the pull request with the GitHub CLI where it's installed and signed in, otherwise in the browser. */
-function openPullRequest(branch, title, body) {
+/** The GitHub sign-in git already has saved for github.com, without ever prompting for one. */
+function savedGithubToken() {
+  try {
+    const out = execFileSync('git', ['credential', 'fill'], {
+      cwd: ROOT,
+      input: 'protocol=https\nhost=github.com\n\n',
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+    });
+    return /^password=(.+)$/m.exec(out)?.[1]?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Creates the pull request through GitHub's API with git's saved sign-in, or returns null if it can't. */
+async function apiPullRequest(repo, branch, title, body) {
+  const token = savedGithubToken();
+  if (!token) return null;
+  try {
+    const response = await fetch(`https://api.github.com/repos/${repo}/pulls`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'add-voyage-records' },
+      body: JSON.stringify({ title, head: branch, base: 'main', body }),
+    });
+    if (!response.ok) return null;
+    return (await response.json()).html_url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Opens the pull request: with the GitHub CLI where it's installed and signed in, else through GitHub's API
+ * with the sign-in git uses to push, else on GitHub's new pull request page in the browser.
+ */
+async function openPullRequest(branch, title, body) {
   try {
     const url = execFileSync('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', title, '--body', body], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     console.log(`Opened a pull request: ${url.split('\n').at(-1)}`);
     return;
   } catch {
-    // No gh, or not signed in: fall back to GitHub's own page.
+    // No gh, or not signed in: try the API next.
   }
   const repo = githubRepo(git('remote', 'get-url', 'origin'));
   if (!repo) {
     console.log(`Pushed ${branch}. Open a pull request for it on GitHub.`);
+    return;
+  }
+  const opened = await apiPullRequest(repo, branch, title, body);
+  if (opened) {
+    console.log(`Opened a pull request: ${opened}`);
+    openInBrowser(opened);
     return;
   }
   const url = `https://github.com/${repo}/compare/main...${encodeURIComponent(branch)}?expand=1&title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
@@ -186,7 +228,7 @@ function openPullRequest(branch, title, body) {
   openInBrowser(url);
 }
 
-function main(args) {
+async function main(args) {
   const dryRun = args.includes('--dry-run');
   const files = args.filter((arg) => !arg.startsWith('--'));
   if (!files.length) {
@@ -216,8 +258,8 @@ function main(args) {
       process.exitCode = 1;
       continue;
     }
-    const pirates = [...new Set(submitted.flatMap((record) => record?.pirates ?? []))];
-    const source = `Sent in ${new Date().toISOString().slice(0, 10)}${pirates.length ? ` by ${pirates.slice(0, 3).join(', ')}${pirates.length > 3 ? ' and crew' : ''}` : ''}`;
+    // Each record already lists its own crew, so the source only says when and in which file it came.
+    const source = `Sent in ${new Date().toISOString().slice(0, 10)} (${basename(path)})`;
     const merged = mergeRecords(table, submitted, source);
     table = merged.records;
     for (const result of merged.results) console.log(`  ${result.text}`);
@@ -253,8 +295,13 @@ function main(args) {
     process.exitCode = 1;
     return;
   }
-  openPullRequest(pr.branch, title, `${lines.join('\n')}\n\nAdded with add-voyage-records from ${files.map((file) => basename(file)).join(', ')}. Check the screenshots before merging.`);
+  await openPullRequest(pr.branch, title, `${lines.join('\n')}\n\nAdded with add-voyage-records from ${files.map((file) => basename(file)).join(', ')}. Check the screenshots before merging.`);
   returnTo(pr.previous);
 }
 
-if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) main(process.argv.slice(2));
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
