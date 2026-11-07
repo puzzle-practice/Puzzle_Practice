@@ -117,3 +117,43 @@ export function exportRecords(runs: Run[], logs: string[], now = new Date(), rec
   }
   return { exported: now.toISOString(), logs, records: exported };
 }
+
+/** How one voyage stands against the record for its crew size: tie, beat, or neither. */
+export function standingFor(run: Run, kind: KnownRecord['kind'], records: KnownRecord[] = knownRecords): Standing | null {
+  const record = recordFor(run, kind, records);
+  if (!record) return null;
+  const value = kind === 'score' ? run.score : run.loot[0];
+  return value > record.value ? 'beat' : value === record.value ? 'tie' : null;
+}
+
+const VOYAGE_NAMES: Record<ExpeditionId, string> = { woodhallow: 'Woodhallow', cursedIsles: 'Cursed Isles', vampireLairs: 'Vampire Lairs' };
+const TOP_CHESTS: Record<ExpeditionId, string> = { woodhallow: 'dire chests', cursedIsles: 'cursed chests', vampireLairs: 'immortal chests' };
+
+/** The records in an export that tie or beat the table, ready to send to Jice. */
+export function claimedRecords(exported: RecordsExport): ExportedRecord[] {
+  return exported.records.filter((record) => record.standing === 'tie' || record.standing === 'beat');
+}
+
+/**
+ * A message to paste to Jice: one readable line per tied or beaten record, then the same records as JSON
+ * so they can go straight into known-records.json.
+ */
+export function recordsMessage(exported: RecordsExport, records: KnownRecord[] = knownRecords): string {
+  const claimed = claimedRecords(exported);
+  const lines = claimed.map((record) => {
+    const standing = records.find((known) =>
+      known.voyage === record.voyage && known.ocean === record.ocean && known.crewSize === record.crewSize && known.kind === record.kind);
+    const what = record.kind === 'score' ? 'best score' : `most ${TOP_CHESTS[record.voyage]}`;
+    const ocean = `${record.ocean[0].toUpperCase()}${record.ocean.slice(1)}`;
+    const verb = record.standing === 'beat' ? `beats ${standing?.value ?? '?'}` : 'ties the record';
+    return `- ${VOYAGE_NAMES[record.voyage]} (${ocean}), ${record.crewSize} pirates, ${what}: ${record.value} (${verb}) on ${record.time ?? record.date ?? 'an unknown date'}. Loot ${record.loot.join('/')}. Crew: ${record.pirates?.join(', ') || 'not in the log'}`;
+  });
+  const data = claimed.map(({ voyage, ocean, crewSize, kind, value, date, time, pirates, loot }) => ({ voyage, ocean, crewSize, kind, value, date, time, pirates, loot }));
+  return [
+    `Hi Jice, I've ${claimed.some((record) => record.standing === 'beat') ? 'beaten' : 'tied'} ${claimed.length === 1 ? 'a voyage record' : `${claimed.length} voyage records`} on Puzzle Practice:`,
+    ...lines,
+    '',
+    'Data for the records table:',
+    JSON.stringify(data),
+  ].join('\n');
+}

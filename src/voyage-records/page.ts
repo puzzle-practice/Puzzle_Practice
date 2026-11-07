@@ -8,7 +8,7 @@ import squirrelIcon from './media/squirrel.png?url';
 import vampireReliquaryIcon from './media/vampire_reliquary.png?url';
 import wayfinderIcon from './media/wolf_skull_wayfinder.png?url';
 import { recordsSwitch } from './switch';
-import { againstRecords, exportRecords, type AgainstRecord } from './known-records';
+import { againstRecords, claimedRecords, exportRecords, recordsMessage, standingFor, type AgainstRecord, type Standing } from './known-records';
 import {
   askToReadLog,
   canReadLog,
@@ -537,6 +537,8 @@ function recordsTable(records: CrewRecord[], id: ExpeditionId): HTMLElement {
     expand.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} details for a crew of ${record.crewSize}`);
     const sameVoyage = record.maxChests === record.maxScore;
     const chestsLabel = `Most ${topChest.toLowerCase()}s`;
+    const chestStanding = standingFor(record.maxChests, 'chests');
+    const scoreStanding = standingFor(record.maxScore, 'score');
     const row = el(
       'tr',
       `vr-row${open ? ' is-open' : ''}`,
@@ -544,18 +546,20 @@ function recordsTable(records: CrewRecord[], id: ExpeditionId): HTMLElement {
       el('td', 'vr-num', count.format(record.runs)),
       el(
         'td',
-        'vr-num',
+        `vr-num ${standingClass(chestStanding)}`,
         el('strong', 'vr-chest-value', chestIcon(CHEST_ICONS[id][0], topChest, 1.5), count.format(record.maxChests.loot[0])),
+        standingBadge(chestStanding),
         el('small', '', formatDate(record.maxChests)),
       ),
-      namesCell(record.maxChests, sameVoyage ? `Best score and ${chestsLabel.toLowerCase()}` : chestsLabel),
+      withStanding(namesCell(record.maxChests, sameVoyage ? `Best score and ${chestsLabel.toLowerCase()}` : chestsLabel), sameVoyage ? chestStanding ?? scoreStanding : chestStanding),
       el(
         'td',
-        'vr-num',
+        `vr-num ${standingClass(scoreStanding)}`,
         el('span', 'vr-score-value', lootRow(record.maxScore), el('strong', '', count.format(record.maxScore.score))),
+        standingBadge(scoreStanding),
         el('small', '', formatDate(record.maxScore)),
       ),
-      sameVoyage ? el('td', 'vr-names is-same', 'Same voyage') : namesCell(record.maxScore, 'Best score'),
+      sameVoyage ? el('td', 'vr-names is-same', 'Same voyage') : withStanding(namesCell(record.maxScore, 'Best score'), scoreStanding),
       el('td', 'vr-action', expand),
     );
     row.addEventListener('click', (event) => {
@@ -569,6 +573,24 @@ function recordsTable(records: CrewRecord[], id: ExpeditionId): HTMLElement {
     }
   }
   return el('div', 'vr-table-wrap', el('table', 'vr-table vr-records', el('thead', '', head), body));
+}
+
+/** In Records by crew size, a best that ties the global record is yellow, one that beats it red. */
+function standingClass(standing: Standing | null): string {
+  return standing === 'beat' ? 'beats-record' : standing === 'tie' ? 'ties-record' : '';
+}
+
+function standingBadge(standing: Standing | null): HTMLElement | null {
+  if (!standing) return null;
+  const badge = el('span', `vr-record-badge is-${standing}`, standing === 'beat' ? 'New record' : 'Ties record');
+  badge.title = standing === 'beat' ? 'Beats the global record for this crew size' : 'Ties the global record for this crew size';
+  return badge;
+}
+
+function withStanding(cell: HTMLElement, standing: Standing | null): HTMLElement {
+  const name = standingClass(standing);
+  if (name) cell.classList.add(name);
+  return cell;
 }
 
 /** Red beats a standing shipwide record, yellow ties one. */
@@ -673,14 +695,70 @@ function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, Aga
   );
 }
 
-/** A file of the player's records, with everything needed to add them to the shipwide table. */
-function downloadRecords(runs: Run[]): void {
-  const exported = exportRecords(withoutIgnored(runs, state.ignored), state.logs.map((log) => log.name));
+/** A file of the player's records, with everything needed to add them to the global table. */
+function downloadRecords(exported: ReturnType<typeof exportRecords>): void {
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }));
   link.download = `voyage-records-${exported.exported.slice(0, 10)}.json`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+/**
+ * Tied or beaten a global record? The popup says to contact Jice and gives a message to copy, which holds
+ * everything needed to add the record. With nothing to send, it says so and still offers the full file.
+ */
+function sendRecords(runs: Run[]): void {
+  const exported = exportRecords(withoutIgnored(runs, state.ignored), state.logs.map((log) => log.name));
+  const claimed = claimedRecords(exported);
+  const close = button('Close', 'panel-button', () => dialog.close());
+  const download = button('Download all my records', 'panel-button', () => downloadRecords(exported));
+  let body: HTMLElement[];
+  if (claimed.length) {
+    const beaten = claimed.filter((record) => record.standing === 'beat').length;
+    const tied = claimed.length - beaten;
+    const message = recordsMessage(exported);
+    const text = el('textarea', 'vr-send-message');
+    text.value = message;
+    text.readOnly = true;
+    text.rows = Math.min(12, message.split('\n').length + 1);
+    const copy = button('Copy message', 'panel-button is-primary', () => {
+      const fallback = () => {
+        text.select();
+        document.execCommand('copy');
+      };
+      const copied = navigator.clipboard ? navigator.clipboard.writeText(message).catch(fallback) : Promise.resolve(fallback());
+      void copied.then(() => { copy.textContent = 'Copied'; });
+    });
+    const summary = [beaten ? `beaten ${plural(beaten, 'global record')}` : '', tied ? `tied ${plural(tied, 'global record')}` : ''].filter(Boolean).join(' and ');
+    body = [
+      el('h2', '', `You've ${summary}!`),
+      el('p', '', 'Contact Jice in game or on Discord to get it added to the Global records, and send this message along with a screenshot if you have one.'),
+      text,
+      el('div', 'vr-send-buttons', copy, download, close),
+    ];
+  } else {
+    body = [
+      el('h2', '', 'No new global records yet'),
+      el('p', '', 'None of your bests tie or beat the Global records. Any that do show in yellow (ties) or red (beats) in Records by crew size.'),
+      el('div', 'vr-send-buttons', download, close),
+    ];
+  }
+  const dialog = el('dialog', 'vr-send', ...body);
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  dialog.querySelector<HTMLButtonElement>('.is-primary')?.focus();
+  const message = dialog.querySelector('textarea');
+  if (message) message.scrollTop = 0;
+}
+
+/** Highlighted, with a count, when this voyage's bests tie or beat a global record. */
+function sendButton(scoped: Run[], runs: Run[]): HTMLElement {
+  const exported = exportRecords(withoutIgnored(scoped, state.ignored), []);
+  const claimed = claimedRecords(exported).length;
+  return button(claimed ? `Send ${plural(claimed, 'new record')}` : 'Export records', `vr-pill${claimed ? ' vr-send-pill' : ''}`, () => sendRecords(runs));
 }
 
 function resultsSection(): HTMLElement {
@@ -724,7 +802,7 @@ function resultsSection(): HTMLElement {
           el(
             'section',
             'vr-section',
-            el('header', 'vr-section-head', el('h3', '', 'Records by crew size'), button('Export records', 'vr-pill', () => downloadRecords(runs))),
+            el('header', 'vr-section-head', el('h3', '', 'Records by crew size'), sendButton(scoped, runs)),
             records.length ? recordsTable(records, id) : null,
             notes.length ? el('p', 'vr-notes', notes.join(' ')) : null,
           ),

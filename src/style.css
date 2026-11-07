@@ -2108,3 +2108,78 @@ a {
   gap: 4px;
   font-size: 0.9rem;
 }
+
+/* Records by crew size: bests that tie (yellow) or beat (red) the global record for that crew size. */
+.vr-records td.ties-record,
+.vr-records td.ties-record strong {
+  color: var(--gold);
+}
+
+.vr-records td.beats-record,
+.vr-records td.beats-record strong {
+  color: #ff6b6b;
+}
+
+.vr-record-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  vertical-align: 2px;
+  white-space: nowrap;
+}
+
+.vr-send-pill {
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+  font-weight: 600;
+}
+
+.vr-send {
+  width: min(640px, 94vw);
+  padding: 18px 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.vr-send::backdrop {
+  background: rgb(0 0 0 / 0.65);
+}
+
+.vr-send h2 {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+}
+
+.vr-send p {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.vr-send-message {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: 0.82rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+}
+
+.vr-send-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.vr-send-buttons .panel-button {
+  flex: none;
+}

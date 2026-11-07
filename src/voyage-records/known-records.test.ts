@@ -78,3 +78,24 @@ describe('exportRecords', () => {
     expect(tableProblems(result.records)).toEqual([]);
   });
 });
+
+describe('recordsMessage', () => {
+  it('lists only tied and beaten records, readable and as data', async () => {
+    const { recordsMessage, claimedRecords } = await import('./known-records');
+    const base = { voyage: 'cursedIsles' as const, ocean: 'emerald', crewSize: 3, pirates: ['A', 'B', 'C'], source: '', loot: [140, 1, 1] as [number, number, number], time: '2026-11-03T20:00:00', date: '2026-11-03' };
+    const exported = {
+      exported: '2026-11-07T00:00:00Z',
+      logs: [],
+      records: [
+        { ...base, kind: 'chests' as const, value: 140, standing: 'beat' as const },
+        { ...base, kind: 'score' as const, value: 10, standing: null },
+      ],
+    };
+    expect(claimedRecords(exported)).toHaveLength(1);
+    const message = recordsMessage(exported);
+    expect(message).toContain('Hi Jice');
+    expect(message).toContain('Cursed Isles (Emerald), 3 pirates, most cursed chests: 140 (beats 130)');
+    expect(message).not.toContain('"kind":"score"');
+    expect(JSON.parse(message.split('\n').at(-1)!)).toHaveLength(1);
+  });
+});
