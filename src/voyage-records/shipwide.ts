@@ -21,6 +21,8 @@ export interface SheetRecord {
   screenshot?: string;
   /** Where the screenshot was hosted before it was copied here. */
   screenshotUrl?: string;
+  /** Video proof, which is left on its host. */
+  videoUrl?: string;
   notes?: string;
   source?: string;
 }

@@ -1748,3 +1748,8 @@ a {
   max-height: calc(94vh - 70px);
   margin: 0 auto;
 }
+
+.rp-video {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}

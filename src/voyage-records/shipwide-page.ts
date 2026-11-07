@@ -34,24 +34,32 @@ function formatDate(date: string | undefined): string {
 }
 
 /** A thumbnail that opens the full screenshot; a link to the old host when there's no local copy yet. */
-function screenshotCell(screenshot: string | undefined, url: string | undefined, label: string): HTMLElement {
+function outLink(label: string, url: string, className: string): HTMLAnchorElement {
+  const link = el('a', className, label);
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noreferrer';
+  link.title = url;
+  return link;
+}
+
+/**
+ * A thumbnail that opens the full screenshot. Until the screenshot is saved here, the cell links to where
+ * it was hosted instead, so dropping the file into public/voyage-records/screenshots is all it takes.
+ */
+function screenshotCell(screenshot: string | undefined, url: string | undefined, label: string, video?: string): HTMLElement {
   const cell = el('td', 'rp-shot');
-  if (screenshot) {
+  const fallback = () => (url ? outLink('Not saved yet', url, 'rp-missing') : el('span', 'rp-none', '—'));
+  if (video) cell.append(outLink('Video', video, 'rp-video'));
+  else if (screenshot) {
     const img = el('img');
-    img.src = screenshot;
     img.alt = label;
     img.loading = 'lazy';
-    cell.append(button(img, 'rp-thumb', () => openViewer(screenshot, label)));
-  } else if (url) {
-    const link = el('a', 'rp-missing', 'Not saved yet');
-    link.href = url;
-    link.target = '_blank';
-    link.rel = 'noreferrer';
-    link.title = url;
-    cell.append(link);
-  } else {
-    cell.append(el('span', 'rp-none', '—'));
-  }
+    const thumb = button(img, 'rp-thumb', () => openViewer(screenshot, label));
+    img.addEventListener('error', () => thumb.replaceWith(fallback()));
+    img.src = screenshot;
+    cell.append(thumb);
+  } else cell.append(fallback());
   return cell;
 }
 
@@ -138,7 +146,7 @@ function categorySection(category: string, records: SheetRecord[]): HTMLElement 
     el('td', 'rp-date', formatDate(record.date)),
     piratesCell(record.pirates),
     hasNotes ? el('td', 'rp-notes', record.notes ?? '') : null,
-    screenshotCell(record.screenshot, record.screenshotUrl, `${category}: ${record.value}`),
+    screenshotCell(record.screenshot, record.screenshotUrl, `${category}: ${record.value}`, record.videoUrl),
   ));
   return el(
     'section',
