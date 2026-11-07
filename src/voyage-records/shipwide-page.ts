@@ -11,8 +11,8 @@ const VOYAGES = Object.keys(expeditions) as ExpeditionId[];
 const count = new Intl.NumberFormat();
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' });
 const shortDateFormat = new Intl.DateTimeFormat(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' });
-/** Names shown before the rest are tucked behind "+N more". */
-const NAMES_SHOWN = 8;
+/** Longer lists of names are tucked away whole, behind one "N pirates" toggle, rather than cut short. */
+const NAMES_SHOWN = 12;
 
 const state = { voyage: 'woodhallow' as ExpeditionId, ocean: null as string | null };
 let renderPage = () => {};
@@ -176,19 +176,16 @@ function proof(cells: Cell[]): HTMLElement {
   return box;
 }
 
-/** Names on one line, each with their share where the sheet gives one; long lists tuck the rest away. */
+/** Names on one line, each with their share where the sheet gives one; a list of more than 12 opens on a click. */
 function names(pirates: string[] = [], scores: number[] = [], everyone: string[] = []): HTMLElement {
   const name = (pirate: string, index: number) =>
     el('span', 'rp-name', pirate, scores[index] === undefined ? null : el('span', 'rp-share', ` ${scores[index]}`));
-  const shown = pirates.length > NAMES_SHOWN + 1 ? pirates.slice(0, NAMES_SHOWN) : pirates;
-  const hidden = pirates.slice(shown.length);
-  const line = el('span', 'rp-names', ...shown.flatMap((pirate, index) => (index ? [', ', name(pirate, index)] : [name(pirate, index)])));
-  if (!pirates.length) line.append(el('span', 'rp-none', '—'));
-  const extras: HTMLElement[] = [];
-  if (hidden.length) extras.push(el('details', 'rp-extra', el('summary', '', `+${hidden.length} more`), hidden.join(', ')));
+  const list = el('span', 'rp-names', ...pirates.flatMap((pirate, index) => (index ? [', ', name(pirate, index)] : [name(pirate, index)])));
+  if (!pirates.length) list.append(el('span', 'rp-none', '—'));
+  const line = pirates.length > NAMES_SHOWN ? el('details', 'rp-extra', el('summary', '', `${pirates.length} pirates`), list) : list;
   const others = everyone.filter((pirate) => !pirates.includes(pirate));
-  if (others.length) extras.push(el('details', 'rp-extra', el('summary', '', `Everyone in the run (${everyone.length})`), everyone.join(', ')));
-  return extras.length ? el('div', 'rp-names-wrap', line, ...extras) : line;
+  if (!others.length) return line;
+  return el('div', 'rp-names-wrap', line, el('details', 'rp-extra', el('summary', '', `Everyone in the run (${everyone.length})`), everyone.join(', ')));
 }
 
 function toCell(label: string, record: SheetRecord): Cell {
