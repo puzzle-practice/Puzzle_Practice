@@ -19,7 +19,7 @@ export interface SheetRecord {
   pirates?: string[];
   /** Each pirate's own share of the record, in the same order as pirates. */
   pirateScores?: number[];
-  /** Everyone who took part, where the sheet lists more than the record holders. */
+  /** Everyone who also reached the record, on their own separate runs, where the sheet lists them. */
   everyone?: string[];
   /** Path under public/, e.g. voyage-records/screenshots/vampire/ic-hauled-r12.png. */
   screenshot?: string;

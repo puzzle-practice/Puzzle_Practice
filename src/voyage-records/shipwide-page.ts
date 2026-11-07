@@ -185,7 +185,7 @@ function names(pirates: string[] = [], scores: number[] = [], everyone: string[]
   const line = pirates.length > NAMES_SHOWN ? el('details', 'rp-extra', el('summary', '', `${pirates.length} pirates`), list) : list;
   const others = everyone.filter((pirate) => !pirates.includes(pirate));
   if (!others.length) return line;
-  return el('div', 'rp-names-wrap', line, el('details', 'rp-extra', el('summary', '', `Everyone in the run (${everyone.length})`), everyone.join(', ')));
+  return el('div', 'rp-names-wrap', line, el('details', 'rp-extra', el('summary', '', `Joint record holders (${everyone.length})`), everyone.join(', ')));
 }
 
 function toCell(label: string, record: SheetRecord): Cell {
