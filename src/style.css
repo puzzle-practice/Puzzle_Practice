@@ -1609,7 +1609,8 @@ a {
   color: var(--muted);
 }
 
-.vr-all tr.is-best td {
+/* A voyage that ties a standing shipwide record (known-records.json). */
+.vr-all tr.ties-record td {
   color: var(--gold);
 }
 
@@ -1631,7 +1632,7 @@ a {
   line-height: 1;
 }
 
-/* A voyage that holds a standing shipwide record (known-records.json). */
-.vr-all tr.is-record td {
+/* A voyage that beats one. */
+.vr-all tr.beats-record td {
   color: #ff6b6b;
 }

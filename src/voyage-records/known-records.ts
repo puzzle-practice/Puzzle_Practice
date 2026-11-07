@@ -1,7 +1,7 @@
-// The current shipwide records: the best any crew has managed, kept by hand in known-records.json.
-// A player's voyage that matches one is shown in red on the Voyage Records page.
+// The current shipwide records: the best any crew has managed, kept in known-records.json.
+// On the Voyage Records page, a player's voyage that ties one is yellow and one that beats it is red.
 import table from './known-records.json';
-import type { ExpeditionId, NewBest, Run } from './records';
+import type { ExpeditionId, Run } from './records';
 
 export interface KnownRecord {
   voyage: ExpeditionId;
@@ -11,15 +11,22 @@ export interface KnownRecord {
   /** "score" counts chests 3, 2 and 1 (1 each for Vampire Lairs); "chests" counts tier 3 chests only. */
   kind: 'score' | 'chests';
   value: number;
-  /** YYYY-MM-DD. When given, a voyage only matches within a day of it, as logs and sheets can differ on the date. */
+  /** YYYY-MM-DD, when known. */
   date?: string;
   pirates?: string[];
-  /** Where the record was read from, e.g. the sheet and tab. */
+  /** Where the record came from, e.g. the sheet and tab. */
   source?: string;
 }
 
+export type Standing = 'tie' | 'beat';
+
+/** How a voyage measures up to the standing records for its voyage, ocean and crew size. */
+export interface AgainstRecord {
+  score: Standing | null;
+  chests: Standing | null;
+}
+
 const VOYAGES: ExpeditionId[] = ['woodhallow', 'cursedIsles', 'vampireLairs'];
-const DAY = 86_400_000;
 
 /** Every problem with the table, so a bad edit fails the tests instead of quietly matching nothing. */
 export function tableProblems(records: unknown[]): string[] {
@@ -43,20 +50,26 @@ export function tableProblems(records: unknown[]): string[] {
 
 export const knownRecords = table.records as KnownRecord[];
 
-/** The player's voyages that set a record still standing in the table. */
-export function currentRecords(runs: Iterable<Run>, records: KnownRecord[] = knownRecords): Map<Run, NewBest> {
-  const matches = new Map<Run, NewBest>();
+export function recordFor(run: Run, kind: KnownRecord['kind'], records: KnownRecord[] = knownRecords): KnownRecord | undefined {
+  return records.find((record) =>
+    record.kind === kind && record.voyage === run.expedition && record.ocean === run.ocean && record.crewSize === run.crewSize);
+}
+
+/**
+ * The player's voyages that tie or beat a standing record. A crew size with no record in the table
+ * has nothing to tie or beat.
+ */
+export function againstRecords(runs: Iterable<Run>, records: KnownRecord[] = knownRecords): Map<Run, AgainstRecord> {
+  const results = new Map<Run, AgainstRecord>();
   for (const run of runs) {
-    const holds = (kind: KnownRecord['kind']) => records.some((record) =>
-      record.kind === kind &&
-      record.voyage === run.expedition &&
-      record.ocean === run.ocean &&
-      record.crewSize === run.crewSize &&
-      record.value === (kind === 'score' ? run.score : run.loot[0]) &&
-      (record.date === undefined || (run.startedAt !== null && Math.abs(Date.parse(record.date) - run.startedAt) < 2 * DAY)));
-    const score = holds('score');
-    const chests = holds('chests');
-    if (score || chests) matches.set(run, { score, chests });
+    const standing = (kind: KnownRecord['kind']): Standing | null => {
+      const record = recordFor(run, kind, records);
+      if (!record) return null;
+      const value = kind === 'score' ? run.score : run.loot[0];
+      return value > record.value ? 'beat' : value === record.value ? 'tie' : null;
+    };
+    const result = { score: standing('score'), chests: standing('chests') };
+    if (result.score || result.chests) results.set(run, result);
   }
-  return matches;
+  return results;
 }

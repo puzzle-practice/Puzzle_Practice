@@ -7,7 +7,7 @@ import serpentIcon from './media/serpent.png?url';
 import squirrelIcon from './media/squirrel.png?url';
 import vampireReliquaryIcon from './media/vampire_reliquary.png?url';
 import wayfinderIcon from './media/wolf_skull_wayfinder.png?url';
-import { currentRecords } from './known-records';
+import { againstRecords, type AgainstRecord } from './known-records';
 import {
   askToReadLog,
   canReadLog,
@@ -570,6 +570,12 @@ function recordsTable(records: CrewRecord[], id: ExpeditionId): HTMLElement {
   return el('div', 'vr-table-wrap', el('table', 'vr-table vr-records', el('thead', '', head), body));
 }
 
+/** Red beats a standing shipwide record, yellow ties one. */
+function recordClass(against: AgainstRecord | undefined): string {
+  if (!against) return '';
+  return against.score === 'beat' || against.chests === 'beat' ? 'beats-record' : 'ties-record';
+}
+
 function newBestMarks(run: Run, best: NewBest | undefined): HTMLElement | null {
   if (!best) return null;
   const topChest = expeditions[run.expedition].chests[0];
@@ -585,7 +591,7 @@ function newBestMarks(run: Run, best: NewBest | undefined): HTMLElement | null {
   );
 }
 
-function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, NewBest>): HTMLElement {
+function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, AgainstRecord>): HTMLElement {
   const sorted = [...runs].sort(state.sort === 'score'
     ? (a, b) => b.score - a.score
     : (a, b) => (b.startedAt ?? -Infinity) - (a.startedAt ?? -Infinity));
@@ -621,7 +627,7 @@ function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, New
     : null;
   const rows = shown.map((run) => el(
     'tr',
-    records.has(run) ? 'is-record' : bests.has(run) ? 'is-best' : '',
+    recordClass(records.get(run)),
     el('td', 'vr-date', formatDate(run), newBestMarks(run, bests.get(run))),
     el('td', 'vr-num', run.crewSize === null ? '?' : String(run.crewSize)),
     el('td', 'vr-loot-cell', lootRow(run)),
@@ -711,7 +717,7 @@ function resultsSection(): HTMLElement {
             records.length ? recordsTable(records, id) : null,
             notes.length ? el('p', 'vr-notes', notes.join(' ')) : null,
           ),
-          allVoyages(scoped, personalBests(counted), currentRecords(scoped)),
+          allVoyages(scoped, personalBests(counted), againstRecords(scoped)),
         ]
       : [el('p', 'vr-empty', `No ${expeditions[id].name} voyages in these logs. If you've sailed one, add the log from the folder the game saves to now, as older logs may stop before it.`)]),
   );
