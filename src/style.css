@@ -1753,3 +1753,26 @@ a {
   font-size: 0.82rem;
   white-space: nowrap;
 }
+
+.rp-shots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rp-more {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: zoom-in;
+}
+
+.rp-more:hover,
+.rp-more:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+  outline: none;
+}

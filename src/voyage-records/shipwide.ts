@@ -23,6 +23,8 @@ export interface SheetRecord {
   screenshotUrl?: string;
   /** Video proof, which is left on its host. */
   videoUrl?: string;
+  /** Further screenshots of the same record, e.g. the rest of an imgur album. */
+  more?: string[];
   notes?: string;
   source?: string;
 }
@@ -38,7 +40,7 @@ interface SheetFile {
   sources: SheetSource[];
   records: SheetRecord[];
   /** Screenshots the crew-size records in known-records.json point to, by record key. */
-  screenshots?: Record<string, { screenshot?: string; screenshotUrl?: string }>;
+  screenshots?: Record<string, { screenshot?: string; screenshotUrl?: string; more?: string[] }>;
 }
 
 const data = sheet as SheetFile;
@@ -54,8 +56,8 @@ export function recordKey(record: Pick<KnownRecord, 'voyage' | 'ocean' | 'crewSi
 
 export interface CrewSizeRow {
   crewSize: number;
-  score?: KnownRecord & { screenshot?: string; screenshotUrl?: string };
-  chests?: KnownRecord & { screenshot?: string; screenshotUrl?: string };
+  score?: KnownRecord & { screenshot?: string; screenshotUrl?: string; more?: string[] };
+  chests?: KnownRecord & { screenshot?: string; screenshotUrl?: string; more?: string[] };
 }
 
 /** Best score and most tier 3 chests side by side, one row per crew size, smallest crew first. */

@@ -47,7 +47,7 @@ function outLink(label: string, url: string, className: string): HTMLAnchorEleme
  * A thumbnail that opens the full screenshot. Until the screenshot is saved here, the cell links to where
  * it was hosted instead, so dropping the file into public/voyage-records/screenshots is all it takes.
  */
-function screenshotCell(screenshot: string | undefined, url: string | undefined, label: string, video?: string): HTMLElement {
+function screenshotCell(screenshot: string | undefined, url: string | undefined, label: string, video?: string, more: string[] = []): HTMLElement {
   const cell = el('td', 'rp-shot');
   const fallback = () => (url ? outLink('Not saved yet', url, 'rp-missing') : el('span', 'rp-none', '—'));
   if (video) cell.append(outLink('Video', video, 'rp-video'));
@@ -58,7 +58,8 @@ function screenshotCell(screenshot: string | undefined, url: string | undefined,
     const thumb = button(img, 'rp-thumb', () => openViewer(screenshot, label));
     img.addEventListener('error', () => thumb.replaceWith(fallback()));
     img.src = screenshot;
-    cell.append(thumb);
+    const extras = more.map((src, index) => button(`+${index + 1}`, 'rp-more', () => openViewer(src, `${label} (${index + 2})`)));
+    cell.append(extras.length ? el('div', 'rp-shots', thumb, ...extras) : thumb);
   } else cell.append(fallback());
   return cell;
 }
@@ -96,11 +97,11 @@ function crewSizeSection(voyage: ExpeditionId, rows: CrewSizeRow[]): HTMLElement
       el('td', 'vr-num', score ? count.format(score.value) : '—'),
       el('td', 'rp-date', formatDate(score?.date)),
       piratesCell(score?.pirates),
-      screenshotCell(score?.screenshot, score?.screenshotUrl, `${crewSize} pirates, best score ${score?.value ?? ''}`),
+      screenshotCell(score?.screenshot, score?.screenshotUrl, `${crewSize} pirates, best score ${score?.value ?? ''}`, undefined, score?.more),
       el('td', 'vr-num rp-split', chests ? count.format(chests.value) : '—'),
       el('td', 'rp-date', formatDate(chests?.date)),
       piratesCell(chests?.pirates),
-      screenshotCell(chests?.screenshot, chests?.screenshotUrl, `${crewSize} pirates, most ${topChest.toLowerCase()}s ${chests?.value ?? ''}`),
+      screenshotCell(chests?.screenshot, chests?.screenshotUrl, `${crewSize} pirates, most ${topChest.toLowerCase()}s ${chests?.value ?? ''}`, undefined, chests?.more),
     ));
   return el(
     'section',
@@ -146,7 +147,7 @@ function categorySection(category: string, records: SheetRecord[]): HTMLElement 
     el('td', 'rp-date', formatDate(record.date)),
     piratesCell(record.pirates),
     hasNotes ? el('td', 'rp-notes', record.notes ?? '') : null,
-    screenshotCell(record.screenshot, record.screenshotUrl, `${category}: ${record.value}`, record.videoUrl),
+    screenshotCell(record.screenshot, record.screenshotUrl, `${category}: ${record.value}`, record.videoUrl, record.more),
   ));
   return el(
     'section',
