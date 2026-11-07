@@ -27,15 +27,16 @@ describe('mergeRecords', () => {
     const { records, results } = mergeRecords(table, [
       sent({ kind: 'chests', value: 140 }),
       sent({ kind: 'score', value: 1270 }),
-      sent({ crewSize: 9, kind: 'score', value: 5 }),
+      sent({ crewSize: 1, kind: 'score', value: 5 }),
       sent({ kind: 'score', value: 12 }),
       { voyage: 'moon', ocean: 'emerald', crewSize: 1, kind: 'score', value: 1 },
+      sent({ crewSize: 8, kind: 'score', value: 99999 }),
     ], 'Sent in');
     expect(records[0]).toEqual({ voyage: 'cursedIsles', ocean: 'emerald', crewSize: 3, kind: 'chests', value: 140, date: '2026-11-03', pirates: ['A', 'B', 'C'], source: 'Sent in' });
     expect(records[1].value).toBe(1270);
-    expect(records[2]).toMatchObject({ crewSize: 9, value: 5 });
+    expect(records[2]).toMatchObject({ crewSize: 1, value: 5 });
     expect(records).toHaveLength(3);
-    expect(results.map((result) => result.outcome)).toEqual(['beaten', 'kept', 'added', 'kept', 'skipped']);
+    expect(results.map((result) => result.outcome)).toEqual(['beaten', 'kept', 'added', 'kept', 'skipped', 'skipped']);
     expect(results[1].text).toContain('ties the record');
     expect(table[0].value).toBe(130);
   });

@@ -16,6 +16,8 @@ export const TABLE = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 
 const VOYAGES = ['woodhallow', 'cursedIsles', 'vampireLairs'];
 const VOYAGE_NAMES = { woodhallow: 'Woodhallow', cursedIsles: 'Cursed Isles', vampireLairs: 'Vampire Lairs' };
 const TOP_CHESTS = { woodhallow: 'dire chests', cursedIsles: 'cursed chests', vampireLairs: 'immortal chests' };
+/** As MAX_SENT_CREW in src/voyage-records/known-records.ts: bigger crews' records aren't kept from sends. */
+const MAX_CREW = { woodhallow: 12, cursedIsles: 7, vampireLairs: 12 };
 const MARKER = 'Data for the records table:';
 
 /**
@@ -45,6 +47,7 @@ export function recordProblem(record) {
   if (!VOYAGES.includes(record.voyage)) return `unknown voyage "${record.voyage}"`;
   if (typeof record.ocean !== 'string' || !/^[a-z]+$/.test(record.ocean)) return `unknown ocean "${record.ocean}"`;
   if (!Number.isInteger(record.crewSize) || record.crewSize < 1) return 'crew size is missing';
+  if (record.crewSize > MAX_CREW[record.voyage]) return `crews over ${MAX_CREW[record.voyage]} aren't sent in (${record.crewSize} pirates)`;
   if (record.kind !== 'score' && record.kind !== 'chests') return `unknown kind "${record.kind}"`;
   if (!Number.isInteger(record.value) || record.value < 0) return 'value is not a whole number';
   if (record.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(record.date)) return 'date is not YYYY-MM-DD';
