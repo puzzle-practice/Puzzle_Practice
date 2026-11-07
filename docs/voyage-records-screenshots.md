@@ -4,13 +4,10 @@ imgur blocks downloads from your region, so none of these could be saved automat
 
 A screenshot shows up on the page as soon as its file is there. Until then the page links to the old imgur address.
 
-4 screenshots still to save (52 are already on the page). Album links (imgur.com/a/...) may hold more than one image; save the one that shows the record, or name extras `-2`, `-3`.
+1 screenshot still to save. Every other linked record has its screenshot on the page. Album links (imgur.com/a/...) may hold more than one image; save the one that shows the record, or name extras `-2`, `-3`.
 
 | Save as | Record | Original link |
 |---|---|---|
-| `vampire-lairs/most-chests-entry-6.png` | Vampire Lairs, 6 pirates, most chests | https://imgur.com/a/pxBLH1x |
-| `vampire-lairs/most-chests-entry-5.png` | Vampire Lairs, 5 pirates, most chests | https://imgur.com/a/033yBYR |
-| `vampire-lairs/most-chests-entry-4.png` | Vampire Lairs, 4 pirates, most chests | https://imgur.com/a/Ga8qJ1I |
 | `vampire-lairs/gift-individual-technitium.png` | Most 🎁 in one entry, one pirate: 14 (Technitium) | https://gyazo.com/7f8c62ab2222ce7694a2e395d66f60be |
 
 ## Records with no screenshot on the sheet
