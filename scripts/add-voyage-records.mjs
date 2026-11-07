@@ -6,13 +6,18 @@
 //   npm run add-records -- path/to/message.txt --dry-run
 // On Windows, drag the file onto add-voyage-records.bat in the repo folder instead.
 //
+// It saves the records on a new branch off the latest main, pushes it, and opens a pull request: with the
+// GitHub CLI (gh) when it's installed and signed in, otherwise on GitHub's page in the browser. --no-pr just
+// saves them here; --dry-run only shows what would change.
+//
 // Each record it replaces is kept, with the one that beat it, in voyage-records-history.jsonl next to this
 // repo's package.json. That file stays on this computer: git ignores it.
 //
 // A record is added when the table has nothing for its voyage, ocean, crew size and kind, and replaces the
 // table's record when it beats it. A tie or a lower value is left out, and the reason is printed.
+import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -120,16 +125,86 @@ export function formatTable(records) {
   return `{\n  "records": [\n${records.map((record) => `    ${JSON.stringify(record)}`).join(',\n')}\n  ]\n}\n`;
 }
 
+function git(...args) {
+  return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
+/** owner/repo from a GitHub remote URL, or null. */
+export function githubRepo(url) {
+  const match = /github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(url.trim());
+  return match ? `${match[1]}/${match[2]}` : null;
+}
+
+/** A new branch off the latest main for the records, or a reason it can't be made. */
+function startBranch() {
+  if (git('status', '--porcelain')) throw new Error(`there are uncommitted changes in ${ROOT}`);
+  const previous = git('rev-parse', '--abbrev-ref', 'HEAD');
+  git('fetch', 'origin', 'main');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+  const branch = `records/${stamp}`;
+  git('checkout', '-b', branch, 'origin/main');
+  return { branch, previous };
+}
+
+/** Back to the branch the run started on, brought up to date when it's main. */
+function returnTo(previous) {
+  git('checkout', previous);
+  if (previous === 'main') {
+    try {
+      git('merge', '--ff-only', 'origin/main');
+    } catch {
+      // main has its own commits: leave it as it is.
+    }
+  }
+}
+
+function openInBrowser(url) {
+  const [command, args] = process.platform === 'win32' ? ['explorer', [url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try {
+    spawn(command, args, { detached: true, stdio: 'ignore' }).unref();
+  } catch {
+    // The URL is printed too.
+  }
+}
+
+/** Opens the pull request with the GitHub CLI where it's installed and signed in, otherwise in the browser. */
+function openPullRequest(branch, title, body) {
+  try {
+    const url = execFileSync('gh', ['pr', 'create', '--base', 'main', '--head', branch, '--title', title, '--body', body], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    console.log(`Opened a pull request: ${url.split('\n').at(-1)}`);
+    return;
+  } catch {
+    // No gh, or not signed in: fall back to GitHub's own page.
+  }
+  const repo = githubRepo(git('remote', 'get-url', 'origin'));
+  if (!repo) {
+    console.log(`Pushed ${branch}. Open a pull request for it on GitHub.`);
+    return;
+  }
+  const url = `https://github.com/${repo}/compare/main...${encodeURIComponent(branch)}?expand=1&title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`;
+  console.log(`Pushed ${branch}. Finish the pull request in your browser:\n${url}`);
+  openInBrowser(url);
+}
+
 function main(args) {
   const dryRun = args.includes('--dry-run');
   const files = args.filter((arg) => !arg.startsWith('--'));
   if (!files.length) {
-    console.error('Usage: npm run add-records -- <export .json or message .txt> [more files] [--dry-run]');
+    console.error('Usage: npm run add-records -- <export .json or message .txt> [more files] [--dry-run] [--no-pr]');
     process.exit(1);
   }
+  // Unless told not to, the records go on a new branch off the latest main and into a pull request.
+  let pr = null;
+  if (!dryRun && !args.includes('--no-pr')) {
+    try {
+      pr = startBranch();
+    } catch (error) {
+      console.log(`No pull request this time (${error.message.split('\n')[0]}). Records will only be saved here.`);
+    }
+  }
   let table = JSON.parse(readFileSync(TABLE, 'utf8')).records;
-  let changed = 0;
   let history = '';
+  const changes = [];
   for (const file of files) {
     const path = resolve(file);
     console.log(`\n${path}`);
@@ -147,18 +222,39 @@ function main(args) {
     table = merged.records;
     for (const result of merged.results) console.log(`  ${result.text}`);
     history += historyLines(merged.results, path);
-    changed += merged.results.filter((result) => result.outcome === 'added' || result.outcome === 'beaten').length;
+    changes.push(...merged.results.filter((result) => result.outcome === 'added' || result.outcome === 'beaten'));
   }
-  if (!changed) {
-    console.log('\nNothing new to add.');
-  } else if (dryRun) {
-    console.log(`\n${changed} record${changed === 1 ? '' : 's'} would change. Run again without --dry-run to save.`);
-  } else {
-    writeFileSync(TABLE, formatTable(table));
-    appendFileSync(HISTORY, history);
-    console.log(`\nSaved ${changed} record${changed === 1 ? '' : 's'} to src/voyage-records/known-records.json. Commit and push to put them live.`);
-    console.log(`The records they replaced are kept in ${HISTORY}.`);
+  const changed = changes.length;
+  const count = `${changed} record${changed === 1 ? '' : 's'}`;
+  if (!changed || dryRun) {
+    console.log(changed ? `\n${count} would change. Run again without --dry-run to save.` : '\nNothing new to add.');
+    if (pr) {
+      returnTo(pr.previous);
+      git('branch', '-D', pr.branch);
+    }
+    return;
   }
+  writeFileSync(TABLE, formatTable(table));
+  appendFileSync(HISTORY, history);
+  console.log(`\nSaved ${count} to src/voyage-records/known-records.json.`);
+  console.log(`The records they replaced are kept in ${HISTORY}.`);
+  if (!pr) {
+    console.log('Commit and push to put them live.');
+    return;
+  }
+  const title = `Voyage records: ${changed === 1 ? 'a new record' : `${changed} new records`}`;
+  const lines = changes.map((change) => `- ${change.text.replace(/^(Added|Beaten)\s+/, '')}`);
+  try {
+    git('add', TABLE);
+    git('commit', '-m', `${title}\n\n${lines.join('\n')}`);
+    git('push', '-u', 'origin', pr.branch);
+  } catch (error) {
+    console.error(`\nCouldn't commit and push (${error.message.split('\n')[0]}). The records are saved on branch ${pr.branch}; push it yourself.`);
+    process.exitCode = 1;
+    return;
+  }
+  openPullRequest(pr.branch, title, `${lines.join('\n')}\n\nAdded with add-voyage-records from ${files.map((file) => basename(file)).join(', ')}. Check the screenshots before merging.`);
+  returnTo(pr.previous);
 }
 
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) main(process.argv.slice(2));

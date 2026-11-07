@@ -53,3 +53,10 @@ it('keeps the replaced record in the history, one line per change', () => {
   expect(lines[0]).toMatchObject({ changedAt: '2026-11-07T12:00:00.000Z', outcome: 'beaten', from: 'squelchy.txt', record: { value: 140 }, previous: table[0] });
   expect(lines[1]).toMatchObject({ outcome: 'added', record: { crewSize: 1, value: 5 }, previous: null });
 });
+
+it('finds the GitHub repo in a remote URL', async () => {
+  const { githubRepo } = await import('./add-voyage-records.mjs');
+  expect(githubRepo('https://github.com/puzzle-practice/Puzzle_Practice.git')).toBe('puzzle-practice/Puzzle_Practice');
+  expect(githubRepo('git@github.com:puzzle-practice/puzzle_practice')).toBe('puzzle-practice/puzzle_practice');
+  expect(githubRepo('https://example.com/x/y')).toBe(null);
+});
