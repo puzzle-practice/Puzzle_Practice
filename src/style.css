@@ -2183,3 +2183,90 @@ a {
 .vr-send-buttons .panel-button {
   flex: none;
 }
+
+/* Global records: the symbols and gold values My records uses. */
+.rp-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rp-symbol {
+  font-size: 0.95em;
+  line-height: 1;
+}
+
+.rp-tile-symbol {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.rp .vr-tile-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp .rp-cell-value,
+.rp .rp-value strong {
+  color: var(--gold);
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.rp .rp-cell .rp-names,
+.rp .rp-pirates .rp-names {
+  color: var(--text);
+}
+
+.rp .rp-share {
+  color: var(--gold);
+  opacity: 0.8;
+}
+
+.rp-crew {
+  text-align: center;
+}
+
+.rp-crew-size {
+  display: block;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.rp-crew small {
+  color: var(--faint);
+  font-size: 0.68rem;
+  font-weight: 400;
+}
+
+.rp-tie {
+  margin-left: 6px;
+  color: var(--gold);
+}
+
+.rp .vr-pickers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.rp .vr-tiles {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 760px) {
+  .rp .vr-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.rp-big-cell {
+  text-align: center;
+}
+
+.rp-big-crews:not([hidden]) {
+  display: table-row-group;
+}

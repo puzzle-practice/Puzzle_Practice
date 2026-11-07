@@ -57,13 +57,13 @@ export const CHEST_ICONS: Record<ExpeditionId, [string, string, string]> = {
   vampireLairs: ['vampirate-chest-large', 'vampirate-chest-medium', 'vampirate-chest-small'],
 };
 /** The familiar each voyage's tier 3 chests can hold. */
-const FAMILIARS: Record<ExpeditionId, { name: string; icon: string }> = {
+export const FAMILIARS: Record<ExpeditionId, { name: string; icon: string }> = {
   woodhallow: { name: 'squirrels', icon: squirrelIcon },
   cursedIsles: { name: 'serpents', icon: serpentIcon },
   vampireLairs: { name: 'bats', icon: batIcon },
 };
 /** The item that leads a crew to each voyage. */
-const VOYAGE_ITEMS: Record<ExpeditionId, string> = {
+export const VOYAGE_ITEMS: Record<ExpeditionId, string> = {
   woodhallow: wayfinderIcon,
   cursedIsles: cursedChartIcon,
   vampireLairs: vampireReliquaryIcon,
@@ -407,14 +407,14 @@ function oceanPicker(oceans: string[], selected: string): HTMLElement | null {
   }));
 }
 
-function itemImage(url: string): HTMLElement {
+export function itemImage(url: string): HTMLElement {
   const image = el('img', 'vr-familiar');
   image.src = url;
   image.alt = '';
   return image;
 }
 
-function tile(label: string, value: string, icon: HTMLElement | null = null): HTMLElement {
+export function tile(label: string, value: string, icon: HTMLElement | null = null): HTMLElement {
   return el(
     'div',
     'vr-tile',

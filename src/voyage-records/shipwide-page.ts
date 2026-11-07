@@ -2,9 +2,10 @@
 // kept in this repository rather than on image hosts.
 // Crew-size records sit in one table with a column per record, each with who holds it.
 // Everything else goes in one table of other records, with tied holders on one line.
-import { CHEST_ICONS, chestIcon } from './page';
+import { CHEST_ICONS, FAMILIARS, VOYAGE_ITEMS, chestIcon, itemImage, tile } from './page';
 import { expeditions, type ExpeditionId } from './records';
-import { crewSizeRows, oceansFor, otherCategories, sheetFetched, sheetSources, type SheetRecord } from './shipwide';
+import { knownRecords } from './known-records';
+import { crewSizeRows, oceansFor, otherCategories, sheetFetched, sheetRecords, sheetSources, type SheetRecord } from './shipwide';
 import { recordsSwitch } from './switch';
 
 const VOYAGES = Object.keys(expeditions) as ExpeditionId[];
@@ -13,6 +14,8 @@ const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', tim
 const shortDateFormat = new Intl.DateTimeFormat(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' });
 /** Longer lists of names are tucked away whole, behind one "N pirates" toggle, rather than cut short. */
 const NAMES_SHOWN = 12;
+/** Crews bigger than this are tucked behind a Show button in the crew-size table, and left out of the headline tiles. */
+const BIG_CREW = 12;
 
 const state = { voyage: 'woodhallow' as ExpeditionId, ocean: null as string | null };
 let renderPage = () => {};
@@ -74,6 +77,25 @@ function labelNode(text: string, voyage: ExpeditionId): Node {
   const [before, after] = text.split('🎁');
   const chests = el('span', 'rp-label-chests', ...CHEST_ICONS[voyage].map((name, index) => chestIcon(name, expeditions[voyage].chests[index], 1)));
   return el('span', 'rp-label', before, chests, after);
+}
+
+/** A small symbol for each kind of record, so the tables scan at a glance. */
+function categoryIcon(label: string, voyage: ExpeditionId): HTMLElement | null {
+  const emoji = (symbol: string) => el('span', 'rp-symbol', symbol);
+  if (label.includes('🎁')) return null;
+  if (/immortal|chest|forage/i.test(label)) return chestIcon(CHEST_ICONS[voyage][0], expeditions[voyage].chests[0], 1);
+  if (/fray/i.test(label)) return emoji('⚔️');
+  if (/duty report/i.test(label)) return emoji('📜');
+  if (/carpentry|holes/i.test(label)) return emoji('🔨');
+  if (/proof/i.test(label)) return emoji('🛡️');
+  if (/fastest|time/i.test(label)) return emoji('⏱️');
+  if (/score/i.test(label)) return emoji('🏆');
+  return emoji('🏅');
+}
+
+/** A record's heading with its symbol in front. */
+function headingNode(label: string, voyage: ExpeditionId): HTMLElement {
+  return el('span', 'rp-heading', categoryIcon(label, voyage), labelNode(label, voyage));
 }
 
 function outLink(label: string, url: string, className: string): HTMLAnchorElement {
@@ -224,10 +246,10 @@ function crewColumns(voyage: ExpeditionId, ocean: string): Column[] {
 
 function crewTable(voyage: ExpeditionId, columns: Column[]): HTMLElement {
   const sizes = [...new Set(columns.flatMap((column) => [...column.cells.keys()]))].sort((a, b) => a - b);
-  const rows = sizes.map((crew) => el(
+  const row = (crew: number) => el(
     'tr',
     '',
-    el('td', 'rp-crew', String(crew)),
+    el('td', 'rp-crew', el('span', 'rp-crew-size', String(crew)), el('small', '', crew === 1 ? 'pirate' : 'pirates')),
     ...columns.map((column) => {
       const cell = column.cells.get(crew);
       if (!cell) return el('td', 'rp-cell rp-none', '—');
@@ -239,7 +261,20 @@ function crewTable(voyage: ExpeditionId, columns: Column[]): HTMLElement {
         cell.notes ? el('small', 'rp-notes', cell.notes) : null,
       );
     }),
-  ));
+  );
+  const big = sizes.filter((crew) => crew > BIG_CREW);
+  const bigRows = el('tbody', 'rp-big-crews', ...big.map(row));
+  bigRows.hidden = true;
+  const toggleLabel = () => `${bigRows.hidden ? 'Show' : 'Hide'} ${big.length} larger crew${big.length === 1 ? '' : 's'} (${BIG_CREW + 1} to ${big[big.length - 1]} pirates)`;
+  const toggle = button('', 'vr-pill rp-big-toggle', () => {
+    bigRows.hidden = !bigRows.hidden;
+    toggle.textContent = toggleLabel();
+    toggle.setAttribute('aria-expanded', String(!bigRows.hidden));
+  });
+  toggle.textContent = toggleLabel();
+  toggle.setAttribute('aria-expanded', 'false');
+  const toggleRow = el('tbody', '', el('tr', '', Object.assign(el('td', 'rp-big-cell', toggle), { colSpan: columns.length + 1 })));
+  const rows = [el('tbody', '', ...sizes.filter((crew) => crew <= BIG_CREW).map(row)), ...(big.length ? [toggleRow, bigRows] : [])];
   return el(
     'section',
     'vr-section',
@@ -250,8 +285,8 @@ function crewTable(voyage: ExpeditionId, columns: Column[]): HTMLElement {
       el(
         'table',
         `vr-table rp-table rp-crew-table${columns.length < 3 ? ' is-narrow' : ''}`,
-        el('thead', '', el('tr', '', el('th', '', 'Crew'), ...columns.map((column) => el('th', 'rp-cell', labelNode(column.label, voyage))))),
-        el('tbody', '', ...rows),
+        el('thead', '', el('tr', '', el('th', '', 'Crew'), ...columns.map((column) => el('th', 'rp-cell', headingNode(column.label, voyage))))),
+        ...rows,
       ),
     ),
   );
@@ -273,8 +308,8 @@ function otherTable(voyage: ExpeditionId, categories: [string, SheetRecord[]][])
       rows.push(el(
         'tr',
         '',
-        el('td', 'rp-record', labelNode(label, voyage)),
-        el('td', 'rp-value', first.value, tied.length > 1 ? el('small', '', `${tied.length}-way tie`) : null),
+        el('td', 'rp-record', headingNode(label, voyage)),
+        el('td', 'rp-value', el('strong', '', first.value), tied.length > 1 ? el('span', 'vr-record-badge rp-tie', `${tied.length}-way tie`) : null),
         el('td', 'rp-pirates', names(pirates, tied.length === 1 ? first.pirateScores : [], first.everyone), first.notes ? el('small', 'rp-notes', first.notes) : null),
         el('td', 'rp-date', formatDate(first.date)),
         el('td', 'rp-shot', proof(tied.map((record) => toCell(category, record)))),
@@ -319,10 +354,20 @@ function forageGrid(records: SheetRecord[]): HTMLElement {
   );
 }
 
+function recordCount(voyage: ExpeditionId): number {
+  return knownRecords.filter((record) => record.voyage === voyage).length + sheetRecords.filter((record) => record.voyage === voyage).length;
+}
+
 function voyageTabs(): HTMLElement {
   return el('nav', 'vr-tabs', ...VOYAGES.map((id) => {
+    const amount = recordCount(id);
     const tab = button(
-      el('span', 'vr-tab-inner', chestIcon(CHEST_ICONS[id][0], ''), el('span', 'vr-tab-text', el('strong', '', expeditions[id].name))),
+      el(
+        'span',
+        'vr-tab-inner',
+        chestIcon(CHEST_ICONS[id][0], ''),
+        el('span', 'vr-tab-text', el('strong', '', expeditions[id].name), el('small', '', `${count.format(amount)} record${amount === 1 ? '' : 's'}`)),
+      ),
       `vr-tab${id === state.voyage ? ' is-active' : ''}`,
       () => {
         state.voyage = id;
@@ -333,6 +378,34 @@ function voyageTabs(): HTMLElement {
     tab.setAttribute('aria-pressed', String(id === state.voyage));
     return tab;
   }));
+}
+
+/** The headline records for a voyage, in the same tiles My records uses. */
+function summaryTiles(voyage: ExpeditionId, ocean: string): HTMLElement {
+  const rows = crewSizeRows(voyage, ocean).filter((row) => row.crewSize <= BIG_CREW);
+  const topChest = expeditions[voyage].chests[0];
+  const best = (kind: 'score' | 'chests') => rows.map((row) => row[kind]).filter((record) => record !== undefined).sort((a, b) => b.value - a.value)[0];
+  const withNote = (node: HTMLElement, note: string) => {
+    if (note) node.append(el('span', 'vr-tile-note', note));
+    return node;
+  };
+  const crewNote = (record?: { crewSize: number }) => (record ? `${record.crewSize} pirate crew` : '');
+  const chests = best('chests');
+  const score = best('score');
+  const holders = new Map<string, number>();
+  const sheet = sheetRecords.filter((record) => record.voyage === voyage && record.ocean === ocean);
+  for (const record of [...rows.flatMap((row) => [row.score, row.chests]), ...sheet]) {
+    for (const pirate of new Set(record?.pirates ?? [])) holders.set(pirate, (holders.get(pirate) ?? 0) + 1);
+  }
+  const [leader, held] = [...holders].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0] ?? ['—', 0];
+  return el(
+    'div',
+    'vr-tiles',
+    withNote(tile(`Most ${topChest.toLowerCase()}s`, chests ? count.format(chests.value) : '—', chestIcon(CHEST_ICONS[voyage][0], topChest)), crewNote(chests)),
+    withNote(tile('Best score', score ? count.format(score.value) : '—', itemImage(VOYAGE_ITEMS[voyage])), crewNote(score)),
+    withNote(tile('Record holders', count.format(holders.size), itemImage(FAMILIARS[voyage].icon)), 'pirates on the board'),
+    withNote(tile('Most records held', leader, el('span', 'rp-tile-symbol', '👑')), held ? `${held} records` : ''),
+  );
 }
 
 function oceanPills(oceans: string[], selected: string): HTMLElement | null {
@@ -379,8 +452,8 @@ export function showShipwideRecords(app: HTMLElement): void {
     }
     const shown = sections.filter((section) => section !== null);
     content.replaceChildren(
-      voyageTabs(),
-      ...(ocean ? [oceanPills(oceans, ocean)].filter((node) => node !== null) : []),
+      el('div', 'vr-pickers', voyageTabs(), ocean ? oceanPills(oceans, ocean) : null),
+      ...(ocean ? [summaryTiles(state.voyage, ocean)] : []),
       sourceNote(state.voyage),
       ...(shown.length ? shown : [el('p', 'vr-empty', 'No records yet.')]),
     );
