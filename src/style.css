@@ -1776,3 +1776,226 @@ a {
   color: var(--text);
   outline: none;
 }
+
+/* ---- My records / Global records switch ---- */
+
+.vr-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.vr-switch-option {
+  padding: 5px 14px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.vr-switch-option:hover,
+.vr-switch-option:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+
+.vr-switch-option.is-active {
+  background: var(--surface-2);
+  color: var(--gold);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+/* ---- Global records layout ---- */
+
+.rp-crew-table th.rp-cell {
+  white-space: normal;
+  min-width: 84px;
+  vertical-align: bottom;
+}
+
+.rp-crew-table td {
+  vertical-align: middle;
+}
+
+.rp-cell strong {
+  font-size: 0.98rem;
+}
+
+.rp-cell small {
+  display: block;
+  color: var(--faint);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.rp-proof-dot {
+  margin-left: 4px;
+  color: var(--accent);
+  font-size: 0.55rem;
+  vertical-align: middle;
+}
+
+.rp-hint {
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+
+.rp-holders {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.rp-holder {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.rp-holder-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.rp-holder-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.rp-holder .rp-date {
+  margin-left: auto;
+  font-size: 0.8rem;
+}
+
+.rp-names {
+  color: var(--text);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.rp-share {
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+
+.rp-names-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rp-extra summary {
+  color: var(--faint);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.rp-extra {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.rp-record small,
+.rp-value small,
+.rp-pirates small {
+  display: block;
+  color: var(--faint);
+  font-size: 0.74rem;
+  font-weight: 400;
+}
+
+.rp-record {
+  font-weight: 500;
+}
+
+.rp-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rp-label-chests {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1px;
+}
+
+.rp-shots .rp-thumb img {
+  width: 56px;
+  height: 38px;
+}
+
+.rp-shots {
+  flex-wrap: wrap;
+}
+
+.rp-forages {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.rp-forage {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.rp-forage-number {
+  color: var(--faint);
+  font-size: 0.74rem;
+}
+
+.rp-forage strong {
+  grid-row: span 2;
+  font-size: 1.1rem;
+}
+
+.rp-forage-name {
+  font-size: 0.85rem;
+}
+
+.rp-forage .rp-shots {
+  grid-column: 1 / -1;
+}
+
+.rp-crew-table.is-narrow {
+  width: auto;
+  min-width: min(100%, 560px);
+}
+
+.rp-step {
+  min-width: 34px;
+  font-size: 1.1rem;
+}
+
+.rp-viewer-bar .panel-button {
+  flex: none;
+}
+
+.rp-viewer-bar span {
+  min-width: 0;
+}
+
+.rp-crew-table.is-narrow .vr-action {
+  width: auto;
+}

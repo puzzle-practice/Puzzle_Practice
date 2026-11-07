@@ -7,6 +7,7 @@ import serpentIcon from './media/serpent.png?url';
 import squirrelIcon from './media/squirrel.png?url';
 import vampireReliquaryIcon from './media/vampire_reliquary.png?url';
 import wayfinderIcon from './media/wolf_skull_wayfinder.png?url';
+import { recordsSwitch } from './switch';
 import { againstRecords, exportRecords, type AgainstRecord } from './known-records';
 import {
   askToReadLog,
@@ -734,7 +735,7 @@ function resultsSection(): HTMLElement {
 }
 
 export function showVoyageRecords(app: HTMLElement): void {
-  document.title = 'Voyage Records · Puzzle Practice';
+  document.title = 'My records · Voyage Records · Puzzle Practice';
   const content = el('main', 'vr');
   const toolbar = el('div', 'vr-toolbar');
   acceptDrops(toolbar);
@@ -747,10 +748,8 @@ export function showVoyageRecords(app: HTMLElement): void {
   void restoreLogs();
   const back = el('a', 'back', '← All puzzles');
   back.href = '#/';
-  const shipwide = el('a', 'panel-button vr-choose', 'Shipwide records');
-  shipwide.href = '#/records';
   app.replaceChildren(
-    el('header', 'bar', back, el('h1', '', 'Voyage Records'), shipwide, toolbar),
+    el('header', 'bar', back, el('h1', '', 'Voyage Records'), recordsSwitch('mine'), toolbar),
     content,
     el('footer', 'about', el('p', 'credits', 'Based on Puzzle Pirates, created by Three Rings Design and now operated by Grey Havens.')),
   );
