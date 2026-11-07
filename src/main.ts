@@ -4,6 +4,7 @@ import './style.css';
 import { runPuzzle, type RunningPuzzle } from './core/host';
 import { puzzles } from './core/registry';
 import { showVoyageRecords } from './voyage-records/page';
+import { showShipwideRecords } from './voyage-records/shipwide-page';
 import {
   chooseBackupFolder,
   exportCompleteBackup,
@@ -46,6 +47,13 @@ function showLanding(): void {
       { className: 'records-link', href: '#/voyage-records' },
       el('strong', {}, 'Voyage Records'),
       el('span', {}, 'Your personal bests in Woodhallow, Cursed Isles and Vampire Lairs, from your chatlogs'),
+      el('span', { className: 'records-link-arrow' }, '→'),
+    ),
+    el(
+      'a',
+      { className: 'records-link', href: '#/records' },
+      el('strong', {}, 'Shipwide Records'),
+      el('span', {}, 'The best any crew has done in Woodhallow, Cursed Isles and Vampire Lairs, with screenshots'),
       el('span', { className: 'records-link-arrow' }, '→'),
     ),
     backupFooter(),
@@ -183,6 +191,7 @@ function route(): void {
   navigation++;
   const id = location.hash.replace(/^#\/?/, '');
   if (id === 'voyage-records') showVoyageRecords(app);
+  else if (id === 'records') showShipwideRecords(app);
   else if (id) void showPuzzle(id);
   else showLanding();
 }

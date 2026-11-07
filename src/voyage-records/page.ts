@@ -50,7 +50,7 @@ interface LogSource {
 }
 
 /** Tier 3 to tier 1, as in Run.loot. */
-const CHEST_ICONS: Record<ExpeditionId, [string, string, string]> = {
+export const CHEST_ICONS: Record<ExpeditionId, [string, string, string]> = {
   woodhallow: ['werewolf-chest-large', 'werewolf-chest-medium', 'werewolf-chest-small'],
   cursedIsles: ['ci-cursed-chest', 'ci-fetish-jar', 'ci-bone-box'],
   vampireLairs: ['vampirate-chest-large', 'vampirate-chest-medium', 'vampirate-chest-small'],
@@ -117,7 +117,7 @@ function plural(amount: number, one: string, many = `${one}s`): string {
   return `${count.format(amount)} ${amount === 1 ? one : many}`;
 }
 
-function chestIcon(name: string, title: string, scale = 2): HTMLElement {
+export function chestIcon(name: string, title: string, scale = 2): HTMLElement {
   const icon: Icon = ICONS[name];
   const [x, y, w, h] = icon.area;
   const node = el('span', 'vr-chest');
@@ -747,8 +747,10 @@ export function showVoyageRecords(app: HTMLElement): void {
   void restoreLogs();
   const back = el('a', 'back', '← All puzzles');
   back.href = '#/';
+  const shipwide = el('a', 'panel-button vr-choose', 'Shipwide records');
+  shipwide.href = '#/records';
   app.replaceChildren(
-    el('header', 'bar', back, el('h1', '', 'Voyage Records'), toolbar),
+    el('header', 'bar', back, el('h1', '', 'Voyage Records'), shipwide, toolbar),
     content,
     el('footer', 'about', el('p', 'credits', 'Based on Puzzle Pirates, created by Three Rings Design and now operated by Grey Havens.')),
   );

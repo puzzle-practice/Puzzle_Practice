@@ -1636,3 +1636,115 @@ a {
 .vr-all tr.beats-record td {
   color: #ff6b6b;
 }
+
+/* ---- Shipwide Records (voyage-records/shipwide-page.ts) ---- */
+
+.rp-table td {
+  vertical-align: top;
+}
+
+.rp-crew {
+  font-size: 1.05rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rp-value {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rp-date {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.rp-pirates {
+  min-width: 180px;
+  max-width: 340px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.rp-pirates summary {
+  cursor: pointer;
+}
+
+.rp-notes {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.rp-split {
+  border-left: 1px solid var(--border);
+}
+
+.rp-shot {
+  width: 1%;
+}
+
+.rp-thumb {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: zoom-in;
+  overflow: hidden;
+}
+
+.rp-thumb img {
+  display: block;
+  width: 72px;
+  height: 48px;
+  object-fit: cover;
+}
+
+.rp-thumb:hover,
+.rp-thumb:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.rp-missing {
+  color: var(--faint);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.rp-none {
+  color: var(--faint);
+}
+
+.rp-viewer {
+  max-width: min(96vw, 1400px);
+  max-height: 94vh;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.rp-viewer::backdrop {
+  background: rgb(0 0 0 / 0.7);
+}
+
+.rp-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.rp-viewer-bar span {
+  flex: 1;
+  font-weight: 600;
+}
+
+.rp-viewer img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(94vh - 70px);
+  margin: 0 auto;
+}
