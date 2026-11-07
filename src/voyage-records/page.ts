@@ -705,7 +705,7 @@ function downloadRecords(exported: ReturnType<typeof exportRecords>): void {
 }
 
 /**
- * Tied or beaten a global record? The popup says to contact Jice and gives a message to copy, which holds
+ * Beaten a global record? The popup says to contact Jice and gives a message to copy, which holds
  * everything needed to add the record. With nothing to send, it says so and still offers the full file.
  */
 const JICE_DISCORD = 'https://discord.com/users/272275489840693249';
@@ -717,8 +717,6 @@ function sendRecords(runs: Run[]): void {
   const download = button('Download all my records', 'panel-button', () => downloadRecords(exported));
   let body: HTMLElement[];
   if (claimed.length) {
-    const beaten = claimed.filter((record) => record.standing === 'beat').length;
-    const tied = claimed.length - beaten;
     const message = recordsMessage(exported);
     const text = el('textarea', 'vr-send-message');
     text.value = message;
@@ -738,9 +736,8 @@ function sendRecords(runs: Run[]): void {
       copyMessage(() => { discord.textContent = 'Copied, now paste it in a DM'; });
     });
     const copy = button('Copy message', 'panel-button', () => copyMessage(() => { copy.textContent = 'Copied'; }));
-    const summary = [beaten ? `beaten ${plural(beaten, 'global record')}` : '', tied ? `tied ${plural(tied, 'global record')}` : ''].filter(Boolean).join(' and ');
     body = [
-      el('h2', '', `You've ${summary}!`),
+      el('h2', '', `You've beaten ${plural(claimed.length, 'global record')}!`),
       el('p', '', 'Contact Jice in game or on Discord to get it added to the Global records, and send this message along with a screenshot if you have one. Copy and open Discord copies the message and opens Jice\'s profile: click Message, then paste.'),
       text,
       el('div', 'vr-send-buttons', discord, copy, download, close),
@@ -748,7 +745,7 @@ function sendRecords(runs: Run[]): void {
   } else {
     body = [
       el('h2', '', 'No new global records yet'),
-      el('p', '', 'None of your bests tie or beat the Global records. Any that do show in yellow (ties) or red (beats) in Records by crew size.'),
+      el('p', '', 'None of your bests beat the Global records. Ties show in yellow and beats in red in Records by crew size; only beats need sending.'),
       el('div', 'vr-send-buttons', download, close),
     ];
   }
@@ -762,7 +759,7 @@ function sendRecords(runs: Run[]): void {
   if (message) message.scrollTop = 0;
 }
 
-/** Highlighted, with a count, when this voyage's bests tie or beat a global record. */
+/** Highlighted, with a count, when this voyage's bests beat a global record. Ties are already on the table. */
 function sendButton(scoped: Run[], runs: Run[]): HTMLElement {
   const exported = exportRecords(withoutIgnored(scoped, state.ignored), []);
   const claimed = claimedRecords(exported).length;

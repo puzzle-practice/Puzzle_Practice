@@ -80,7 +80,7 @@ describe('exportRecords', () => {
 });
 
 describe('recordsMessage', () => {
-  it('lists only tied and beaten records, readable and as data', async () => {
+  it('lists only beaten records, readable and as data', async () => {
     const { recordsMessage, claimedRecords } = await import('./known-records');
     const base = { voyage: 'cursedIsles' as const, ocean: 'emerald', crewSize: 3, pirates: ['A', 'B', 'C'], source: '', loot: [140, 1, 1] as [number, number, number], time: '2026-11-03T20:00:00', date: '2026-11-03' };
     const exported = {
@@ -89,6 +89,7 @@ describe('recordsMessage', () => {
       records: [
         { ...base, kind: 'chests' as const, value: 140, standing: 'beat' as const },
         { ...base, kind: 'score' as const, value: 10, standing: null },
+        { ...base, crewSize: 4, kind: 'score' as const, value: 1800, standing: 'tie' as const },
       ],
     };
     expect(claimedRecords(exported)).toHaveLength(1);
