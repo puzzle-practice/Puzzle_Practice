@@ -1630,3 +1630,8 @@ a {
   font-size: 1.05rem;
   line-height: 1;
 }
+
+/* A voyage that holds a standing shipwide record (known-records.json). */
+.vr-all tr.is-record td {
+  color: #ff6b6b;
+}
