@@ -745,8 +745,8 @@ function sendRecords(runs: Run[]): void {
     ];
   } else {
     body = [
-      el('h2', '', 'No new global records yet'),
-      el('p', '', 'None of your bests beat the Global records. Ties show in yellow and beats in red in Records by crew size; only beats need sending.'),
+      el('h2', '', 'No new records yet'),
+      el('p', '', 'Beat a global record and you can send it to Jice from here.'),
       el('div', 'vr-send-buttons', download, close),
     ];
   }
