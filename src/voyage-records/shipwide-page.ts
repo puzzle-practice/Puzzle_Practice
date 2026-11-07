@@ -214,7 +214,7 @@ function toCell(label: string, record: SheetRecord): Cell {
   return { ...record, label };
 }
 
-/** A column per record kept by crew size: best score and most top chests, then each sheet category. */
+/** A column per record kept by crew size: most top chests and best score (as My records orders them), then each sheet category. */
 function crewColumns(voyage: ExpeditionId, ocean: string): Column[] {
   const [topChest] = expeditions[voyage].chests;
   const score: Column = { label: 'Best score', cells: new Map() };
@@ -234,7 +234,7 @@ function crewColumns(voyage: ExpeditionId, ocean: string): Column[] {
       }
     }
   }
-  const columns = [score, chests].filter((column) => column.cells.size);
+  const columns = [chests, score].filter((column) => column.cells.size);
   for (const [category, records] of otherCategories(voyage, ocean)) {
     const byCrew = records.filter((record) => record.crewSize !== undefined);
     if (!byCrew.length || byCrew.length < records.length) continue;
