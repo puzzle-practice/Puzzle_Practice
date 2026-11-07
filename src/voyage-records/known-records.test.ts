@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { againstRecords, knownRecords, tableProblems, type KnownRecord } from './known-records';
+import { againstRecords, exportRecords, knownRecords, tableProblems, type KnownRecord } from './known-records';
 import type { Run } from './records';
 
 const voyage = (overrides: Partial<Run> = {}) => ({
@@ -48,5 +48,33 @@ describe('againstRecords', () => {
     expect(againstRecords([run], [record({ voyage: 'cursedIsles', value: 1 })]).size).toBe(0);
     expect(againstRecords([run], [record({ value: 3000 })]).size).toBe(0);
     expect(againstRecords([run], []).size).toBe(0);
+  });
+});
+
+describe('exportRecords', () => {
+  it('writes the best score and most chests for each crew size, against the table', () => {
+    const best = voyage({ players: ['Aster', 'Birch'] });
+    const moreChests = voyage({ loot: [160, 300, 500], score: 1580, startedAt: null });
+    const small = voyage({ crewSize: 3, loot: [10, 10, 10], score: 60 });
+    const unknownOcean = voyage({ ocean: null });
+    const result = exportRecords([best, moreChests, small, unknownOcean], ['Aster_emerald_x'], new Date('2026-11-07T13:00:00Z'), [
+      record({ value: 2300 }),
+      record({ kind: 'chests', value: 160 }),
+    ]);
+    expect(result.exported).toBe('2026-11-07T13:00:00.000Z');
+    expect(result.logs).toEqual(['Aster_emerald_x']);
+    expect(result.records.map(({ crewSize, kind, value, standing }) => [crewSize, kind, value, standing])).toEqual([
+      [3, 'score', 60, 'new'],
+      [3, 'chests', 10, 'new'],
+      [12, 'score', 2402, 'beat'],
+      [12, 'chests', 160, 'tie'],
+    ]);
+    expect(result.records[2]).toMatchObject({
+      voyage: 'woodhallow', ocean: 'emerald', date: '2026-10-23', time: '2026-10-23T20:00:00',
+      pirates: ['Aster', 'Birch'], loot: [157, 420, 1091], source: 'Exported from Aster_emerald_x',
+    });
+    expect(result.records[3]).toMatchObject({ time: null, loot: [160, 300, 500] });
+    expect(result.records[3]).not.toHaveProperty('date');
+    expect(tableProblems(result.records)).toEqual([]);
   });
 });

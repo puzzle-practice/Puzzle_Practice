@@ -7,7 +7,7 @@ import serpentIcon from './media/serpent.png?url';
 import squirrelIcon from './media/squirrel.png?url';
 import vampireReliquaryIcon from './media/vampire_reliquary.png?url';
 import wayfinderIcon from './media/wolf_skull_wayfinder.png?url';
-import { againstRecords, type AgainstRecord } from './known-records';
+import { againstRecords, exportRecords, type AgainstRecord } from './known-records';
 import {
   askToReadLog,
   canReadLog,
@@ -672,6 +672,16 @@ function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, Aga
   );
 }
 
+/** A file of the player's records, with everything needed to add them to the shipwide table. */
+function downloadRecords(runs: Run[]): void {
+  const exported = exportRecords(withoutIgnored(runs, state.ignored), state.logs.map((log) => log.name));
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }));
+  link.download = `voyage-records-${exported.exported.slice(0, 10)}.json`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
 function resultsSection(): HTMLElement {
   const parsed = state.logs.flatMap((log) => log.runs);
   const runs = mergeRuns(state.logs.map((log) => log.runs));
@@ -713,7 +723,7 @@ function resultsSection(): HTMLElement {
           el(
             'section',
             'vr-section',
-            el('header', 'vr-section-head', el('h3', '', 'Records by crew size')),
+            el('header', 'vr-section-head', el('h3', '', 'Records by crew size'), button('Export records', 'vr-pill', () => downloadRecords(runs))),
             records.length ? recordsTable(records, id) : null,
             notes.length ? el('p', 'vr-notes', notes.join(' ')) : null,
           ),

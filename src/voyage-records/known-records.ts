@@ -1,7 +1,7 @@
 // The current shipwide records: the best any crew has managed, kept in known-records.json.
 // On the Voyage Records page, a player's voyage that ties one is yellow and one that beats it is red.
 import table from './known-records.json';
-import type { ExpeditionId, Run } from './records';
+import { recordsByCrewSize, type ExpeditionId, type Run } from './records';
 
 export interface KnownRecord {
   voyage: ExpeditionId;
@@ -72,4 +72,48 @@ export function againstRecords(runs: Iterable<Run>, records: KnownRecord[] = kno
     if (result.score || result.chests) results.set(run, result);
   }
   return results;
+}
+
+/** A personal record as the Export records button writes it: a table entry plus what backs it up. */
+export interface ExportedRecord extends KnownRecord {
+  /** The date and time written in the chatlog. */
+  time: string | null;
+  /** Chests brought aboard, tier 3 to tier 1. */
+  loot: [number, number, number];
+  /** Against the table when exported: "new" where the table has no record for that crew size yet. */
+  standing: Standing | 'new' | null;
+}
+
+export interface RecordsExport {
+  exported: string;
+  logs: string[];
+  records: ExportedRecord[];
+}
+
+/** The player's best score and most tier 3 chests for each voyage, ocean and crew size. */
+export function exportRecords(runs: Run[], logs: string[], now = new Date(), records: KnownRecord[] = knownRecords): RecordsExport {
+  const exported: ExportedRecord[] = [];
+  for (const group of recordsByCrewSize(runs)) {
+    if (group.ocean === null) continue;
+    for (const kind of ['score', 'chests'] as const) {
+      const run = kind === 'score' ? group.maxScore : group.maxChests;
+      const value = kind === 'score' ? run.score : run.loot[0];
+      const record = recordFor(run, kind, records);
+      const time = run.startedAt === null ? null : new Date(run.startedAt).toISOString().slice(0, 19);
+      exported.push({
+        voyage: run.expedition,
+        ocean: group.ocean,
+        crewSize: group.crewSize,
+        kind,
+        value,
+        ...(time ? { date: time.slice(0, 10) } : {}),
+        pirates: run.players,
+        source: `Exported from ${logs.join(', ')}`,
+        time,
+        loot: run.loot,
+        standing: !record ? 'new' : value > record.value ? 'beat' : value === record.value ? 'tie' : null,
+      });
+    }
+  }
+  return { exported: now.toISOString(), logs, records: exported };
 }
