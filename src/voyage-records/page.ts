@@ -708,6 +708,8 @@ function downloadRecords(exported: ReturnType<typeof exportRecords>): void {
  * Tied or beaten a global record? The popup says to contact Jice and gives a message to copy, which holds
  * everything needed to add the record. With nothing to send, it says so and still offers the full file.
  */
+const JICE_DISCORD = 'https://discord.com/users/272275489840693249';
+
 function sendRecords(runs: Run[]): void {
   const exported = exportRecords(withoutIgnored(runs, state.ignored), state.logs.map((log) => log.name));
   const claimed = claimedRecords(exported);
@@ -722,20 +724,26 @@ function sendRecords(runs: Run[]): void {
     text.value = message;
     text.readOnly = true;
     text.rows = Math.min(12, message.split('\n').length + 1);
-    const copy = button('Copy message', 'panel-button is-primary', () => {
+    const copyMessage = (done: () => void) => {
       const fallback = () => {
         text.select();
         document.execCommand('copy');
       };
       const copied = navigator.clipboard ? navigator.clipboard.writeText(message).catch(fallback) : Promise.resolve(fallback());
-      void copied.then(() => { copy.textContent = 'Copied'; });
+      void copied.then(done);
+    };
+    const discord = button('Copy and open Discord', 'panel-button is-primary', () => {
+      // Discord can't prefill a DM, so copy the message and open Jice's profile, where Message is one click away.
+      window.open(JICE_DISCORD, '_blank', 'noopener');
+      copyMessage(() => { discord.textContent = 'Copied, now paste it in a DM'; });
     });
+    const copy = button('Copy message', 'panel-button', () => copyMessage(() => { copy.textContent = 'Copied'; }));
     const summary = [beaten ? `beaten ${plural(beaten, 'global record')}` : '', tied ? `tied ${plural(tied, 'global record')}` : ''].filter(Boolean).join(' and ');
     body = [
       el('h2', '', `You've ${summary}!`),
-      el('p', '', 'Contact Jice in game or on Discord to get it added to the Global records, and send this message along with a screenshot if you have one.'),
+      el('p', '', 'Contact Jice in game or on Discord to get it added to the Global records, and send this message along with a screenshot if you have one. Copy and open Discord copies the message and opens Jice\'s profile: click Message, then paste.'),
       text,
-      el('div', 'vr-send-buttons', copy, download, close),
+      el('div', 'vr-send-buttons', discord, copy, download, close),
     ];
   } else {
     body = [
