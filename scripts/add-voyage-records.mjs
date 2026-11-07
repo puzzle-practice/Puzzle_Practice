@@ -216,8 +216,8 @@ function main(args) {
       process.exitCode = 1;
       continue;
     }
-    const pirates = [...new Set(submitted.flatMap((record) => record?.pirates ?? []))];
-    const source = `Sent in ${new Date().toISOString().slice(0, 10)}${pirates.length ? ` by ${pirates.slice(0, 3).join(', ')}${pirates.length > 3 ? ' and crew' : ''}` : ''}`;
+    // Each record already lists its own crew, so the source only says when and in which file it came.
+    const source = `Sent in ${new Date().toISOString().slice(0, 10)} (${basename(path)})`;
     const merged = mergeRecords(table, submitted, source);
     table = merged.records;
     for (const result of merged.results) console.log(`  ${result.text}`);
