@@ -129,9 +129,15 @@ export function standingFor(run: Run, kind: KnownRecord['kind'], records: KnownR
 const VOYAGE_NAMES: Record<ExpeditionId, string> = { woodhallow: 'Woodhallow', cursedIsles: 'Cursed Isles', vampireLairs: 'Vampire Lairs' };
 const TOP_CHESTS: Record<ExpeditionId, string> = { woodhallow: 'dire chests', cursedIsles: 'cursed chests', vampireLairs: 'immortal chests' };
 
-/** The records in an export that beat the table, ready to send to Jice. A tie is already on the table, so it isn't sent. */
+/** The biggest crew whose records are worth sending in: past this, crews are too rare to keep records for. */
+export const MAX_SENT_CREW: Record<ExpeditionId, number> = { woodhallow: 12, cursedIsles: 7, vampireLairs: 12 };
+
+/**
+ * The records in an export that beat the table, ready to send to Jice. A tie is already on the table, and
+ * crews bigger than MAX_SENT_CREW aren't asked for, so neither is sent.
+ */
 export function claimedRecords(exported: RecordsExport): ExportedRecord[] {
-  return exported.records.filter((record) => record.standing === 'beat');
+  return exported.records.filter((record) => record.standing === 'beat' && record.crewSize <= MAX_SENT_CREW[record.voyage]);
 }
 
 /**

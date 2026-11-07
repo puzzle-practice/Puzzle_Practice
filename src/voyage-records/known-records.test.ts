@@ -90,6 +90,7 @@ describe('recordsMessage', () => {
         { ...base, kind: 'chests' as const, value: 140, standing: 'beat' as const },
         { ...base, kind: 'score' as const, value: 10, standing: null },
         { ...base, crewSize: 4, kind: 'score' as const, value: 1800, standing: 'tie' as const },
+        { ...base, crewSize: 8, kind: 'score' as const, value: 9999, standing: 'beat' as const },
       ],
     };
     expect(claimedRecords(exported)).toHaveLength(1);
