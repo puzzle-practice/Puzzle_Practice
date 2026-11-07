@@ -8,7 +8,7 @@
     {"voyage":"woodhallow","ocean":"emerald","crewSize":3,"kind":"score","value":758,"date":"2026-10-29","pirates":["Cono","Jice","Rock"],"source":"Jice's chatlog (emerald)"},
     {"voyage":"woodhallow","ocean":"emerald","crewSize":4,"kind":"chests","value":82,"date":"2026-11-01","pirates":["Gummybears","Imalioncub","Mikethyson","Mincemeat"],"source":"Sent in 2026-11-07 (gummy.txt)"},
     {"voyage":"woodhallow","ocean":"emerald","crewSize":4,"kind":"score","value":1143,"date":"2026-10-25","pirates":["Dien","Jice","Rock","Vackert"],"source":"Jice's chatlog (emerald)"},
-    {"voyage":"woodhallow","ocean":"emerald","crewSize":5,"kind":"chests","value":126,"date":"2026-11-06","pirates":["Bkvi","Gummybears","Mikethyson","Xioch","Zikato"],"source":"Sent in 2026-11-07 (gummy.txt)"},
+    {"voyage":"woodhallow","ocean":"emerald","crewSize":5,"kind":"chests","value":119,"date":"2026-11-06","pirates":["Amizing","Dancter","Dien","Jice","Xioch"],"source":"Jice's chatlog (emerald)"},
     {"voyage":"woodhallow","ocean":"emerald","crewSize":5,"kind":"score","value":1526,"date":"2026-11-06","pirates":["Amizing","Dancter","Dien","Jice","Xioch"],"source":"Jice's chatlog (emerald)"},
     {"voyage":"woodhallow","ocean":"emerald","crewSize":6,"kind":"chests","value":117,"date":"2026-10-25","pirates":["Dien","Imalioncub","Jice","Rock","Rudis","Vackert"],"source":"Jice's chatlog (emerald)"},
     {"voyage":"woodhallow","ocean":"emerald","crewSize":6,"kind":"score","value":1558,"date":"2026-10-25","pirates":["Dien","Imalioncub","Jice","Rock","Rudis","Vackert"],"source":"Jice's chatlog (emerald)"},
