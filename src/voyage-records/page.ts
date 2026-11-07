@@ -580,10 +580,11 @@ function standingClass(standing: Standing | null): string {
   return standing === 'beat' ? 'beats-record' : standing === 'tie' ? 'ties-record' : '';
 }
 
+/** A "New record" badge on a best that beats the global record. A tie shows only in yellow. */
 function standingBadge(standing: Standing | null): HTMLElement | null {
-  if (!standing) return null;
-  const badge = el('span', `vr-record-badge is-${standing}`, standing === 'beat' ? 'New record' : 'Ties record');
-  badge.title = standing === 'beat' ? 'Beats the global record for this crew size' : 'Ties the global record for this crew size';
+  if (standing !== 'beat') return null;
+  const badge = el('span', 'vr-record-badge is-beat', 'New record');
+  badge.title = 'Beats the global record for this crew size';
   return badge;
 }
 
