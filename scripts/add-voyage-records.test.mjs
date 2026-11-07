@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatTable, mergeRecords, readSubmission } from './add-voyage-records.mjs';
+import { formatTable, historyLines, mergeRecords, readSubmission } from './add-voyage-records.mjs';
 
 const table = [
   { voyage: 'cursedIsles', ocean: 'emerald', crewSize: 3, kind: 'chests', value: 130, pirates: ['Old'], source: 'sheet' },
@@ -44,4 +44,19 @@ describe('mergeRecords', () => {
 
 it('writes the table one record per line, as the repo keeps it', () => {
   expect(formatTable(table)).toBe(`{\n  "records": [\n    ${JSON.stringify(table[0])},\n    ${JSON.stringify(table[1])}\n  ]\n}\n`);
+});
+
+it('keeps the replaced record in the history, one line per change', () => {
+  const { results } = mergeRecords(table, [sent({ kind: 'chests', value: 140 }), sent({ kind: 'score', value: 12 }), sent({ crewSize: 1, kind: 'score', value: 5 })], 'Sent in');
+  const lines = historyLines(results, 'squelchy.txt', new Date('2026-11-07T12:00:00Z')).trim().split('\n').map((line) => JSON.parse(line));
+  expect(lines).toHaveLength(2);
+  expect(lines[0]).toMatchObject({ changedAt: '2026-11-07T12:00:00.000Z', outcome: 'beaten', from: 'squelchy.txt', record: { value: 140 }, previous: table[0] });
+  expect(lines[1]).toMatchObject({ outcome: 'added', record: { crewSize: 1, value: 5 }, previous: null });
+});
+
+it('finds the GitHub repo in a remote URL', async () => {
+  const { githubRepo } = await import('./add-voyage-records.mjs');
+  expect(githubRepo('https://github.com/puzzle-practice/Puzzle_Practice.git')).toBe('puzzle-practice/Puzzle_Practice');
+  expect(githubRepo('git@github.com:puzzle-practice/puzzle_practice')).toBe('puzzle-practice/puzzle_practice');
+  expect(githubRepo('https://example.com/x/y')).toBe(null);
 });
