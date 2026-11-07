@@ -10,7 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "new-puzzle": "node scripts/new-puzzle.mjs",
-    "pick": "node scripts/pick-branch.mjs"
+    "pick": "node scripts/pick-branch.mjs",
+    "add-records": "node scripts/add-voyage-records.mjs"
   },
   "devDependencies": {
     "fake-indexeddb": "^6.2.5",
