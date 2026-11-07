@@ -3,3 +3,4 @@ dist/
 *.log
 .DS_Store
 PRIVATE_REPO.md
+voyage-records-history.jsonl

@@ -6,13 +6,19 @@
 //   npm run add-records -- path/to/message.txt --dry-run
 // On Windows, drag the file onto add-voyage-records.bat in the repo folder instead.
 //
+// Each record it replaces is kept, with the one that beat it, in voyage-records-history.jsonl next to this
+// repo's package.json. That file stays on this computer: git ignores it.
+//
 // A record is added when the table has nothing for its voyage, ocean, crew size and kind, and replaces the
 // table's record when it beats it. A tie or a lower value is left out, and the reason is printed.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const TABLE = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'voyage-records', 'known-records.json');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+export const TABLE = join(ROOT, 'src', 'voyage-records', 'known-records.json');
+/** Every record the importer replaced or added, one JSON object per line. Kept on this computer only (it's in .gitignore). */
+export const HISTORY = join(ROOT, 'voyage-records-history.jsonl');
 const VOYAGES = ['woodhallow', 'cursedIsles', 'vampireLairs'];
 const VOYAGE_NAMES = { woodhallow: 'Woodhallow', cursedIsles: 'Cursed Isles', vampireLairs: 'Vampire Lairs' };
 const TOP_CHESTS = { woodhallow: 'dire chests', cursedIsles: 'cursed chests', vampireLairs: 'immortal chests' };
@@ -88,17 +94,25 @@ export function mergeRecords(table, submitted, source) {
     const entry = tableEntry(record, source);
     if (index < 0) {
       records.push(entry);
-      results.push({ outcome: 'added', text: `Added   ${describe(record)} (no record before)` });
+      results.push({ outcome: 'added', text: `Added   ${describe(record)} (no record before)`, record: entry, previous: null });
     } else if (record.value > records[index].value) {
-      const before = records[index].value;
+      const previous = records[index];
       records[index] = entry;
-      results.push({ outcome: 'beaten', text: `Beaten  ${describe(record)} (was ${before})` });
+      results.push({ outcome: 'beaten', text: `Beaten  ${describe(record)} (was ${previous.value})`, record: entry, previous });
     } else {
       const why = record.value === records[index].value ? 'ties the record' : `record is ${records[index].value}`;
       results.push({ outcome: 'kept', text: `Kept    ${describe(record)} (${why})` });
     }
   }
   return { records, results };
+}
+
+/** History lines for the changes in a merge: when, what came in, and the record it replaced. */
+export function historyLines(results, from, at = new Date()) {
+  return results
+    .filter((result) => result.outcome === 'added' || result.outcome === 'beaten')
+    .map((result) => `${JSON.stringify({ changedAt: at.toISOString(), outcome: result.outcome, from, record: result.record, previous: result.previous })}\n`)
+    .join('');
 }
 
 /** The table as the repo keeps it: one record per line. */
@@ -115,6 +129,7 @@ function main(args) {
   }
   let table = JSON.parse(readFileSync(TABLE, 'utf8')).records;
   let changed = 0;
+  let history = '';
   for (const file of files) {
     const path = resolve(file);
     console.log(`\n${path}`);
@@ -131,6 +146,7 @@ function main(args) {
     const merged = mergeRecords(table, submitted, source);
     table = merged.records;
     for (const result of merged.results) console.log(`  ${result.text}`);
+    history += historyLines(merged.results, path);
     changed += merged.results.filter((result) => result.outcome === 'added' || result.outcome === 'beaten').length;
   }
   if (!changed) {
@@ -139,7 +155,9 @@ function main(args) {
     console.log(`\n${changed} record${changed === 1 ? '' : 's'} would change. Run again without --dry-run to save.`);
   } else {
     writeFileSync(TABLE, formatTable(table));
+    appendFileSync(HISTORY, history);
     console.log(`\nSaved ${changed} record${changed === 1 ? '' : 's'} to src/voyage-records/known-records.json. Commit and push to put them live.`);
+    console.log(`The records they replaced are kept in ${HISTORY}.`);
   }
 }
 
