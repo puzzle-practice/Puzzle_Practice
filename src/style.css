@@ -755,3 +755,878 @@ a {
 
 /* Empty groups and explanation-only cards do not take panel space. */
 .panel-group:empty, .panel-group:has(> .panel-title:only-child) { display: none; }
+
+/* ---- Voyage Records (voyage-records/page.ts) ---- */
+
+.records-link {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.88rem;
+  text-decoration: none;
+  box-shadow: var(--shadow);
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.records-link strong {
+  color: var(--gold);
+  font-size: 0.98rem;
+}
+
+.records-link-arrow {
+  margin-left: auto;
+  color: var(--text);
+}
+
+.records-link:hover,
+.records-link:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.vr {
+  --vr-good: #6fcf97;
+  --vr-bad: #f08a8a;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vr-chest {
+  display: inline-block;
+  flex: none;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+}
+
+.vr-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: center;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.vr-drop.is-over {
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+
+.vr-drop-chests {
+  display: flex;
+  gap: 12px;
+}
+
+.vr-drop h2 {
+  margin: 0 0 4px;
+  font-size: 1.25rem;
+}
+
+.vr-drop .vr-choose {
+  flex: none;
+  width: auto;
+  padding: 8px 18px;
+}
+
+.vr-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vr-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 6px 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.vr-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vr-file-note {
+  flex: none;
+  color: var(--muted);
+}
+
+.vr-file.is-error .vr-file-note {
+  color: var(--vr-bad);
+}
+
+.vr-file.is-reading {
+  padding-right: 12px;
+  color: var(--muted);
+}
+
+.vr-file-remove {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.vr-file-remove:hover,
+.vr-file-remove:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.vr-results {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vr-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vr-tab {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.vr-tab:hover,
+.vr-tab:focus-visible {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+.vr-tab.is-active {
+  background: var(--surface-2);
+  border-color: var(--gold);
+}
+
+.vr-tab-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.vr-tab-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+.vr-tab-text small {
+  color: var(--muted);
+}
+
+.vr-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vr-pill {
+  padding: 3px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.vr-pill:hover,
+.vr-pill:focus-visible {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.vr-pill.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.vr-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vr-tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.vr-tile-label {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.vr-tile-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gold);
+  font-size: 1.7rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.vr-tile-note {
+  color: var(--faint);
+  font-size: 0.78rem;
+}
+
+.vr-section {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.vr-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.vr-section-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.vr-table-wrap {
+  overflow-x: auto;
+}
+
+.vr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.vr-table th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-strong);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.vr-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.vr-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.vr-table .vr-num {
+  text-align: right;
+}
+
+.vr-row {
+  cursor: pointer;
+}
+
+.vr-row:hover td,
+.vr-row.is-open td {
+  background: var(--surface-2);
+}
+
+.vr-crew-size {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.vr-table td small {
+  display: block;
+  color: var(--faint);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.vr-action {
+  width: 1%;
+  text-align: right;
+}
+
+.vr-expand {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.vr-expand:hover,
+.vr-expand:focus-visible {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.vr-detail > td {
+  padding: 10px;
+  background: var(--surface-2);
+}
+
+.vr-runs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 10px;
+}
+
+.vr-run {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.vr-run-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.vr-run h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.vr-run-date {
+  margin: -6px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.vr-loot {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.vr-loot-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.vr-result {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.vr-result.is-good {
+  color: var(--vr-good);
+}
+
+.vr-result.is-bad {
+  color: var(--vr-bad);
+}
+
+.vr-crew {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vr-crew li {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+  font-size: 0.8rem;
+}
+
+.vr-frays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.vr-fray {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.vr-fray.is-good {
+  border-color: color-mix(in srgb, var(--vr-good) 55%, transparent);
+  color: var(--vr-good);
+}
+
+.vr-fray.is-bad {
+  border-color: color-mix(in srgb, var(--vr-bad) 55%, transparent);
+  color: var(--vr-bad);
+}
+
+.vr-notes {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: 0.8rem;
+}
+
+.vr-empty {
+  margin: 0;
+  padding: 24px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--muted);
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .vr-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vr-tab {
+    padding: 8px;
+  }
+
+  .vr-tab-inner {
+    flex-direction: column;
+    gap: 4px;
+    text-align: center;
+  }
+
+  /* Tapping a row opens it, so the Details button can give up its column. */
+  .vr-action,
+  .vr-wide-only {
+    display: none;
+  }
+
+  .vr-table th,
+  .vr-table td {
+    padding-inline: 6px;
+  }
+}
+
+/* The tables carry every pirate's name, so this page takes more of a wide screen. */
+#app:has(> .vr) {
+  max-width: 1600px;
+}
+
+.vr-table td.vr-names {
+  min-width: 200px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.vr-table td.vr-names.is-same {
+  color: var(--faint);
+}
+
+.vr-loot {
+  white-space: nowrap;
+}
+
+/* Too narrow for name columns: each row keeps its numbers and puts the names on lines below. */
+@media (max-width: 1000px) {
+  .vr-action,
+  .vr-wide-only,
+  .vr-names-col,
+  .vr-loot-col,
+  .vr-table td.vr-names.is-same {
+    display: none;
+  }
+
+  .vr-records thead tr,
+  .vr-records .vr-row,
+  .vr-all thead tr,
+  .vr-all tbody tr {
+    display: grid;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .vr-records thead tr,
+  .vr-records .vr-row {
+    grid-template-columns: 4.5rem 4rem 1fr 1fr;
+  }
+
+  .vr-all thead tr,
+  .vr-all tbody tr {
+    grid-template-columns: 1fr 3rem 5rem 5rem;
+  }
+
+  .vr-table thead th,
+  .vr-records .vr-row td,
+  .vr-all tbody td {
+    border-bottom: 0;
+  }
+
+  .vr-table td.vr-names,
+  .vr-all .vr-loot-cell {
+    grid-column: 1 / -1;
+    min-width: 0;
+    padding-block: 0 6px;
+  }
+
+  .vr-all .vr-loot-cell {
+    order: 1;
+  }
+
+  .vr-table td.vr-names {
+    order: 2;
+  }
+
+  .vr-records td.vr-names::before {
+    content: attr(data-label) ': ';
+    color: var(--faint);
+  }
+}
+
+.vr-tiles {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+/* The game's 36x39 item icon, kept at its own size and kept from stretching the tile. */
+.vr-familiar {
+  flex: none;
+  width: 36px;
+  height: 39px;
+  margin-block: -6px;
+  image-rendering: pixelated;
+}
+
+@media (max-width: 1000px) {
+  .vr-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .vr-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.vr-tiles {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.vr-tile-totals {
+  grid-column: span 2;
+}
+
+.vr-tile-totals .vr-tile-value {
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: 1.35rem;
+  line-height: 1.65;
+}
+
+.vr-tile-total {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vr-chest-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+@media (max-width: 1000px) {
+  .vr-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .vr-tile-totals {
+    grid-column: 1 / -1;
+  }
+
+}
+
+@media (max-width: 760px) {
+  .vr-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.bar:has(> .vr-toolbar) {
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+
+.bar:has(> .vr-toolbar) h1 {
+  white-space: nowrap;
+}
+
+.vr-toolbar {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+}
+
+.vr-score-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px 14px;
+}
+
+.vr-section-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 16px;
+}
+
+.vr-pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vr-page-label {
+  min-width: 6.5em;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.vr-pill:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.vr-pickers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.vr-toolbar.is-over {
+  outline: 1px dashed var(--accent);
+  outline-offset: 4px;
+}
+
+.vr-toolbar .vr-choose {
+  flex: none;
+  width: auto;
+  padding: 6px 14px;
+}
+
+.vr-pickers .vr-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.vr-pickers .vr-tab {
+  padding: 4px 10px;
+}
+
+.vr-pickers .vr-tab-inner {
+  gap: 8px;
+}
+
+.vr-pickers .vr-tab-text {
+  font-size: 0.85rem;
+  line-height: 1.2;
+}
+
+.vr-pickers .vr-tab-text small {
+  font-size: 0.74rem;
+}
+
+@media (max-width: 760px) {
+  .vr-toolbar {
+    flex-basis: 100%;
+  }
+
+  .vr-pickers .vr-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  /* Three tiles under the full-width totals: the last one fills the second row. */
+  .vr-tile:last-child {
+    grid-column: span 2;
+  }
+
+  .vr-records .vr-loot {
+    justify-content: flex-end;
+  }
+}
+
+/* With room for columns, a best score keeps its chests on the same line. */
+@media (min-width: 1001px) {
+  .vr-score-value,
+  .vr-records .vr-loot {
+    flex-wrap: nowrap;
+  }
+}
+
+.vr-drop-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.vr-ignore {
+  position: relative;
+  margin-left: auto;
+  font-size: 0.84rem;
+}
+
+.vr-ignore summary {
+  padding: 3px 4px;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.vr-ignore summary:hover,
+.vr-ignore summary:focus-visible,
+.vr-ignore[open] summary {
+  color: var(--text);
+}
+
+.vr-ignore-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(300px, calc(100vw - 32px));
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  box-shadow: var(--shadow);
+}
+
+.vr-ignore-form {
+  display: flex;
+  gap: 6px;
+}
+
+.vr-ignore-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.vr-ignore-note {
+  margin: 0;
+  color: var(--muted);
+}
+
+.vr-all tr.is-best td {
+  color: var(--gold);
+}
+
+.vr-table td.vr-date {
+  white-space: nowrap;
+}
+
+.vr-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: -3px;
+}
+
+.vr-star {
+  color: var(--gold);
+  font-size: 1.05rem;
+  line-height: 1;
+}

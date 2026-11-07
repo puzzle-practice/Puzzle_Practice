@@ -3,6 +3,7 @@
 import './style.css';
 import { runPuzzle, type RunningPuzzle } from './core/host';
 import { puzzles } from './core/registry';
+import { showVoyageRecords } from './voyage-records/page';
 import {
   chooseBackupFolder,
   exportCompleteBackup,
@@ -40,6 +41,13 @@ function showLanding(): void {
   app.replaceChildren(
     el('header', { className: 'site' }, el('h1', {}, 'Puzzle Practice')),
     el('main', { className: 'grid' }, ...cards),
+    el(
+      'a',
+      { className: 'records-link', href: '#/voyage-records' },
+      el('strong', {}, 'Voyage Records'),
+      el('span', {}, 'Your personal bests in Woodhallow, Cursed Isles and Vampire Lairs, from your chatlogs'),
+      el('span', { className: 'records-link-arrow' }, '→'),
+    ),
     backupFooter(),
   );
 }
@@ -174,7 +182,8 @@ function route(): void {
   running = null;
   navigation++;
   const id = location.hash.replace(/^#\/?/, '');
-  if (id) void showPuzzle(id);
+  if (id === 'voyage-records') showVoyageRecords(app);
+  else if (id) void showPuzzle(id);
   else showLanding();
 }
 

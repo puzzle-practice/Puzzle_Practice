@@ -60,7 +60,7 @@ function parseDirectoryBackup(json: string): DirectoryBackup {
 }
 function replayName(metadata: ReplayMetadata): string { return `${metadata.id.replaceAll(':', '-')}.json.gz`; }
 
-function openHandleDb(): Promise<IDBDatabase> {
+export function openHandleDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('puzzle-practice-files', 1);
     request.onupgradeneeded = () => request.result.createObjectStore('handles');
