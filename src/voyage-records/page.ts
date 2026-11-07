@@ -7,6 +7,7 @@ import serpentIcon from './media/serpent.png?url';
 import squirrelIcon from './media/squirrel.png?url';
 import vampireReliquaryIcon from './media/vampire_reliquary.png?url';
 import wayfinderIcon from './media/wolf_skull_wayfinder.png?url';
+import { currentRecords } from './known-records';
 import {
   askToReadLog,
   canReadLog,
@@ -584,7 +585,7 @@ function newBestMarks(run: Run, best: NewBest | undefined): HTMLElement | null {
   );
 }
 
-function allVoyages(runs: Run[], bests: Map<Run, NewBest>): HTMLElement {
+function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, NewBest>): HTMLElement {
   const sorted = [...runs].sort(state.sort === 'score'
     ? (a, b) => b.score - a.score
     : (a, b) => (b.startedAt ?? -Infinity) - (a.startedAt ?? -Infinity));
@@ -620,7 +621,7 @@ function allVoyages(runs: Run[], bests: Map<Run, NewBest>): HTMLElement {
     : null;
   const rows = shown.map((run) => el(
     'tr',
-    bests.has(run) ? 'is-best' : '',
+    records.has(run) ? 'is-record' : bests.has(run) ? 'is-best' : '',
     el('td', 'vr-date', formatDate(run), newBestMarks(run, bests.get(run))),
     el('td', 'vr-num', run.crewSize === null ? '?' : String(run.crewSize)),
     el('td', 'vr-loot-cell', lootRow(run)),
@@ -710,7 +711,7 @@ function resultsSection(): HTMLElement {
             records.length ? recordsTable(records, id) : null,
             notes.length ? el('p', 'vr-notes', notes.join(' ')) : null,
           ),
-          allVoyages(scoped, personalBests(counted)),
+          allVoyages(scoped, personalBests(counted), currentRecords(scoped)),
         ]
       : [el('p', 'vr-empty', `No ${expeditions[id].name} voyages in these logs. If you've sailed one, add the log from the folder the game saves to now, as older logs may stop before it.`)]),
   );
