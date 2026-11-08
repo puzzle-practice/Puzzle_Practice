@@ -5,7 +5,7 @@
     {"voyage": "vampireLairs", "name": "YPP Vampires", "url": "https://tinyurl.com/yppvampires"}
   ],
   "records": [
-    {"voyage": "woodhallow", "ocean": "emerald", "category": "Best dnav score in one DR, one pirate", "value": "27", "pirates": ["Xioch"], "screenshot": "voyage-records/screenshots/woodhallow/dnav-xioch.png", "source": "Sent to Jared"},
+    {"voyage": "woodhallow", "ocean": "emerald", "category": "Best dnav score in one DR, one pirate", "value": "31", "pirates": ["Jice"], "screenshot": "voyage-records/screenshots/woodhallow/dnav-jice.png", "source": "Sent to Jared"},
     {"voyage": "woodhallow", "ocean": "emerald", "category": "Best forage score in one DR, one pirate", "value": "87", "pirates": ["Rock"], "screenshot": "voyage-records/screenshots/woodhallow/forage-rock.png", "source": "Sent to Jared"},
     {"voyage": "woodhallow", "ocean": "emerald", "category": "Most DCs in one forage", "value": "", "source": "Not set yet"},
     {"voyage": "cursedIsles", "ocean": "emerald", "category": "Most cursed chests in one entry, one pirate", "value": "59", "pirates": ["Toiygul"], "screenshot": "voyage-records/screenshots/cursed-isles/most-ccs-entry-individual.png", "screenshotUrl": "https://i.imgur.com/9xJNyGn.png", "source": "CI Forages, CI Records tab"},
