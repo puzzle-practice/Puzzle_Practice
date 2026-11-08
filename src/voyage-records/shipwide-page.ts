@@ -85,6 +85,7 @@ function categoryIcon(label: string, voyage: ExpeditionId): HTMLElement | null {
   if (label.includes('🎁')) return null;
   if (/immortal|chest|forage/i.test(label)) return chestIcon(CHEST_ICONS[voyage][0], expeditions[voyage].chests[0], 1);
   if (/fray/i.test(label)) return emoji('⚔️');
+  if (/dnav|navigat/i.test(label)) return emoji('🧭');
   if (/duty report/i.test(label)) return emoji('📜');
   if (/carpentry|holes/i.test(label)) return emoji('🔨');
   if (/proof/i.test(label)) return emoji('🛡️');
@@ -309,7 +310,7 @@ function otherTable(voyage: ExpeditionId, categories: [string, SheetRecord[]][])
         'tr',
         '',
         el('td', 'rp-record', headingNode(label, voyage)),
-        el('td', 'rp-value', el('strong', '', first.value), tied.length > 1 ? el('span', 'vr-record-badge rp-tie', `${tied.length}-way tie`) : null),
+        el('td', 'rp-value', el('strong', '', first.value || '—'), tied.length > 1 ? el('span', 'vr-record-badge rp-tie', `${tied.length}-way tie`) : null),
         el('td', 'rp-pirates', names(pirates, tied.length === 1 ? first.pirateScores : [], first.everyone), first.notes ? el('small', 'rp-notes', first.notes) : null),
         el('td', 'rp-date', formatDate(first.date)),
         el('td', 'rp-shot', proof(tied.map((record) => toCell(category, record)))),
@@ -422,7 +423,7 @@ function oceanPills(oceans: string[], selected: string): HTMLElement | null {
 
 function sourceNote(voyage: ExpeditionId): HTMLElement {
   const sources = sheetSources.filter((source) => source.voyage === voyage);
-  if (!sources.length) return el('p', 'vr-notes', 'Woodhallow records come from crews’ chatlogs. Send yours in with the Export records button under My records.');
+  if (!sources.length) return el('p', 'vr-notes', 'Woodhallow records come from crews’ chatlogs and screenshots sent to Jice. Beat one? Send it from My records.');
   const links = sources.flatMap((source, index) => {
     const link = el('a', '', source.name);
     link.href = source.url;
