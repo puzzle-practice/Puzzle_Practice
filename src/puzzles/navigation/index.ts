@@ -515,7 +515,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     averages: duty.averages(store.sessionHistory(settingsKey(liveSettings)), { scoreLabel: 'Points' }),
     recent: duty.recent(store.history(settingsKey(liveSettings)), { scoreLabel: 'Points' }),
     rows: [['Points', String(totals().points)],
-      ['Constellations', board && !liveSettings.clears ? String(totals().constellations) : `${totals().constellations}${of(runGoal(liveSettings))}`],
       ...(board ? [['Boards', String(board + 1)]] : []),
       ['Stars dropped', String(totals().stars)], ['Ring rotations', String(totals().moves)], ['Longest chain', chainName(longestChain)], ['Longest cascade', chainName(longestCascade)], ['Time', `${(elapsed()/1000).toFixed(2)}s`]],
   } : null);
