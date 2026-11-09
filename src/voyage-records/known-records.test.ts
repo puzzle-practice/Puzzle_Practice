@@ -96,7 +96,8 @@ describe('recordsMessage', () => {
     expect(claimedRecords(exported)).toHaveLength(1);
     const message = recordsMessage(exported);
     expect(message).toContain('Hi Jice');
-    expect(message).toContain('Cursed Isles (Emerald), 3 pirates, most cursed chests: 140 (beats 130)');
+    expect(message).toContain('1. Cursed Isles (Emerald), 3 pirates, most cursed chests: 140 (beats 130)');
+    expect(message).toContain('picture, image or video of it, numbered as above');
     expect(message).not.toContain('"kind":"score"');
     expect(JSON.parse(message.split('\n').at(-1)!)).toHaveLength(1);
   });

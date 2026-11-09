@@ -705,6 +705,11 @@ function downloadRecords(exported: ReturnType<typeof exportRecords>): void {
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
+/** "picture, image or video", in a colour of its own so players don't miss that proof is wanted. */
+function mediaWords(): HTMLElement {
+  return el('span', 'vr-media-words', 'picture, image or video');
+}
+
 /**
  * Beaten a global record? The popup says to contact Jice and gives a message to copy, which holds
  * everything needed to add the record. With nothing to send, it says so and still offers the full file.
@@ -739,14 +744,16 @@ function sendRecords(runs: Run[]): void {
     const copy = button('Copy message', 'panel-button', () => copyMessage(() => { copy.textContent = 'Copied'; }));
     body = [
       el('h2', '', `You've beaten ${plural(claimed.length, 'global record')}!`),
-      el('p', '', 'Contact Jice in game or on Discord to get it added to the Global records, and send this message along with a screenshot if you have one. Copy and open Discord copies the message and opens Jice\'s profile: click Message, then paste.'),
+      el('p', '', 'Contact Jice in game or on Discord to get it added to the Global records, and send this message. ',
+        el('strong', '', 'Please send a ', mediaWords(), ' of each record too'),
+        ', numbered to match the list, so it can go up on the Global records page next to yours. Copy and open Discord copies the message and opens Jice\'s profile: click Message, then paste.'),
       text,
       el('div', 'vr-send-buttons', discord, copy, download, close),
     ];
   } else {
     body = [
       el('h2', '', 'No new records yet'),
-      el('p', '', 'Beat a global record and you can send it to Jice from here.'),
+      el('p', '', 'Beat a global record and you can send it to Jice from here, along with a ', mediaWords(), ' of it.'),
       el('div', 'vr-send-buttons', download, close),
     ];
   }

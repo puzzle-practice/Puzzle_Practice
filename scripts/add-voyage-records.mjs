@@ -4,7 +4,14 @@
 // "Download all my records" file. Point this at either one, saved as a file:
 //   npm run add-records -- path/to/voyage-records-2026-11-07.json
 //   npm run add-records -- path/to/message.txt --dry-run
-// On Windows, drag the file onto add-voyage-records.bat in the repo folder instead.
+//   npm run add-records -- path/to/folder
+// On Windows, drag the file (or folder) onto add-voyage-records.bat in the repo folder instead.
+//
+// A folder holds one player's send-in: their message or export as the only .txt or .json in it, plus the
+// pictures, images and videos they sent, named by the record's number in the message (1.png, 2.jpg,
+// 2-b.png, 3.mp4...). A picture whose name doesn't start with a number goes with every record in the file.
+// The pictures are copied into public/voyage-records/screenshots/<voyage>/sent/ and listed for their record
+// in src/voyage-records/sheet-records.json, so Global records shows them. See docs/voyage-records-screenshots.md.
 //
 // It saves the records on a new branch off the latest main, pushes it, and opens a pull request: with the
 // GitHub CLI (gh) when it's installed and signed in, else through GitHub's API with the sign-in git pushes with,
@@ -16,12 +23,20 @@
 // A record is added when the table has nothing for its voyage, ocean, crew size and kind, and replaces the
 // table's record when it beats it. A tie or a lower value is left out, and the reason is printed.
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const TABLE = join(ROOT, 'src', 'voyage-records', 'known-records.json');
+/** Where the Global records page looks up each crew-size record's screenshots (its "screenshots" part). */
+export const SHEET = join(ROOT, 'src', 'voyage-records', 'sheet-records.json');
+const PUBLIC = join(ROOT, 'public');
+const SHOT_DIRS = { woodhallow: 'woodhallow', cursedIsles: 'cursed-isles', vampireLairs: 'vampire-lairs' };
+const PICTURE = /\.(png|jpe?g|gif|webp|mp4|webm|mov|m4v)$/i;
+/** GitHub refuses files over 100 MB, so a bigger video can't go in the repo. */
+const MAX_FILE_MB = 95;
 /** Every record the importer replaced or added, one JSON object per line. Kept on this computer only (it's in .gitignore). */
 export const HISTORY = join(ROOT, 'voyage-records-history.jsonl');
 const VOYAGES = ['woodhallow', 'cursedIsles', 'vampireLairs'];
@@ -89,24 +104,24 @@ export function mergeRecords(table, submitted, source) {
   const records = table.map((record) => ({ ...record }));
   const results = [];
   const key = (record) => JSON.stringify([record.voyage, record.ocean, record.crewSize, record.kind]);
-  for (const record of submitted) {
+  for (const [number, record] of submitted.map((sent, index) => [index + 1, sent])) {
     const problem = recordProblem(record);
     if (problem) {
-      results.push({ outcome: 'skipped', text: `Skipped a record: ${problem}` });
+      results.push({ number, outcome: 'skipped', text: `Skipped a record: ${problem}` });
       continue;
     }
     const index = records.findIndex((known) => key(known) === key(record));
     const entry = tableEntry(record, source);
     if (index < 0) {
       records.push(entry);
-      results.push({ outcome: 'added', text: `Added   ${describe(record)} (no record before)`, record: entry, previous: null });
+      results.push({ number, outcome: 'added', text: `Added   ${describe(record)} (no record before)`, record: entry, previous: null });
     } else if (record.value > records[index].value) {
       const previous = records[index];
       records[index] = entry;
-      results.push({ outcome: 'beaten', text: `Beaten  ${describe(record)} (was ${previous.value})`, record: entry, previous });
+      results.push({ number, outcome: 'beaten', text: `Beaten  ${describe(record)} (was ${previous.value})`, record: entry, previous });
     } else {
       const why = record.value === records[index].value ? 'ties the record' : `record is ${records[index].value}`;
-      results.push({ outcome: 'kept', text: `Kept    ${describe(record)} (${why})` });
+      results.push({ number, outcome: 'kept', text: `Kept    ${describe(record)} (${why})`, ...(record.value === records[index].value ? { tie: records[index] } : {}) });
     }
   }
   return { records, results };
@@ -123,6 +138,154 @@ export function historyLines(results, from, at = new Date()) {
 /** The table as the repo keeps it: one record per line. */
 export function formatTable(records) {
   return `{\n  "records": [\n${records.map((record) => `    ${JSON.stringify(record)}`).join(',\n')}\n  ]\n}\n`;
+}
+
+/** The key a crew-size record's screenshots are filed under in sheet-records.json, as recordKey in shipwide.ts. */
+export function recordKey(record) {
+  return `${record.voyage}/${record.ocean}/${record.crewSize}/${record.kind}`;
+}
+
+/**
+ * The pictures in a send-in folder, by the record number their name starts with ("2.png", "2-b.jpg",
+ * "2 (1).mp4"), plus those with no number, which go with every record. Each list is in name order.
+ */
+export function sortPictures(names) {
+  const byNumber = new Map();
+  const shared = [];
+  const stem = (name) => name.slice(0, name.length - extname(name).length);
+  const sorted = names.filter((name) => PICTURE.test(name)).sort((a, b) => stem(a).localeCompare(stem(b), undefined, { numeric: true }) || a.localeCompare(b));
+  for (const name of sorted) {
+    const match = /^(\d+)(?![\d])/.exec(name);
+    if (!match) {
+      shared.push(name);
+      continue;
+    }
+    const number = Number(match[1]);
+    byNumber.set(number, [...(byNumber.get(number) ?? []), name]);
+  }
+  return { byNumber, shared };
+}
+
+/**
+ * Which pictures go with which record: every added or beaten record gets the pictures numbered for it and
+ * the shared ones. A record that ties the table gets them too when the table's record has none yet, so
+ * pictures sent after the record went up can still be added. Returns { number, record, names } per record.
+ */
+export function picturesFor(results, pictures, screenshots = {}) {
+  const plan = [];
+  for (const result of results) {
+    const names = [...(pictures.byNumber.get(result.number) ?? []), ...pictures.shared];
+    if (!names.length) continue;
+    if (result.outcome === 'added' || result.outcome === 'beaten') plan.push({ number: result.number, record: result.record, names });
+    else if (result.tie && !screenshots[recordKey(result.tie)]) plan.push({ number: result.number, record: result.tie, names, late: true });
+  }
+  return plan;
+}
+
+/** Where a picture is copied to, under public/: the voyage's sent/ folder, named for the record and the file's contents. */
+export function picturePath(record, bytes, name) {
+  const hash = createHash('sha256').update(bytes).digest('hex').slice(0, 8);
+  return `voyage-records/screenshots/${SHOT_DIRS[record.voyage]}/sent/${record.ocean}-${record.crewSize}p-${hash}${extname(name).toLowerCase().replace('.jpeg', '.jpg')}`;
+}
+
+/** The screenshots entry for a record: the first picture, then the rest. */
+export function screenshotEntry(paths) {
+  return paths.length > 1 ? { screenshot: paths[0], more: paths.slice(1) } : { screenshot: paths[0] };
+}
+
+/** Every saved file an entry points to. */
+function entryFiles(entry) {
+  return [entry?.screenshot, ...(entry?.more ?? [])].filter(Boolean);
+}
+
+/** One value as sheet-records.json writes it: JSON with a space after each colon and comma. */
+function sheetValue(value) {
+  if (Array.isArray(value)) return `[${value.map(sheetValue).join(', ')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value).map(([key, item]) => `${JSON.stringify(key)}: ${sheetValue(item)}`).join(', ')}}`;
+  return JSON.stringify(value);
+}
+
+/**
+ * sheet-records.json with its "screenshots" part replaced, one record per line as the repo keeps it.
+ * Everything above that part is left exactly as it was.
+ */
+export function withScreenshots(text, screenshots) {
+  const lines = Object.entries(screenshots).map(([key, entry]) => `    ${JSON.stringify(key)}: ${sheetValue(entry)}`);
+  const block = `"screenshots": {\n${lines.join(',\n')}\n  }`;
+  const at = text.lastIndexOf('"screenshots": {');
+  if (at >= 0) return `${text.slice(0, at)}${block}\n}\n`;
+  const end = text.lastIndexOf('}');
+  return `${text.slice(0, end).trimEnd()},\n  ${block}\n}\n`;
+}
+
+/**
+ * The records file in a send-in folder: its only .txt or .json. Throws when there's none or more than one.
+ */
+export function submissionIn(folder, names = readdirSync(folder)) {
+  const files = names.filter((name) => /\.(txt|json)$/i.test(name));
+  if (files.length === 1) return join(folder, files[0]);
+  throw new Error(files.length
+    ? `More than one .txt or .json in the folder (${files.join(', ')}). Keep only the player's records file there.`
+    : 'No .txt or .json records file in the folder. Save the player\'s message or export there.');
+}
+
+/**
+ * Copies a folder's pictures into public/ and points each record at them in the screenshots table. A beaten
+ * record's old pictures are dropped from the table, and deleted when this script saved them and nothing else
+ * uses them. Returns the changed screenshots table, the files to commit, and what to print.
+ */
+function savePictures(folder, results, screenshots) {
+  const next = { ...screenshots };
+  const notes = [];
+  const added = [];
+  const pictures = folder ? sortPictures(readdirSync(folder)) : { byNumber: new Map(), shared: [] };
+  const plan = picturesFor(results, pictures, screenshots);
+  const planned = new Set(plan.map((item) => item.number));
+  const dropped = [];
+  for (const result of results) {
+    if (result.outcome !== 'beaten') continue;
+    const key = recordKey(result.record);
+    if (!next[key]) continue;
+    dropped.push(...entryFiles(next[key]));
+    delete next[key];
+    if (!planned.has(result.number)) notes.push(`  Record ${result.number} has no picture: its old screenshot was taken off, as it shows the beaten record.`);
+  }
+  for (const item of plan) {
+    const paths = [];
+    for (const name of item.names) {
+      const from = join(folder, name);
+      const size = statSync(from).size / 1024 / 1024;
+      if (size > MAX_FILE_MB) {
+        notes.push(`  Left out ${name}: at ${Math.round(size)} MB it's too big for GitHub. Upload it to YouTube and add its link as videoUrl instead.`);
+        continue;
+      }
+      const bytes = readFileSync(from);
+      const path = picturePath(item.record, bytes, name);
+      if (!paths.includes(path)) paths.push(path);
+      const to = join(PUBLIC, path);
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(from, to);
+      if (!added.includes(to)) added.push(to);
+    }
+    if (!paths.length) continue;
+    next[recordKey(item.record)] = screenshotEntry(paths);
+    notes.push(`  Record ${item.number}: ${item.names.join(', ')}${item.late ? ' (added to the record already on the table)' : ''}`);
+  }
+  const unused = new Set(results.filter((result) => result.number && !planned.has(result.number)).map((result) => result.number));
+  for (const [number, names] of pictures.byNumber) {
+    if (unused.has(number) || !results.some((result) => result.number === number)) notes.push(`  Not used: ${names.join(', ')} (record ${number} ${results.some((result) => result.number === number) ? 'was not added' : 'is not in the file'})`);
+  }
+  const stillUsed = new Set(Object.values(next).flatMap(entryFiles));
+  const removed = [];
+  for (const path of dropped) {
+    if (!/\/sent\//.test(path) || stillUsed.has(path)) continue;
+    const file = join(PUBLIC, path);
+    if (existsSync(file)) {
+      rmSync(file);
+      removed.push(file);
+    }
+  }
+  return { screenshots: next, added, removed, notes, changed: JSON.stringify(next) !== JSON.stringify(screenshots) };
 }
 
 function git(...args) {
@@ -232,7 +395,7 @@ async function main(args) {
   const dryRun = args.includes('--dry-run');
   const files = args.filter((arg) => !arg.startsWith('--'));
   if (!files.length) {
-    console.error('Usage: npm run add-records -- <export .json or message .txt> [more files] [--dry-run] [--no-pr]');
+    console.error('Usage: npm run add-records -- <export .json, message .txt, or a folder with one and its pictures> [more] [--dry-run] [--no-pr]');
     process.exit(1);
   }
   // Unless told not to, the records go on a new branch off the latest main and into a pull request.
@@ -245,13 +408,24 @@ async function main(args) {
     }
   }
   let table = JSON.parse(readFileSync(TABLE, 'utf8')).records;
+  const sheetText = readFileSync(SHEET, 'utf8');
+  let screenshots = JSON.parse(sheetText).screenshots ?? {};
   let history = '';
   const changes = [];
+  const pictureFiles = [];
+  const removedFiles = [];
+  let picturesChanged = false;
   for (const file of files) {
-    const path = resolve(file);
+    let path = resolve(file);
+    let folder = null;
     console.log(`\n${path}`);
     let submitted;
     try {
+      if (existsSync(path) && statSync(path).isDirectory()) {
+        folder = path;
+        path = submissionIn(folder);
+        console.log(`  Records from ${basename(path)}`);
+      }
       submitted = readSubmission(readFileSync(path, 'utf8'));
     } catch (error) {
       console.error(`  ${error.code === 'ENOENT' ? 'File not found.' : error.message}`);
@@ -259,35 +433,56 @@ async function main(args) {
       continue;
     }
     // Each record already lists its own crew, so the source only says when and in which file it came.
-    const source = `Sent in ${new Date().toISOString().slice(0, 10)} (${basename(path)})`;
+    const source = `Sent in ${new Date().toISOString().slice(0, 10)} (${folder ? `${basename(folder)}/` : ''}${basename(path)})`;
     const merged = mergeRecords(table, submitted, source);
-    table = merged.records;
     for (const result of merged.results) console.log(`  ${result.text}`);
+    if (dryRun) {
+      const plan = folder ? picturesFor(merged.results, sortPictures(readdirSync(folder)), screenshots) : [];
+      for (const item of plan) console.log(`  Record ${item.number} would get ${item.names.join(', ')}`);
+      picturesChanged ||= plan.length > 0;
+    } else {
+      const saved = savePictures(folder, merged.results, screenshots);
+      if (saved.notes.length) console.log(`  Pictures:\n${saved.notes.join('\n')}`);
+      screenshots = saved.screenshots;
+      pictureFiles.push(...saved.added);
+      removedFiles.push(...saved.removed);
+      picturesChanged ||= saved.changed;
+    }
+    table = merged.records;
     history += historyLines(merged.results, path);
     changes.push(...merged.results.filter((result) => result.outcome === 'added' || result.outcome === 'beaten'));
   }
   const changed = changes.length;
-  const count = `${changed} record${changed === 1 ? '' : 's'}`;
-  if (!changed || dryRun) {
-    console.log(changed ? `\n${count} would change. Run again without --dry-run to save.` : '\nNothing new to add.');
+  const count = changed ? `${changed} record${changed === 1 ? '' : 's'}` : 'pictures';
+  if ((!changed && !picturesChanged) || dryRun) {
+    console.log(changed || picturesChanged ? `\n${count} would change. Run again without --dry-run to save.` : '\nNothing new to add.');
     if (pr) {
       returnTo(pr.previous);
       git('branch', '-D', pr.branch);
     }
     return;
   }
-  writeFileSync(TABLE, formatTable(table));
-  appendFileSync(HISTORY, history);
-  console.log(`\nSaved ${count} to src/voyage-records/known-records.json.`);
-  console.log(`The records they replaced are kept in ${HISTORY}.`);
+  if (changed) {
+    writeFileSync(TABLE, formatTable(table));
+    appendFileSync(HISTORY, history);
+    console.log(`\nSaved ${count} to src/voyage-records/known-records.json.`);
+    console.log(`The records they replaced are kept in ${HISTORY}.`);
+  }
+  if (picturesChanged) {
+    writeFileSync(SHEET, withScreenshots(sheetText, screenshots));
+    console.log(`Saved ${pictureFiles.length} picture${pictureFiles.length === 1 ? '' : 's'} for Global records.`);
+  }
   if (!pr) {
     console.log('Commit and push to put them live.');
     return;
   }
-  const title = `Voyage records: ${changed === 1 ? 'a new record' : `${changed} new records`}`;
+  const title = changed
+    ? `Voyage records: ${changed === 1 ? 'a new record' : `${changed} new records`}`
+    : 'Voyage records: pictures for records already on the table';
   const lines = changes.map((change) => `- ${change.text.replace(/^(Added|Beaten)\s+/, '')}`);
+  if (pictureFiles.length) lines.push(`- ${pictureFiles.length} picture${pictureFiles.length === 1 ? '' : 's'} for Global records`);
   try {
-    git('add', TABLE);
+    git('add', TABLE, SHEET, ...pictureFiles, ...removedFiles);
     git('commit', '-m', `${title}\n\n${lines.join('\n')}`);
     git('push', '-u', 'origin', pr.branch);
   } catch (error) {

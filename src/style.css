@@ -1742,11 +1742,16 @@ a {
   font-weight: 600;
 }
 
-.rp-viewer img {
+.rp-viewer img,
+.rp-viewer video {
   display: block;
   max-width: 100%;
   max-height: calc(94vh - 70px);
   margin: 0 auto;
+}
+
+.rp-viewer [hidden] {
+  display: none;
 }
 
 .rp-video {
@@ -2269,4 +2274,10 @@ a {
 
 .rp-big-crews:not([hidden]) {
   display: table-row-group;
+}
+
+/* "picture, image or video" in the records send-in text: its own colour so players see that proof is wanted. */
+.vr-media-words {
+  color: #4fe3c1;
+  font-weight: 700;
 }
