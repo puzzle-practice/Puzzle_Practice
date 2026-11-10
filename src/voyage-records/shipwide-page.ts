@@ -115,11 +115,19 @@ interface Shot {
   label: string;
 }
 
-/** A screenshot viewer that steps through every screenshot of a record, with the arrow keys too. */
+/** Proof saved as a video file rather than a picture: it plays in the viewer instead. */
+function isVideo(src: string): boolean {
+  return /\.(mp4|webm|mov|m4v)$/i.test(src);
+}
+
+/** A screenshot viewer that steps through every screenshot (or video) of a record, with the arrow keys too. */
 function openViewer(shots: Shot[], start: number): void {
   viewer?.remove();
   let index = start;
   const img = el('img');
+  const video = el('video');
+  video.controls = true;
+  video.preload = 'metadata';
   const caption = el('span');
   const open = el('a', 'panel-button', 'Open full size');
   open.target = '_blank';
@@ -133,19 +141,32 @@ function openViewer(shots: Shot[], start: number): void {
   next.setAttribute('aria-label', 'Next screenshot');
   const show = () => {
     const shot = shots[index];
-    img.src = shot.src;
+    const playing = isVideo(shot.src);
+    img.hidden = playing;
+    video.hidden = !playing;
+    video.pause();
+    if (playing) {
+      video.src = shot.src;
+      img.removeAttribute('src');
+    } else {
+      img.src = shot.src;
+      video.removeAttribute('src');
+    }
     img.alt = shot.label;
     open.href = shot.src;
     caption.textContent = shots.length > 1 ? `${shot.label} · ${index + 1} of ${shots.length}` : shot.label;
   };
   const stepper = shots.length > 1 ? [previous, next] : [];
-  const dialog = el('dialog', 'rp-viewer', el('div', 'rp-viewer-bar', caption, ...stepper, open, button('Close', 'panel-button', () => dialog.close())), img);
+  const dialog = el('dialog', 'rp-viewer', el('div', 'rp-viewer-bar', caption, ...stepper, open, button('Close', 'panel-button', () => dialog.close())), img, video);
   dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
   dialog.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowLeft') step(-1);
     if (event.key === 'ArrowRight') step(1);
   });
-  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('close', () => {
+    video.pause();
+    dialog.remove();
+  });
   show();
   document.body.append(dialog);
   viewer = dialog;
@@ -423,7 +444,10 @@ function oceanPills(oceans: string[], selected: string): HTMLElement | null {
 
 function sourceNote(voyage: ExpeditionId): HTMLElement {
   const sources = sheetSources.filter((source) => source.voyage === voyage);
-  if (!sources.length) return el('p', 'vr-notes', 'Woodhallow records come from crews’ chatlogs and screenshots sent to Jice. Beat one? Send it from My records.');
+  if (!sources.length) {
+    return el('p', 'vr-notes', 'Woodhallow records come from crews’ chatlogs and screenshots sent to Jice. Beat one? Send it from My records, with a ',
+      el('span', 'vr-media-words', 'picture, image or video'), ' of it.');
+  }
   const links = sources.flatMap((source, index) => {
     const link = el('a', '', source.name);
     link.href = source.url;

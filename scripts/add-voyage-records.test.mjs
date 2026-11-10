@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { formatTable, historyLines, mergeRecords, readSubmission } from './add-voyage-records.mjs';
 
 const table = [
@@ -59,4 +60,56 @@ it('finds the GitHub repo in a remote URL', async () => {
   expect(githubRepo('https://github.com/puzzle-practice/Puzzle_Practice.git')).toBe('puzzle-practice/Puzzle_Practice');
   expect(githubRepo('git@github.com:puzzle-practice/puzzle_practice')).toBe('puzzle-practice/puzzle_practice');
   expect(githubRepo('https://example.com/x/y')).toBe(null);
+});
+
+describe('pictures in a send-in folder', () => {
+  it('sorts pictures by the record number they start with, and shares the rest', async () => {
+    const { sortPictures } = await import('./add-voyage-records.mjs');
+    const { byNumber, shared } = sortPictures(['10.png', '2-b.jpg', '2.png', '1 (1).MP4', 'crew.webp', 'message.txt', 'notes.doc', '12x.png']);
+    expect(Object.fromEntries(byNumber)).toEqual({ 1: ['1 (1).MP4'], 2: ['2.png', '2-b.jpg'], 10: ['10.png'], 12: ['12x.png'] });
+    expect(shared).toEqual(['crew.webp']);
+  });
+
+  it('gives pictures to added and beaten records, and to a tie whose record has none yet', async () => {
+    const { picturesFor, sortPictures } = await import('./add-voyage-records.mjs');
+    const { results } = mergeRecords(table, [
+      sent({ kind: 'chests', value: 140 }),
+      sent({ kind: 'score', value: 1270 }),
+      sent({ crewSize: 1, kind: 'score', value: 5 }),
+      sent({ kind: 'score', value: 12 }),
+    ], 'Sent in');
+    const pictures = sortPictures(['1.png', '2.png', '4.png', 'all.png']);
+    expect(picturesFor(results, pictures).map(({ number, names, late }) => ({ number, names, late }))).toEqual([
+      { number: 1, names: ['1.png', 'all.png'], late: undefined },
+      { number: 2, names: ['2.png', 'all.png'], late: true },
+      { number: 3, names: ['all.png'], late: undefined },
+    ]);
+    // The tied score record already has a picture, so it keeps that one.
+    expect(picturesFor(results, pictures, { 'cursedIsles/emerald/3/score': { screenshot: 'x.png' } }).map((item) => item.number)).toEqual([1, 3]);
+  });
+
+  it('names copied pictures by voyage, ocean, crew and contents', async () => {
+    const { picturePath } = await import('./add-voyage-records.mjs');
+    const path = picturePath({ voyage: 'vampireLairs', ocean: 'emerald', crewSize: 4 }, Buffer.from('a'), 'Shot.JPEG');
+    expect(path).toMatch(/^voyage-records\/screenshots\/vampire-lairs\/sent\/emerald-4p-[0-9a-f]{8}\.jpg$/);
+    expect(picturePath({ voyage: 'vampireLairs', ocean: 'emerald', crewSize: 4 }, Buffer.from('a'), 'x.jpg')).toBe(path);
+  });
+
+  it('finds the one records file in the folder', async () => {
+    const { submissionIn } = await import('./add-voyage-records.mjs');
+    expect(submissionIn('f', ['1.png', 'gummy.txt'])).toMatch(/gummy\.txt$/);
+    expect(() => submissionIn('f', ['1.png'])).toThrow(/No .txt or .json/);
+    expect(() => submissionIn('f', ['a.txt', 'b.json'])).toThrow(/More than one/);
+  });
+
+  it('rewrites only the screenshots part of sheet-records.json, in the same layout', async () => {
+    const { SHEET, screenshotEntry, withScreenshots } = await import('./add-voyage-records.mjs');
+    const text = readFileSync(SHEET, 'utf8');
+    const { screenshots } = JSON.parse(text);
+    expect(withScreenshots(text, screenshots)).toBe(text);
+    const next = withScreenshots(text, { ...screenshots, 'woodhallow/emerald/4/score': screenshotEntry(['a.png', 'b.mp4']) });
+    expect(next.startsWith(text.slice(0, text.lastIndexOf('"screenshots"')))).toBe(true);
+    expect(next).toContain('    "woodhallow/emerald/4/score": {"screenshot": "a.png", "more": ["b.mp4"]}\n  }\n}\n');
+    expect(JSON.parse(next).screenshots['woodhallow/emerald/4/score']).toEqual({ screenshot: 'a.png', more: ['b.mp4'] });
+  });
 });
