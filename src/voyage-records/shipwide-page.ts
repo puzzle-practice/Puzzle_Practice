@@ -442,12 +442,10 @@ function oceanPills(oceans: string[], selected: string): HTMLElement | null {
   }));
 }
 
-function sourceNote(voyage: ExpeditionId): HTMLElement {
+/** Where a voyage's records were copied from, or nothing for a voyage with no source sheet (Woodhallow). */
+function sourceNote(voyage: ExpeditionId): HTMLElement | null {
   const sources = sheetSources.filter((source) => source.voyage === voyage);
-  if (!sources.length) {
-    return el('p', 'vr-notes', 'Woodhallow records come from crews’ chatlogs and screenshots sent to Jice. Beat one? Send it from My records, with a ',
-      el('span', 'vr-media-words', 'picture, image or video'), ' of it.');
-  }
+  if (!sources.length) return null;
   const links = sources.flatMap((source, index) => {
     const link = el('a', '', source.name);
     link.href = source.url;
@@ -479,7 +477,7 @@ export function showShipwideRecords(app: HTMLElement): void {
     content.replaceChildren(
       el('div', 'vr-pickers', voyageTabs(), ocean ? oceanPills(oceans, ocean) : null),
       ...(ocean ? [summaryTiles(state.voyage, ocean)] : []),
-      sourceNote(state.voyage),
+      ...[sourceNote(state.voyage)].filter((note) => note !== null),
       ...(shown.length ? shown : [el('p', 'vr-empty', 'No records yet.')]),
     );
   };
