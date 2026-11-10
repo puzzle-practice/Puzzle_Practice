@@ -2263,7 +2263,8 @@ describe('Navigation sessions and replay', () => {
     expect(store.history(settingsKey(settings))).toHaveLength(0);
     now = 700; instance.frame([]);
     buttons.get('Play::Start')!();
-    expect(results()[0]).toMatchObject({ rows: expect.arrayContaining([['Stars dropped', '1'], ['Boards', '2'], ['Constellations', '0 / 13']]) });
+    expect(results()[0]).toMatchObject({ rows: expect.arrayContaining([['Stars dropped', '1'], ['Boards', '2']]) });
+    expect(results()[0]).not.toMatchObject({ rows: expect.arrayContaining([expect.arrayContaining(['Constellations'])]) });
     expect(store.history(settingsKey(settings))).toEqual([expect.objectContaining({ reason: 'Stopped', boards: 2 })]);
     instance.dispose?.();
   });

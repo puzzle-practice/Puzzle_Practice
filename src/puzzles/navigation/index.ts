@@ -100,7 +100,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const timeUp = () => running && !!liveSettings.timerMs && !timeLeft();
   const hold = new EndHold(ticks);
     const dismissKeepsRun = () => isWerewolf(liveSettings.mode) || liveSettings.clears;
-  const of = (goal: number) => goal === Infinity ? '' : ` / ${goal}`;
   const keepsTimer = () => isWerewolf(liveSettings.mode) && isWerewolf(settings.mode) && liveSettings.timerMs > 0 && settings.timerMs === liveSettings.timerMs;
   const saveSettings = () => store.set('settings', settings);
   const key = (name: string, action: string, fallback: string) => keyMatches(name, 'navigation', action, fallback);
@@ -427,9 +426,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }, { disabled: () => !game || (replays?.isPlaying ?? false) || (keepsTimer() && !timeLeft()) || dealing() || !!pendingStart });
   pause.install(panel, () => running && !replays.isPlaying);
   panel.score().stats(['', 'Now'], () => [['Points', String(totals().points)]]);
-  panel.group('Constellations').note(() => !board ? `${game?.constellations ?? 0}${of(game?.goal ?? runGoal(settings))} completed`
-    : liveSettings.clears ? `${totals().constellations}${of(runGoal(liveSettings))} completed over ${board + 1} boards`
-    : `${game?.constellations ?? 0}${of(game?.goal ?? Infinity)} completed on board ${board + 1} (${totals().constellations} in all)`);
   panel.controlSettings.group('Controls')
     .button('Rotate left', () => pendingCommands.push('ccw'), { disabled: () => !running || scenes.length > 0 || replays.isPlaying || pause.paused || dealing() })
     .button('Rotate right', () => pendingCommands.push('cw'), { disabled: () => !running || scenes.length > 0 || replays.isPlaying || pause.paused || dealing() })
@@ -515,7 +511,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     averages: duty.averages(store.sessionHistory(settingsKey(liveSettings)), { scoreLabel: 'Points' }),
     recent: duty.recent(store.history(settingsKey(liveSettings)), { scoreLabel: 'Points' }),
     rows: [['Points', String(totals().points)],
-      ['Constellations', board && !liveSettings.clears ? String(totals().constellations) : `${totals().constellations}${of(runGoal(liveSettings))}`],
       ...(board ? [['Boards', String(board + 1)]] : []),
       ['Stars dropped', String(totals().stars)], ['Ring rotations', String(totals().moves)], ['Longest chain', chainName(longestChain)], ['Longest cascade', chainName(longestCascade)], ['Time', `${(elapsed()/1000).toFixed(2)}s`]],
   } : null);
