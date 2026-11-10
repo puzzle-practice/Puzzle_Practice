@@ -23,7 +23,7 @@ Players are asked to send a picture, image or video with each record. Their mess
 
 ```
 gummy-2026-11-09/
-  message.txt     the copied message, or their "Download all my records" .json (only one .txt or .json)
+  message.txt     the copied message, or their "Download all my records" .json (only one .txt or .json; a README.txt or notes.txt is ignored)
   1.png           picture for record 1
   1-b.png         a second picture for record 1 (anything after the number is fine)
   2.mp4           a video for record 2

@@ -219,10 +219,12 @@ export function withScreenshots(text, screenshots) {
 }
 
 /**
- * The records file in a send-in folder: its only .txt or .json. Throws when there's none or more than one.
+ * The records file in a send-in folder: its only .txt or .json, not counting a README or notes file.
+ * Throws when there's none or more than one.
  */
 export function submissionIn(folder, names = readdirSync(folder)) {
-  const files = names.filter((name) => /\.(txt|json)$/i.test(name));
+  // A README or notes file kept with the pictures isn't the player's records.
+  const files = names.filter((name) => /\.(txt|json)$/i.test(name) && !/^(readme|notes?)\b/i.test(name));
   if (files.length === 1) return join(folder, files[0]);
   throw new Error(files.length
     ? `More than one .txt or .json in the folder (${files.join(', ')}). Keep only the player's records file there.`

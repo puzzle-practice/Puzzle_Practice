@@ -98,6 +98,7 @@ describe('pictures in a send-in folder', () => {
   it('finds the one records file in the folder', async () => {
     const { submissionIn } = await import('./add-voyage-records.mjs');
     expect(submissionIn('f', ['1.png', 'gummy.txt'])).toMatch(/gummy\.txt$/);
+    expect(submissionIn('f', ['1.png', 'README.txt', 'notes.txt', 'record text.txt'])).toMatch(/record text\.txt$/);
     expect(() => submissionIn('f', ['1.png'])).toThrow(/No .txt or .json/);
     expect(() => submissionIn('f', ['a.txt', 'b.json'])).toThrow(/More than one/);
   });
