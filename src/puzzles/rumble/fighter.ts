@@ -236,7 +236,7 @@ export class Fighter {
   private fire(fist: number, now: number): void {
     let piece = this.hand[fist];
     // Held a second or more: charged, even if the frame that would have shown it hasn't come.
-    if (this.charging === fist && (this.chargedHand || now - this.chargeStart >= CHARGE_MS)) piece = charged(piece);
+    if (this.charging === fist && (this.chargedHand || now - this.chargeStart >= CHARGE_MS) && this.board.canCharge(piece)) piece = charged(piece);
     let dir = this.dir[fist];
     if (this.wobble) {
       const [lo, hi] = this.board.ranges[fist];
@@ -328,7 +328,7 @@ export class Fighter {
       case 'control': {
         if (this.halted) return false;
         const controlNow = this.sandbox.shotTimer ? Math.min(now, this.controlAt + AUTO_FIRE_MS) : now;
-        if (this.charging >= 0 && !this.chargedHand && controlNow - this.chargeStart >= CHARGE_MS) {
+        if (this.charging >= 0 && !this.chargedHand && controlNow - this.chargeStart >= CHARGE_MS && this.board.canCharge(this.hand[this.charging])) {
           this.chargedHand = true;
         }
         if (!this.sandbox.shotTimer) return false;
