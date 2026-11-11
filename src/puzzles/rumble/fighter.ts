@@ -530,6 +530,25 @@ export class Fighter {
     });
   }
 
+  /**
+   * Freeplay mode: the board drops a row now, as it would on the eighth shot, and the count of
+   * shots to the next drop starts over. Returns false if a ball or strike is still moving.
+   */
+  dropNow(now: number): boolean {
+    if (!this.canFire || this.punch || this.sprinkle || this.flight) return false;
+    this.board.drop();
+    this.stats.drops++;
+    this.dropAt = now;
+    this.shotAt = now;
+    this.shakeSounds = 0;
+    this.charging = -1;
+    this.warned = false;
+    this.busyUntil = now + DROP_MS;
+    this.phase = 'drop';
+    if (this.board.isDead() && !this.sandbox.endless) this.knockOut(this.busyUntil);
+    return true;
+  }
+
   /** Freeplay mode: the board was edited, so the turn's clock starts over. */
   edited(now: number): void {
     if (this.phase !== 'control') return;

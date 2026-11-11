@@ -1099,7 +1099,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   });
 
   // The board's seed can be copied in any mode, and pasted or dealt anew while playing in Freeplay.
-  const boardGroup = panel.controlSettings.group('Board');
+  const boardGroup = panel.group('Board');
   boardGroup.button('Copy', () => game && copyText(getCreateSeed(fromColumns(game.board.columns)), 'Copy this seed:'), {
     disabled: () => !game,
     title: "Copy the board's seed",
