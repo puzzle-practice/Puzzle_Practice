@@ -1601,8 +1601,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         else { match.update(now); if (match.settledAt) stop(); }
       } else if (aiming() && aim?.result) aim.update(now);
     }
-    rumbleAudio.sync(running && !aiming() && !replays.isSeeking && !replays.isAdvancing ? match?.player ?? null : null);
+    // A replay steps the game several times a frame: its sustained sounds follow the frame it
+    // shows, not each step, so they aren't stopped and started again every frame.
     if (replays.isSeeking || replays.isAdvancing) return;
+    rumbleAudio.sync(running && !aiming() ? match?.player ?? null : null);
     draw(now);
   }
 
