@@ -244,7 +244,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     game = new NavigationGame(SETTINGS, rng.integer(1, 0x7fffffff));
     start = null; upcoming = []; goal = null;
     shown = positionOf(game);
-    scenes = []; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
+    scenes = []; afterScenes = null; waiting = false; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
     captionText = '';
     status = 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked, and a buzz sounds if a ring 2 star lines up with the ring 1 star under it (as the rings sit, or after the turn you’re saving).';
   }
@@ -310,7 +310,10 @@ export default (async ({ screen, panel, store, ticks }) => {
     if (action.kind === 'drop' && upcoming.length) g.entry = upcoming.shift()!;
   }
   function practiceMove(action: Action): void {
-    if (!game || busy() || !playing()) return;
+    if (!game || !playing()) return;
+    // From scratch plays like the game: a new move finishes the last one's animation at once.
+    if (busy() && mode === 'scratch') finishScenes();
+    if (busy()) return;
     if (action.kind === 'drop' && game.board.get(game.entry.octant, 0) !== EMPTY) { status = 'That drop would booch the board.'; return; }
     const list = act(game, action);
     if (!list.length) return;
@@ -581,9 +584,11 @@ export default (async ({ screen, panel, store, ticks }) => {
     if (!current && mode === 'practise' && game && goal && showGoal) drawGoal(goal, scene.cells);
     if (!current) {
       if (arrowRing) drawArrow(arrowRing.ring, arrowRing.clockwise);
-      if (playing() && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
+      if (playing() && game && !game.finished && mode !== 'scratch') star(game.entry.colour, game.entry.octant, 205);
       if (mode === 'when' && bad && bad.moves[buildAt]?.kind === 'drop') star(bad.boards[buildAt].entry.colour, bad.boards[buildAt].entry.octant, 205);
     }
+    // From scratch keeps the next star in view while a move plays out.
+    if (mode === 'scratch' && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
     drawCaption(captionText);
   }
 
@@ -602,6 +607,11 @@ export default (async ({ screen, panel, store, ticks }) => {
       scenes.shift();
       startNext();
     }
+  }
+  /** Skips to the end of what's playing. */
+  function finishScenes(): void {
+    scenes = []; waiting = false;
+    const done = afterScenes; afterScenes = null; done?.();
   }
   function startNext(): void {
     if (scenes[0]?.caption) captionText = scenes[0].caption;
@@ -677,11 +687,11 @@ export default (async ({ screen, panel, store, ticks }) => {
   steps.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
   const scratch = panel.group('Build from scratch', { hidden: () => mode !== 'scratch' });
-  scratch.button('New board', newScratch, { variant: 'primary', disabled: busy });
+  scratch.button('New board', newScratch, { variant: 'primary' });
   scratch.append(rowBreak());
-  scratch.button('Rotate left', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: false }), { disabled: busy })
-    .button('Rotate right', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: true }), { disabled: busy })
-    .button('Drop star', () => practiceMove({ kind: 'drop' }), { disabled: busy });
+  scratch.button('Rotate left', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: false }))
+    .button('Rotate right', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: true }))
+    .button('Drop star', () => practiceMove({ kind: 'drop' }));
   scratch.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
   const practise = panel.group('Practice', { hidden: () => mode !== 'practise' });
