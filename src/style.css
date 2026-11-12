@@ -2281,3 +2281,10 @@ a {
   color: #4fe3c1;
   font-weight: 700;
 }
+
+/* Dennav tutorial lesson text */
+.tutorial-text { font-size: 0.92rem; line-height: 1.45; color: var(--text); }
+.tutorial-text p { margin: 0 0 0.6em; }
+.tutorial-text .tutorial-heading { margin-top: 0.8em; font-weight: 600; }
+.tutorial-text ul { margin: 0; padding-left: 1.2em; }
+.tutorial-text li { margin-bottom: 0.3em; }
