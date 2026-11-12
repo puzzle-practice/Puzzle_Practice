@@ -122,6 +122,19 @@ describe('Dennav tutorial: the vertical triple, step by step', async () => {
     expect(wildedBy(targets, [26, 27, 28])).toHaveLength(4);
     expect(bestHorizontals(targets)).toEqual({ wild: 4, starts: [0, 2] });
   });
+  it('reads the build from the targets when two look as far along', () => {
+    // Ring 1 from east round: yellow, white, white, blue, orange, orange, red, blue. Ring 2: yellow east
+    // (on its target), red south. Targets: blue ring 1 and ring 2 west, yellow ring 2 east, yellow ring 3 north-west.
+    const cells = Array<number>(32).fill(-1);
+    [4, 3, 3, 0, 1, 1, 2, 0].forEach((c, o) => { cells[24 + o] = c; });
+    cells[16] = 4; cells[16 + 6] = 2;
+    const t = (ring: number, octant: number, colour: number) => ({ ring, octant, colour, wild: false });
+    const guess = guessBuild(cells, [t(3, 4, 0), t(2, 4, 0), t(2, 0, 4), t(1, 3, 4)])!;
+    // The red vertical over the south, with the orange pair beside it under the blue targets.
+    expect(guess.column).toBe(6);
+    expect(guess.colour).toBe(2);
+    expect(guess.lineups).toEqual([[24, 16]]);
+  });
   it('finds ring 1 and ring 2 line-ups, in line and after the saved turn', () => {
     const E = -1;
     // Ring indices: 0 outer (ring 4) … 3 inner (ring 1). A blue (0) vertical over octant 0 with ring 1

@@ -595,7 +595,7 @@ function unturned(turn: Action | null, cell: number): number {
  * Guesses the vertical triple a player is building: two or three of one colour through rings 1–3 in
  * one column (now, or after one turn), with a ring 1 pair of another colour beside that column.
  */
-export function guessBuild(cells: number[]): BuildGuess | null {
+export function guessBuild(cells: number[], targets: Target[] = []): BuildGuess | null {
   let best: (BuildGuess & { score: number }) | null = null;
   for (const turn of TURNS) {
     const lined = turn ? linedUpCells({ cells, targets: [], entry: { colour: 0, octant: 0 } }, turn) : cells;
@@ -611,7 +611,10 @@ export function guessBuild(cells: number[]): BuildGuess | null {
         if (!turn && vertical.length === 3) continue;
         // A ring 4 star of the pair's colour waiting above the column makes it all the likelier.
         const topped = pairs.some(([a]) => lined[EXTRA * 8 + column] === lined[a]);
-        const score = vertical.length * 2 + (topped ? 1 : 0) + (turn ? 0 : 0.5);
+        // Between builds that look as far along, the one whose horizontal turns more unfilled targets wild.
+        const open = targets.filter((t) => lined[t.ring * 8 + t.octant] !== t.colour);
+        const wild = Math.max(...pairs.map((pair) => wildedBy(open, [INNER * 8 + column, ...pair]).length));
+        const score = vertical.length * 2 + (topped ? 1 : 0) + wild * 0.1 + (turn ? 0 : 0.05);
         if (best && best.score >= score) continue;
         const lineups: [number, number][] = [];
         const own = new Set(vertical.map((c) => unturned(turn, c)));

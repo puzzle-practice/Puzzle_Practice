@@ -93,7 +93,10 @@ export default (async ({ screen, panel, store, ticks }) => {
   /** Find the wrong move: the spoiled build, how far through it the board is, and the working board it was meant to reach. */
   let bad: BadBuild | null = null, buildAt = 0, goodFinal: Position | null = null, buildTrigger: Action | null = null;
 
-  const speed = () => (slow ? 2 : 1);
+  /** Replaying the last move slowly (Build from scratch). */
+  let replaying = false;
+  const isSlow = () => slow || replaying;
+  const speed = () => (isSlow() ? 2 : 1);
   const busy = () => scenes.length > 0;
   /** Modes where the player moves the rings. */
   const playing = () => mode === 'practise' || mode === 'scratch';
@@ -105,6 +108,7 @@ export default (async ({ screen, panel, store, ticks }) => {
   }
   /** A move played back for the player to follow: turns slowed down, and a pause after it before the next. */
   function paced(list: Scene[], g: NavigationGame): Scene[] {
+    if (!isSlow()) return list;
     const slowed = list.map((scene) => scene.rotation ? { ...scene, duration: 450 } : scene);
     return [...slowed.slice(0, -1), ...slowed.slice(-1).map((scene) => ({ ...scene, duration: Math.max(scene.duration, 700) })), ...(slowed.length ? [] : [{ ...g.scene(700) }])];
   }
@@ -240,17 +244,29 @@ export default (async ({ screen, panel, store, ticks }) => {
   // --- Build from scratch ---
   /** What the board looks like it's building, and the line-ups already buzzed for. */
   let guess: BuildGuess | null = null, buzzed = new Set<string>();
+  /** Moves made while the last was playing out, and the last move with the board before it, to replay slowly. */
+  let queued: Action[] = [], lastMove: { before: Position; action: Action } | null = null;
+  function replayLast(): void {
+    if (!lastMove || busy() || !game) return;
+    const g = gameAt(lastMove.before);
+    const list = act(g, lastMove.action);
+    const o = outcome(list, positionOf(g));
+    const live = game;
+    replaying = true; stepping = false; marks = []; shown = lastMove.before;
+    captionText = `Last move: ${moveText(lastMove.action, lastMove.action.kind === 'drop' ? lastMove.before.entry : undefined)}`;
+    playScenes(list, captionsFor(o), () => { replaying = false; shown = positionOf(live); captionText = ''; checkScratch(); });
+  }
   function newScratch(): void {
     game = new NavigationGame(SETTINGS, rng.integer(1, 0x7fffffff));
     start = null; upcoming = []; goal = null;
     shown = positionOf(game);
-    scenes = []; afterScenes = null; waiting = false; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
+    scenes = []; afterScenes = null; waiting = false; replaying = false; queued = []; lastMove = null; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
     captionText = '';
     status = 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked, and a buzz sounds if a ring 2 star lines up with the ring 1 star under it (as the rings sit, or after the turn you’re saving).';
   }
   function checkScratch(): void {
     if (!game) return;
-    guess = guessBuild(game.board.cells);
+    guess = guessBuild(game.board.cells, game.targets);
     marks = [];
     if (!guess) { buzzed = new Set(); return; }
     for (const c of [...guess.vertical, ...guess.pair]) marks.push({ cell: c, colour: '#7fd8ff' });
@@ -311,9 +327,10 @@ export default (async ({ screen, panel, store, ticks }) => {
   }
   function practiceMove(action: Action): void {
     if (!game || !playing()) return;
-    // From scratch plays like the game: a new move finishes the last one's animation at once.
-    if (busy() && mode === 'scratch') finishScenes();
+    // From scratch: moves made while one plays out wait their turn, as in the game.
+    if (busy() && mode === 'scratch') { if (queued.length < 4 && !replaying) queued.push(action); return; }
     if (busy()) return;
+    if (mode === 'scratch') lastMove = { before: positionOf(game), action };
     if (action.kind === 'drop' && game.board.get(game.entry.octant, 0) !== EMPTY) { status = 'That drop would booch the board.'; return; }
     const list = act(game, action);
     if (!list.length) return;
@@ -324,7 +341,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     stepping = false;
     playScenes(list, captionsFor(o), () => {
       shown = positionOf(g);
-      if (mode === 'scratch') { checkScratch(); return; }
+      if (mode === 'scratch') { checkScratch(); const nextMove = queued.shift(); if (nextMove) practiceMove(nextMove); return; }
       if (!o.links.length) { status = `${moves} move${moves > 1 ? 's' : ''} so far.`; return; }
       if (lesson().accepts(o)) status = `Yes! ${lesson().success}`;
       else status = `That set off ${o.charted ? `a ${chainName(o.charted).toLowerCase()}` : 'a clear'}, but not a ${lesson().title.toLowerCase()}. Reset to try again, or Show answer.`;
@@ -598,7 +615,8 @@ export default (async ({ screen, panel, store, ticks }) => {
       const current = scenes[0];
       const end = sceneStart + current.scene.duration * speed();
       if (now < end) return;
-      if (current.caption && scenes.length > 1) {
+      // A clear's caption stays up a moment when slowed down (or until Next when stepping); otherwise game speed.
+      if (current.caption && scenes.length > 1 && (stepping || isSlow())) {
         if (stepping) { waiting = true; return; }
         const hold = end + 900 * speed();
         if (now < hold) return;
@@ -607,11 +625,6 @@ export default (async ({ screen, panel, store, ticks }) => {
       scenes.shift();
       startNext();
     }
-  }
-  /** Skips to the end of what's playing. */
-  function finishScenes(): void {
-    scenes = []; waiting = false;
-    const done = afterScenes; afterScenes = null; done?.();
   }
   function startNext(): void {
     if (scenes[0]?.caption) captionText = scenes[0].caption;
@@ -692,6 +705,9 @@ export default (async ({ screen, panel, store, ticks }) => {
   scratch.button('Rotate left', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: false }))
     .button('Rotate right', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: true }))
     .button('Drop star', () => practiceMove({ kind: 'drop' }));
+  scratch.append(rowBreak());
+  scratch.button('Replay last move slowly', replayLast, { disabled: () => busy() || !lastMove, title: 'Play your last move again, slowed down, to see what it set off' });
+  scratch.append(rowBreak());
   scratch.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
   const practise = panel.group('Practice', { hidden: () => mode !== 'practise' });
