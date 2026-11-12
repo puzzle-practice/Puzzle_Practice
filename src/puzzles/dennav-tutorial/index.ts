@@ -2,18 +2,20 @@
 // Learn watches a move play out link by link; Practice deals the same strategy a few moves early;
 // Spot the wrong star hides one wrong star in a board; Find the wrong move spoils a build-up with one bad turn.
 import { Images } from '../../core/assets';
+import { SoundBank } from '../../core/audio';
 import { Random } from '../../core/random';
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
-import type { NavigationGame, Scene } from '../navigation/game';
+import { NavigationGame, type Scene } from '../navigation/game';
 import { COLOUR_NAMES, OCTANT_NAMES } from '../navigation/create';
 import { EMPTY, type Run } from '../navigation/logic';
 import {
-  RINGS, act, play, runStars, buildUpAtMost, dropEntries, spoilBuild, chainName, fixes, gameAt, generate, makeMistake, outcome, positionOf, scramble,
-  type Action, type BadBuild, type Example, type Link, type Mistake, type Outcome, type Position,
+  RINGS, INNER, MIDDLE, TOP, act, play, runStars, verticalPlan, horizontalAt, guessBuild, linedUp, SETTINGS, buildUpAtMost, dropEntries, spoilBuild, chainName, fixes, gameAt, generate, makeMistake, outcome, positionOf, scramble,
+  type Action, type BadBuild, type BuildGuess, type VerticalPlan, type Example, type Link, type Mistake, type Outcome, type Position,
 } from './engine';
 import { LESSONS, VEGAS_AS_PLAYED, type Lesson } from './lessons';
 
+const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 const imageUrls = import.meta.glob<string>('../navigation/media/*.png', { eager: true, query: '?url', import: 'default' });
 const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
 const CX = 225, CY = 300;
@@ -21,9 +23,10 @@ const radius = (ring: number) => 55 + (RINGS - 1 - ring) * 47;
 const position = (octant: number, r: number): [number, number] => [CX + Math.cos(octant * Math.PI / 4) * r, CY - Math.sin(octant * Math.PI / 4) * r];
 const ringLabel = (ring: number) => `ring ${RINGS - ring}`;
 
-type Mode = 'learn' | 'practise' | 'spot' | 'when';
+type Mode = 'learn' | 'steps' | 'practise' | 'scratch' | 'spot' | 'when';
 const MODES: { value: Mode; label: string }[] = [
-  { value: 'learn', label: 'Learn' }, { value: 'practise', label: 'Practice' },
+  { value: 'learn', label: 'Learn' }, { value: 'steps', label: 'Build it step by step' }, { value: 'practise', label: 'Practice' },
+  { value: 'scratch', label: 'Build from scratch' },
   { value: 'spot', label: 'Spot the wrong star' }, { value: 'when', label: 'Find the wrong move' },
 ];
 /** Practice stages: turns only (0–3 turns before the move), or building up the last few stars (negative: -n moves of build-up). */
@@ -54,6 +57,7 @@ function moveText(action: Action, entry?: { colour: number; octant: number }): s
 
 export default (async ({ screen, panel, store, ticks }) => {
   const images = await Images.load(imageUrls);
+  const sounds = new SoundBank(soundUrls);
   const ctx = screen.ctx;
   const rng = new Random();
   let lessonIndex = Math.max(0, LESSONS.findIndex((l) => l.id === store.get('lesson', LESSONS[0].id)));
@@ -91,6 +95,8 @@ export default (async ({ screen, panel, store, ticks }) => {
 
   const speed = () => (slow ? 2 : 1);
   const busy = () => scenes.length > 0;
+  /** Modes where the player moves the rings. */
+  const playing = () => mode === 'practise' || mode === 'scratch';
 
   function playScenes(list: Scene[], captions: Map<Scene, string>, done: (() => void) | null = null): void {
     scenes = list.map((scene) => ({ scene, caption: captions.get(scene) }));
@@ -134,6 +140,124 @@ export default (async ({ screen, panel, store, ticks }) => {
     const moments = lesson().moments;
     const seed = moments[rng.integer(0, moments.length - 1)];
     showExample(generate(seed, lesson().accepts, rng), 'New example');
+  }
+
+
+  // --- Build it step by step (the vertical triple) ---
+  let stepEx: Example | null = null, plan: VerticalPlan | null = null, stepAt = 0, picked = false;
+  const STEP_TITLES = ['The goal', 'Step 1: where the horizontal goes', 'Step 2: build the vertical', 'Step 3: the star on top'];
+  const hasSteps = () => lesson().id === 'vertical-triple';
+  /** The board with only some rings on it. */
+  function only(p: Position, rings: number[]): Position {
+    return { ...p, cells: p.cells.map((c, i) => (rings.includes(Math.floor(i / 8)) ? c : EMPTY)) };
+  }
+  function newSteps(fromSession = false): void {
+    if (!hasSteps()) { stepEx = null; plan = null; shown = { ...shown, cells: shown.cells.map(() => EMPTY), targets: [] }; marks = []; arrowRing = null; captionText = ''; status = 'Step by step is written for the vertical triple so far. Pick Vertical triple in Lesson.'; return; }
+    const l = lesson();
+    for (let tries = 0; tries < 40; tries++) {
+      const ex: Example = fromSession ? l.moments[momentIndex = (momentIndex + (tries ? 1 : 0)) % l.moments.length]
+        : generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng);
+      const pl = verticalPlan(ex);
+      if (!pl || (pl.lineups.length && tries < 39)) continue;
+      stepEx = ex; plan = pl;
+      showStep(0);
+      return;
+    }
+    status = 'Couldn’t make one of those just now. Try again.';
+  }
+  function showStep(k: number): void {
+    if (!stepEx || !plan || busy()) return;
+    const ex = stepEx, pl = plan;
+    stepAt = Math.max(0, Math.min(3, k)); picked = false; scenes = []; game = null;
+    const yellow = '#ffd84a', red = '#ff4040';
+    const colour = (cell: number) => COLOUR_NAMES[ex.position.cells[cell]].toLowerCase();
+    arrowRing = null; marks = [];
+    if (stepAt === 0) {
+      shown = ex.position;
+      marks = runStars(ex.position, ex.action).map((cell) => ({ cell, colour: yellow }));
+      arrowRing = ex.action.kind === 'rotate' ? { ring: ex.action.ring, clockwise: ex.action.clockwise } : null;
+      status = `${STEP_TITLES[0]}. This is the finished board: ${moveText(ex.action)} lines the ${colour(pl.vertical[0])} vertical up through rings 1–3 and it clears. The ring 4 star above it drops all the way into ring 1 and joins the ${colour(pl.pair[0])} pair there, and that second clear turns the targets beside it wild, so the constellation charts as a triple. Press Play move to watch, then Next step to see how it's built.`;
+    } else if (stepAt === 1) {
+      shown = only(ex.position, [INNER]);
+      status = `${STEP_TITLES[1]}. Start with ring 1. Choose where the ring 1 horizontal will go: a star with a pair of another colour beside it, which the vertical will knock out. Put it next to as many unfilled targets as you can, because the targets beside that clear go wild. Click the ring 1 star you'd build the vertical on.`;
+    } else if (stepAt === 2) {
+      shown = only(ex.position, [INNER, MIDDLE, TOP]);
+      marks = pl.vertical.map((cell) => ({ cell, colour: yellow }));
+      for (const cell of pl.lineups) marks.push({ cell, colour: red });
+      const turn = ex.action.kind === 'rotate' ? ex.action : null;
+      const offset = turn ? `${ringLabel(turn.ring)} is left one place out, so it doesn't clear until the last turn` : 'it is only completed by the last move';
+      const top = ex.position.targets.filter((t) => t.ring === TOP);
+      const under = pl.pair.concat(pl.gap).map((c) => linedUp(ex.action, c) % 8);
+      const ring3 = top.length ? (top.some((t) => under.includes(t.octant))
+        ? ' The ring 3 target sits over the horizontal, so it gets filled in step 3.'
+        : ' The ring 3 target isn’t over the horizontal, so fill it now, while you build the vertical.') : '';
+      status = `${STEP_TITLES[2]}. Build the ${colour(pl.vertical[0])} vertical through rings 1, 2 and 3 over that star (marked); ${offset}. While you build, make sure no other ring 2 star is the same colour as the ring 1 star under it, either as the rings sit now or after that last turn. ${pl.lineups.length ? 'The red star breaks that rule.' : 'None do here.'}${ring3}`;
+    } else {
+      shown = ex.position;
+      marks = [{ cell: pl.top, colour: yellow }];
+      arrowRing = ex.action.kind === 'rotate' ? { ring: ex.action.ring, clockwise: ex.action.clockwise } : null;
+      status = `${STEP_TITLES[3]}. Last, turn ring 4 so the star over the vertical (marked) is ${colour(pl.top)}, the pair's colour. Then ${moveText(ex.action)}: the vertical clears, that star drops into ring 1, and the horizontal turns the targets beside it wild. Press Play move.`;
+    }
+    captionText = STEP_TITLES[stepAt];
+  }
+  function pickHorizontal(cell: number): void {
+    if (!stepEx || !plan || stepAt !== 1 || picked || busy()) return;
+    if (Math.floor(cell / 8) !== INNER || stepEx.position.cells[cell] === EMPTY) return;
+    const ex = stepEx, pl = plan;
+    const best = horizontalAt(ex, pl.gap), here = horizontalAt(ex, cell);
+    const reveal = () => {
+      marks = [pl.gap, ...pl.pair].map((c) => ({ cell: c, colour: '#ffd84a' }));
+      for (const t of pl.wilded) marks.push({ cell: t.ring * 8 + t.octant, colour: '#7fd8ff' });
+    };
+    if (cell === pl.gap || (here.pair && here.wild >= best.wild)) {
+      picked = true; reveal();
+      status = `${cell === pl.gap ? 'Yes.' : 'That works as well as the one used here.'} The vertical goes on the marked star, and the dropped star makes a horizontal with the pair beside it. The ${pl.wilded.length} target${pl.wilded.length === 1 ? '' : 's'} marked blue go${pl.wilded.length === 1 ? 'es' : ''} wild when it clears. Press Next step.`;
+    } else if (here.pair) {
+      marks = [{ cell, colour: '#ff4040' }];
+      status = `A horizontal there would work, but only ${here.wild} unfilled target${here.wild === 1 ? '' : 's'} sit${here.wild === 1 ? 's' : ''} beside it. There's a spot next to ${best.wild}. Try again.`;
+    } else {
+      marks = [{ cell, colour: '#ff4040' }];
+      status = 'There’s no pair beside that star, so the star dropped in wouldn’t make a horizontal. Try again.';
+    }
+  }
+  function playSteps(): void {
+    if (!stepEx || busy()) return;
+    const g = gameAt(stepEx.position);
+    const list = act(g, stepEx.action);
+    const o = outcome(list, positionOf(g));
+    stepping = false; arrowRing = null; marks = []; shown = stepEx.position;
+    playScenes(list, captionsFor(o), () => {
+      shown = positionOf(g);
+      captionText = o.charted ? `Charted as a ${chainName(o.charted).toLowerCase()}.` : 'Nothing charted.';
+    });
+  }
+
+  // --- Build from scratch ---
+  /** What the board looks like it's building, and the line-ups already buzzed for. */
+  let guess: BuildGuess | null = null, buzzed = new Set<string>();
+  function newScratch(): void {
+    game = new NavigationGame(SETTINGS, rng.integer(1, 0x7fffffff));
+    start = null; upcoming = []; goal = null;
+    shown = positionOf(game);
+    scenes = []; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
+    captionText = '';
+    status = 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked, and a buzz sounds if a ring 2 star lines up with the ring 1 star under it (as the rings sit, or after the turn you’re saving).';
+  }
+  function checkScratch(): void {
+    if (!game) return;
+    guess = guessBuild(game.board.cells);
+    marks = [];
+    if (!guess) { buzzed = new Set(); return; }
+    for (const c of [...guess.vertical, ...guess.pair]) marks.push({ cell: c, colour: '#7fd8ff' });
+    const keys = new Set(guess.lineups.map(([a, b]) => `${a}-${b}-${game!.board.cells[a]}`));
+    const fresh = [...keys].filter((k) => !buzzed.has(k));
+    for (const [a, b] of guess.lineups) marks.push({ cell: a, colour: '#ff4040' }, { cell: b, colour: '#ff4040' });
+    const what = `Looks like a ${COLOUR_NAMES[guess.colour].toLowerCase()} vertical over ${OCTANT_NAMES[guess.column].toLowerCase()}${guess.turn ? `, lined up by ${moveText(guess.turn)}` : ''}.`;
+    if (fresh.length) {
+      sounds.play('buzz', 0.6);
+      status = `${what} Ring 2 lines up with ring 1 (marked red): that pair will clear early or spoil the chain.`;
+    } else status = guess.lineups.length ? `${what} Still a line-up between rings 1 and 2 (marked red).` : `${what} Rings 1 and 2 are clear of line-ups.`;
+    buzzed = keys;
   }
 
   // --- Practice ---
@@ -181,7 +305,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     if (action.kind === 'drop' && upcoming.length) g.entry = upcoming.shift()!;
   }
   function practiceMove(action: Action): void {
-    if (!game || busy() || mode !== 'practise') return;
+    if (!game || busy() || !playing()) return;
     if (action.kind === 'drop' && game.board.get(game.entry.octant, 0) !== EMPTY) { status = 'That drop would booch the board.'; return; }
     const list = act(game, action);
     if (!list.length) return;
@@ -192,6 +316,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     stepping = false;
     playScenes(list, captionsFor(o), () => {
       shown = positionOf(g);
+      if (mode === 'scratch') { checkScratch(); return; }
       if (!o.links.length) { status = `${moves} move${moves > 1 ? 's' : ''} so far.`; return; }
       if (lesson().accepts(o)) status = `Yes! ${lesson().success}`;
       else status = `That set off ${o.charted ? `a ${chainName(o.charted).toLowerCase()}` : 'a clear'}, but not a ${lesson().title.toLowerCase()}. Reset to try again, or Show answer.`;
@@ -347,7 +472,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     const tile = (target ? (highlighted ? 24 : 16) : highlighted ? 8 : 0) + ((octant + 2) % 8);
     ctx.drawImage(images.get(`star_${COLOURS[colour]}`), tile * 56, 0, 56, 56, Math.trunc(x) - 28, Math.trunc(y) - 28, 56, 56);
   }
-  function drawBoard(scene: Scene, progress: number, now: number): void {
+  function drawBoard(scene: Scene, progress: number, now: number, glows: { cell: number; colour: string }[] = []): void {
     const cleared = new Set(scene.clear?.cells.map((c) => c.ring * 8 + c.octant));
     const falling = new Map(scene.falls?.map((f) => [f.from * 8 + f.octant, f]));
     for (const t of scene.targets) {
@@ -358,6 +483,8 @@ export default (async ({ screen, panel, store, ticks }) => {
         ctx.drawImage(images.get('star_wild'), ((matches ? 8 : 0) + (t.octant + 2) % 8) * 56, 0, 56, 56, Math.trunc(x) - 28, Math.trunc(y) - 28, 56, 56);
       } else star(t.colour, t.octant, radius(t.ring), matches, true);
     }
+    // Glows go over the targets (added light, so a target still shows through) and under the stars.
+    for (const m of glows) ringMark(m.cell, m.colour);
     for (let ring = 0; ring < RINGS; ring++) for (let o = 0; o < 8; o++) {
       const colour = scene.cells[ring * 8 + o];
       if (colour < 0) continue;
@@ -376,12 +503,12 @@ export default (async ({ screen, panel, store, ticks }) => {
       ctx.restore();
     }
   }
-  /** A glow behind a star (drawn before the board, so targets and stars stay in front of it). */
+  /** A glow behind a star, added as light so a target under it still shows. */
   function ringMark(cell: number, colour: string): void {
     const [x, y] = position(cell % 8, radius(Math.floor(cell / 8)));
     const glow = ctx.createRadialGradient(x, y, 8, x, y, 30);
     glow.addColorStop(0, colour); glow.addColorStop(0.55, colour); glow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.save(); ctx.globalAlpha = 0.85; ctx.fillStyle = glow;
+    ctx.save(); ctx.globalAlpha = 0.85; ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(x, y, 30, 0, Math.PI * 2); ctx.fill(); ctx.restore();
   }
   /** The finished board, faint, wherever the board in play doesn't match it yet. */
@@ -427,7 +554,7 @@ export default (async ({ screen, panel, store, ticks }) => {
   function draw(now: number): void {
     screen.blit(images.get('werewolf_background'), 0, 0);
     screen.blit(images.get('title'), 0, 0);
-    if (mode === 'practise' && game) {
+    if (playing() && game) {
       ctx.save(); ctx.globalAlpha = 0.85;
       ctx.drawImage(images.get('werewolf_rings'), (RINGS - 1 - selected) * 414, 0, 414, 414, CX - 207, CY - 207, 414, 414);
       ctx.restore();
@@ -436,12 +563,11 @@ export default (async ({ screen, panel, store, ticks }) => {
     const scene: Scene = current?.scene ?? { cells: shown.cells, targets: shown.targets, duration: 0 };
     const duration = (current?.scene.duration ?? 0) * speed();
     const progress = duration ? Math.min(1, (now - sceneStart) / duration) : 1;
-    if (!current) for (const m of marks) ringMark(m.cell, m.colour);
-    drawBoard(scene, progress, now);
+    drawBoard(scene, progress, now, current ? [] : marks);
     if (!current && mode === 'practise' && game && goal && showGoal) drawGoal(goal, scene.cells);
     if (!current) {
       if (arrowRing) drawArrow(arrowRing.ring, arrowRing.clockwise);
-      if (mode === 'practise' && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
+      if (playing() && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
       if (mode === 'when' && bad && bad.moves[buildAt]?.kind === 'drop') star(bad.boards[buildAt].entry.colour, bad.boards[buildAt].entry.octant, 205);
     }
     drawCaption(captionText);
@@ -485,7 +611,9 @@ export default (async ({ screen, panel, store, ticks }) => {
     scenes = []; marks = []; status = ''; mistake = null; bad = null; game = null; start = null;
     waiting = false; afterScenes = null;
     if (mode === 'learn') showExample(lesson().moments[momentIndex] ?? lesson().moments[0], (lesson().moments[momentIndex] ?? lesson().moments[0]).label);
+    else if (mode === 'steps') newSteps(true);
     else if (mode === 'practise') newPractice();
+    else if (mode === 'scratch') newScratch();
     else if (mode === 'when') newBadBuild();
     else newMistake();
   }
@@ -523,6 +651,24 @@ export default (async ({ screen, panel, store, ticks }) => {
     .button('New example', newExample, { disabled: busy, title: 'The same strategy in new colours and target layouts' });
   learn.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); })
     .toggle('Ring the chain stars', () => ringChain, (on) => { ringChain = on; store.set('ringChain', on); if (!busy()) showExample(example, exampleLabel); }, { title: 'Before the move, ring the stars its clears will use' });
+
+  const steps = panel.group('Step by step', { hidden: () => mode !== 'steps' });
+  steps.button('◀ Back', () => showStep(stepAt - 1), { disabled: () => busy() || !stepEx || stepAt === 0 })
+    .button('Next step ▶', () => showStep(stepAt + 1), { variant: 'primary', disabled: () => busy() || !stepEx || stepAt === 3 })
+    .button('Play move', playSteps, { disabled: () => busy() || !stepEx || (stepAt !== 0 && stepAt !== 3) });
+  steps.append(rowBreak());
+  steps.button('Show board', () => showStep(stepAt), { disabled: () => busy() || !stepEx, title: 'Back to this step’s board' })
+    .button('Session board', () => { momentIndex = (momentIndex + 1) % lesson().moments.length; newSteps(true); }, { disabled: () => busy() || !hasSteps(), title: 'The next board from your replays' })
+    .button('New example', () => newSteps(), { disabled: () => busy() || !hasSteps(), title: 'The same strategy in new colours and target layouts' });
+  steps.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
+
+  const scratch = panel.group('Build from scratch', { hidden: () => mode !== 'scratch' });
+  scratch.button('New board', newScratch, { variant: 'primary', disabled: busy });
+  scratch.append(rowBreak());
+  scratch.button('Rotate left', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: false }), { disabled: busy })
+    .button('Rotate right', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: true }), { disabled: busy })
+    .button('Drop star', () => practiceMove({ kind: 'drop' }), { disabled: busy });
+  scratch.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
   const practise = panel.group('Practice', { hidden: () => mode !== 'practise' });
   practise.select('Stage', STAGES, () => stage, (value) => { stage = value; store.set('stage', value); newPractice(); }, { disabled: busy, title: 'How many moves before the board sets the strategy off' });
@@ -569,6 +715,7 @@ export default (async ({ screen, panel, store, ticks }) => {
 
   const key = (name: string, action: string, fallback: string) => keyMatches(name, 'navigation', action, fallback);
   return {
+    dispose() { sounds.dispose(); },
     frame(events) {
       for (const event of events) {
         if (event.type === 'keydown') {
@@ -578,7 +725,7 @@ export default (async ({ screen, panel, store, ticks }) => {
             else if (key(event.key, 'cw', 'arrowright')) buildStep(1);
             continue;
           }
-          if (mode !== 'practise') continue;
+          if (!playing()) continue;
           if (key(event.key, 'ringOut', 'arrowup')) selected = Math.max(0, selected - 1);
           else if (key(event.key, 'ringIn', 'arrowdown')) selected = Math.min(RINGS - 1, selected + 1);
           else if (key(event.key, 'ccw', 'arrowleft')) practiceMove({ kind: 'rotate', ring: selected, clockwise: false });
@@ -592,7 +739,8 @@ export default (async ({ screen, panel, store, ticks }) => {
           const cell = cellAt(event.pos as [number, number]);
           if (!cell) continue;
           if (mode === 'spot' && event.button === 1) clickStar(cell.ring * 8 + cell.octant);
-          else if (mode === 'practise') {
+          else if (mode === 'steps' && event.button === 1) pickHorizontal(cell.ring * 8 + cell.octant);
+          else if (playing()) {
             if (selected !== cell.ring) selected = cell.ring;
             else practiceMove({ kind: 'rotate', ring: selected, clockwise: event.button === 1 });
           }

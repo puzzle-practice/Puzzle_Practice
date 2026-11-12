@@ -90,3 +90,40 @@ describe('Dennav tutorial build-up stages', async () => {
     }
   });
 });
+
+describe('Dennav tutorial: the vertical triple, step by step', async () => {
+  const { verticalPlan, horizontalAt, guessBuild, linedUp, INNER } = await import('./engine');
+  const lesson = LESSONS.find((l) => l.id === 'vertical-triple')!;
+  it('takes every session board and new example apart', () => {
+    const rng = new Random(3);
+    const examples = [...lesson.moments, ...Array.from({ length: 10 }, (_, i) => generate(lesson.moments[i % lesson.moments.length], lesson.accepts, rng))];
+    for (const ex of examples) {
+      const plan = verticalPlan(ex)!;
+      expect(plan).not.toBeNull();
+      expect(plan.vertical).toHaveLength(3);
+      expect(plan.pair.length).toBeGreaterThanOrEqual(2);
+      expect(Math.floor(plan.gap / 8)).toBe(INNER);
+      // The pair is the colour of the star that drops in, and a horizontal at the gap is found.
+      expect(plan.pair.every((c) => ex.position.cells[c] === ex.position.cells[plan.top])).toBe(true);
+      expect(horizontalAt(ex, plan.gap).pair).toBe(true);
+      // Seen from the board, it looks like a vertical being built over that column.
+      const guess = guessBuild(ex.position.cells)!;
+      expect(guess).not.toBeNull();
+      expect(guess.column).toBe(linedUp(ex.action, plan.gap) % 8);
+    }
+  });
+  it('finds ring 1 and ring 2 line-ups, in line and after the saved turn', () => {
+    const E = -1;
+    // Ring indices: 0 outer (ring 4) … 3 inner (ring 1). A blue (0) vertical over octant 0 with ring 1
+    // turned one out, and a red (2) pair beside it in ring 1.
+    const cells = Array<number>(32).fill(E);
+    const set = (ring: number, octant: number, colour: number) => { cells[ring * 8 + octant] = colour; };
+    set(1, 0, 0); set(2, 0, 0); set(3, 1, 0); // ring 1's blue sits one place round: turning ring 1 lines it up
+    set(3, 2, 2); set(3, 0, 2); // the red pair, once lined up, sits either side of octant 0
+    const clean = guessBuild(cells)!;
+    expect(clean).not.toBeNull();
+    expect(clean.lineups).toEqual([]);
+    set(3, 4, 4); set(2, 4, 4); // yellow above yellow: lined up as the rings sit
+    expect(guessBuild(cells)!.lineups).toContainEqual([3 * 8 + 4, 2 * 8 + 4]);
+  });
+});

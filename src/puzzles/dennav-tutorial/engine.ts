@@ -453,11 +453,20 @@ export function spoilBuild(build: Build, trigger: Action, accepts: (o: Outcome) 
  * targets start wild, or a fourth inner target joins). Follows each star through the move's turn, falls and clears.
  */
 export function runStars(p: Position, action: Action): number[] {
+  return [...new Set(linkStars(p, action).filter((l) => l.counts).flatMap((l) => l.cells))];
+}
+
+/**
+ * For each clear a move sets off, the stars it takes, as cells of the board before the move, and
+ * whether it matters to the chain: every clear before charting, and a cascade after it only when it
+ * charges the next constellation.
+ */
+export function linkStars(p: Position, action: Action): { link: Link; cells: number[]; counts: boolean }[] {
   const game = gameAt(p);
   const scenes = act(game, action);
   const links = outcome(scenes, positionOf(game)).links;
   const ids = p.cells.map((c, i) => (c === EMPTY ? -1 : i));
-  const used = new Set<number>();
+  const result: { link: Link; cells: number[]; counts: boolean }[] = [];
   let previous: Target[] = p.targets;
   for (const scene of scenes) {
     if (scene.rotation) {
@@ -468,16 +477,17 @@ export function runStars(p: Position, action: Action): number[] {
     for (const f of scene.falls ?? []) { ids[f.ring * 8 + f.octant] = ids[f.from * 8 + f.octant]; ids[f.from * 8 + f.octant] = -1; }
     if (scene.clear) {
       const link = links.find((l) => l.scene === scene);
-      const counts = scene.clear.kind === 'run' && !!link && (!link.afterChart || charges(previous, scene.targets));
+      const cells: number[] = [];
       for (const c of scene.clear.cells) {
         const id = ids[c.ring * 8 + c.octant];
-        if (counts && id >= 0) used.add(id);
+        if (id >= 0) cells.push(id);
         ids[c.ring * 8 + c.octant] = -1;
       }
+      if (link && scene.clear.kind === 'run') result.push({ link, cells, counts: !link.afterChart || charges(previous, scene.targets) });
     }
     previous = scene.targets;
   }
-  return [...used];
+  return result;
 }
 
 /** Whether a cascade charged the new constellation: its inner targets went wild, or a fourth inner target joined. */
@@ -493,4 +503,139 @@ export function buildUpAtMost(final: Position, rng: Random, drops: number): Buil
     if (build) return build;
   }
   return null;
+}
+
+/** Where a star on the board before a move sits once the move's turn (if any) has lined things up. */
+export function linedUp(action: Action, cell: number): number {
+  if (action.kind !== 'rotate' || Math.floor(cell / 8) !== action.ring) return cell;
+  const ring = action.ring, octant = cell % 8;
+  return ring * 8 + (octant + (action.clockwise ? 7 : 1)) % 8;
+}
+/** The board once the move's turn has lined it up, before anything clears. */
+export function linedUpCells(p: Position, action: Action): number[] {
+  const cells = [...p.cells];
+  p.cells.forEach((colour, i) => { cells[linedUp(action, i)] = colour; });
+  return cells;
+}
+
+/** Whether a clear of `cells` would turn a target wild: the target is in or beside one of them, in its ring or the next ring. */
+export const besideClear = (t: Target, cells: number[]): boolean =>
+  cells.some((c) => {
+    const ring = Math.floor(c / 8), octant = c % 8;
+    return (t.ring === ring && (t.octant === octant || Math.abs(((t.octant - octant + 12) % 8) - 4) === 3)) || (t.octant === octant && Math.abs(t.ring - ring) === 1);
+  });
+
+/** A vertical triple taken apart for teaching: what goes where, as cells of the board before the move. */
+export interface VerticalPlan {
+  /** The vertical's three stars, rings 1–3. */
+  vertical: number[];
+  /** The ring 1 cell the vertical empties, where the ring 4 star lands. */
+  gap: number;
+  /** The ring 1 pair the dropped star joins. */
+  pair: number[];
+  /** The ring 4 star that drops all the way into ring 1. */
+  top: number;
+  /** Targets the ring 1 clear turns wild. */
+  wilded: Target[];
+  /** Ring 2 stars (outside the vertical's column) the same colour as the ring 1 star under them, once lined up. */
+  lineups: number[];
+}
+export function verticalPlan(ex: Example): VerticalPlan | null {
+  const links = linkStars(ex.position, ex.action).filter((l) => !l.link.afterChart);
+  if (links.length < 2) return null;
+  const vertical = links[0].cells, horizontal = links[1].cells;
+  const gap = vertical.find((c) => Math.floor(c / 8) === INNER);
+  const top = horizontal.find((c) => Math.floor(c / 8) === EXTRA);
+  if (gap === undefined || top === undefined || vertical.length !== 3) return null;
+  const pair = horizontal.filter((c) => Math.floor(c / 8) === INNER);
+  const cells = linedUpCells(ex.position, ex.action);
+  const column = linedUp(ex.action, gap) % 8;
+  const lineups: number[] = [];
+  for (let o = 0; o < 8; o++) {
+    if (o === column) continue;
+    const inner = cells[INNER * 8 + o], middle = cells[MIDDLE * 8 + o];
+    if (inner !== EMPTY && inner === middle) lineups.push(ex.position.cells.findIndex((_, i) => linedUp(ex.action, i) === MIDDLE * 8 + o));
+  }
+  return { vertical, gap, pair, top, wilded: links[1].link.wilded, lineups };
+}
+
+/**
+ * Picking where the ring 1 horizontal goes: if the ring 4 star dropped into ring 1 at `cell` (a cell of
+ * the board before the move), whether a pair beside it would make a clear, and how many targets that
+ * clear would turn wild (counting only targets not already filled or wild).
+ */
+export function horizontalAt(ex: Example, cell: number): { pair: boolean; wild: number } {
+  const cells = linedUpCells(ex.position, ex.action);
+  const at = linedUp(ex.action, cell);
+  if (Math.floor(at / 8) !== INNER) return { pair: false, wild: 0 };
+  const o = at % 8, colour = (k: number) => cells[INNER * 8 + ((o + k + 8) % 8)];
+  const options = [[-1, 1], [1, 2], [-2, -1]].filter(([a, b]) => colour(a) !== EMPTY && colour(a) === colour(b));
+  if (!options.length) return { pair: false, wild: 0 };
+  const open = ex.position.targets.filter((t) => !t.wild && cells[t.ring * 8 + t.octant] !== t.colour);
+  const wild = Math.max(...options.map(([a, b]) => {
+    const run = [0, a, b].map((k) => INNER * 8 + ((o + k + 8) % 8));
+    return open.filter((t) => besideClear(t, run)).length;
+  }));
+  return { pair: true, wild };
+}
+
+/** A vertical triple a player seems to be building on a board, read from where its parts are. */
+export interface BuildGuess {
+  /** The column the vertical lines up in, once `turn` is made. */
+  column: number;
+  colour: number;
+  /** The turn that lines the vertical up (the offset the player has left), or null if it's in line already. */
+  turn: Action | null;
+  /** The vertical's stars and the ring 1 pair beside its column, as cells of the board as it is. */
+  vertical: number[];
+  pair: number[];
+  /** Ring 1 and ring 2 stars of one colour, one above the other, before or after the turn: each as [ring 1 cell, ring 2 cell]. */
+  lineups: [number, number][];
+}
+const TURNS: (Action | null)[] = [null, ...[INNER, MIDDLE, TOP].flatMap((ring) => [true, false].map((clockwise): Action => ({ kind: 'rotate', ring, clockwise })))];
+/** Where a cell of the lined-up board was before the turn. */
+function unturned(turn: Action | null, cell: number): number {
+  if (!turn || turn.kind !== 'rotate' || Math.floor(cell / 8) !== turn.ring) return cell;
+  return turn.ring * 8 + (cell % 8 + (turn.clockwise ? 1 : 7)) % 8;
+}
+/**
+ * Guesses the vertical triple a player is building: two or three of one colour through rings 1–3 in
+ * one column (now, or after one turn), with a ring 1 pair of another colour beside that column.
+ */
+export function guessBuild(cells: number[]): BuildGuess | null {
+  let best: (BuildGuess & { score: number }) | null = null;
+  for (const turn of TURNS) {
+    const lined = turn ? linedUpCells({ cells, targets: [], entry: { colour: 0, octant: 0 } }, turn) : cells;
+    for (let column = 0; column < 8; column++) {
+      const stack = [INNER, MIDDLE, TOP].map((ring) => ring * 8 + column).filter((c) => lined[c] !== EMPTY);
+      for (const colour of new Set(stack.map((c) => lined[c]))) {
+        const vertical = stack.filter((c) => lined[c] === colour);
+        if (vertical.length < 2 || !vertical.includes(INNER * 8 + column) && vertical.length < 3) continue;
+        const at = (k: number) => INNER * 8 + (column + k + 8) % 8;
+        const pairs = [[-1, 1], [1, 2], [-2, -1]].map((ks) => ks.map(at)).filter(([a, b]) => lined[a] !== EMPTY && lined[a] === lined[b] && lined[a] !== colour);
+        if (!pairs.length) continue;
+        // A full vertical in line already would have cleared: it needs its turn.
+        if (!turn && vertical.length === 3) continue;
+        // A ring 4 star of the pair's colour waiting above the column makes it all the likelier.
+        const topped = pairs.some(([a]) => lined[EXTRA * 8 + column] === lined[a]);
+        const score = vertical.length * 2 + (topped ? 1 : 0) + (turn ? 0 : 0.5);
+        if (best && best.score >= score) continue;
+        const lineups: [number, number][] = [];
+        const own = new Set(vertical.map((c) => unturned(turn, c)));
+        const check = (board: number[], from: (c: number) => number) => {
+          for (let o = 0; o < 8; o++) {
+            const inner = from(INNER * 8 + o), middle = from(MIDDLE * 8 + o);
+            if (own.has(inner) || own.has(middle) || board[INNER * 8 + o] === EMPTY || board[INNER * 8 + o] !== board[MIDDLE * 8 + o]) continue;
+            if (!lineups.some(([a, b]) => a === inner && b === middle)) lineups.push([inner, middle]);
+          }
+        };
+        check(cells, (c) => c);
+        if (turn) check(lined, (c) => unturned(turn, c));
+        best = { column, colour, turn, vertical: vertical.map((c) => unturned(turn, c)), pair: (pairs.find(([a]) => lined[EXTRA * 8 + column] === lined[a]) ?? pairs[0]).map((c) => unturned(turn, c)), lineups, score };
+      }
+    }
+  }
+  if (!best) return null;
+  const { score: _score, ...guess } = best;
+  return guess;
 }
