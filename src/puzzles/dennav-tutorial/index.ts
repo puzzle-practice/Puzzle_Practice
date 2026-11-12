@@ -29,7 +29,7 @@ const MODES: { value: Mode; label: string }[] = [
 /** Practice stages: turns only (0–3 turns before the move), or building up the last few stars (negative: -n moves of build-up). */
 const STAGES = [
   ...[0, 1, 2, 3].map((value) => ({ value, label: value ? `${value + 1} moves out (turns only)` : 'One move to go' })),
-  ...[3, 5, 8].map((n) => ({ value: -n, label: `Build it: last ${n} stars` })),
+  ...[3, 5, 8].map((n) => ({ value: -n, label: `Finish the combo: last ${n} stars` })),
 ];
 
 function describeRun(run: Run): string {
@@ -72,6 +72,8 @@ export default (async ({ screen, panel, store, ticks }) => {
   let game: NavigationGame | null = null;
   let start: Position | null = null;
   let solution: Action[] = [];
+  /** Finish the combo: the board to build, and what the player is told to do. */
+  let goal: Position | null = null, practiceGoal = '', showGoal = store.get<boolean>('showGoal', true);
   /** Build-up stages: the stars still to come, in order (the next star is the game's entry). */
   let upcoming: { colour: number; octant: number }[] = [], dealtUpcoming: { colour: number; octant: number }[] = [];
   let selected = RINGS - 1;
@@ -150,12 +152,12 @@ export default (async ({ screen, panel, store, ticks }) => {
         dealtUpcoming = [...dropEntries(h), ex.position.entry];
       } else dealt = stage ? scramble(ex, stage, l.accepts, rng) : { position: ex.position, solution: [ex.action] };
       if (!dealt) continue;
-      start = dealt.position; solution = dealt.solution;
-      resetPractice();
+      start = dealt.position; solution = dealt.solution; goal = stage < 0 ? ex.position : null;
       const drops = solution.filter((a) => a.kind === 'drop').length;
-      status = stage < 0
-        ? `${l.title}: build it up. ${drops} star${drops === 1 ? '' : 's'} still to come, each falling where the game puts it; turn the rings to take them where they belong, then set it off.`
-        : `${l.title}: ${stage ? `${stage + 1} moves` : 'one move'} to set it off. Make the chain happen.`;
+      practiceGoal = stage < 0
+        ? `Goal: ${l.goal} Then ${moveText(ex.action)} to set off the ${l.title.toLowerCase()}. ${drops} star${drops === 1 ? '' : 's'} still to come, each falling where the game puts it: turn the rings to take them where they belong. The finished board is shown faintly.`
+        : `Goal: ${l.goal} ${stage ? `It’s ${stage + 1} moves away.` : 'One move does it.'}`;
+      resetPractice();
       return;
     }
     status = 'Couldn’t deal that stage just now. Try again, or try an earlier stage.';
@@ -167,7 +169,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     if (upcoming.length) game.entry = upcoming.shift()!;
     shown = positionOf(game);
     scenes = []; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1;
-    captionText = ''; status = '';
+    captionText = ''; status = practiceGoal;
   }
   function answerText(): string {
     const stars = [start!.entry, ...dealtUpcoming].slice(dealtUpcoming.length ? 1 : 0);
@@ -374,10 +376,19 @@ export default (async ({ screen, panel, store, ticks }) => {
       ctx.restore();
     }
   }
+  /** A glow behind a star (drawn before the board, so targets and stars stay in front of it). */
   function ringMark(cell: number, colour: string): void {
     const [x, y] = position(cell % 8, radius(Math.floor(cell / 8)));
-    ctx.save(); ctx.strokeStyle = colour; ctx.lineWidth = 4; ctx.shadowColor = colour; ctx.shadowBlur = 8;
-    ctx.beginPath(); ctx.arc(x, y, 25, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+    const glow = ctx.createRadialGradient(x, y, 8, x, y, 30);
+    glow.addColorStop(0, colour); glow.addColorStop(0.55, colour); glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.save(); ctx.globalAlpha = 0.85; ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(x, y, 30, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+  }
+  /** The finished board, faint, wherever the board in play doesn't match it yet. */
+  function drawGoal(target: Position, cells: number[]): void {
+    ctx.save(); ctx.globalAlpha = 0.38;
+    target.cells.forEach((colour, i) => { if (colour !== EMPTY && cells[i] !== colour) star(colour, i % 8, radius(Math.floor(i / 8))); });
+    ctx.restore();
   }
   function drawArrow(ring: number, clockwise: boolean): void {
     const r = radius(ring) + 24;
@@ -425,9 +436,10 @@ export default (async ({ screen, panel, store, ticks }) => {
     const scene: Scene = current?.scene ?? { cells: shown.cells, targets: shown.targets, duration: 0 };
     const duration = (current?.scene.duration ?? 0) * speed();
     const progress = duration ? Math.min(1, (now - sceneStart) / duration) : 1;
+    if (!current) for (const m of marks) ringMark(m.cell, m.colour);
     drawBoard(scene, progress, now);
+    if (!current && mode === 'practise' && game && goal && showGoal) drawGoal(goal, scene.cells);
     if (!current) {
-      for (const m of marks) ringMark(m.cell, m.colour);
       if (arrowRing) drawArrow(arrowRing.ring, arrowRing.clockwise);
       if (mode === 'practise' && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
       if (mode === 'when' && bad && bad.moves[buildAt]?.kind === 'drop') star(bad.boards[buildAt].entry.colour, bad.boards[buildAt].entry.octant, 205);
@@ -521,7 +533,8 @@ export default (async ({ screen, panel, store, ticks }) => {
   practise.button('Rotate left', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: false }), { disabled: busy })
     .button('Rotate right', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: true }), { disabled: busy })
     .button('Drop star', () => practiceMove({ kind: 'drop' }), { disabled: busy });
-  practise.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
+  practise.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); })
+    .toggle('Show the finished board', () => showGoal, (on) => { showGoal = on; store.set('showGoal', on); }, { hidden: () => stage >= 0 });
 
   const spot = panel.group('Spot the mistake', { hidden: () => mode !== 'spot' });
   spot.button('New board', () => newMistake(), { variant: 'primary', disabled: busy })

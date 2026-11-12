@@ -317,9 +317,10 @@ export const dropEntries = (build: { boards: Position[]; moves: Action[] }) =>
 export function buildUp(final: Position, rng: Random, drops: number): Build | null {
   for (let attempt = 0; attempt < 200; attempt++) {
     let board = clonePosition(final);
-    const units: { board: Position; moves: Action[]; junk: boolean }[] = [];
+    const units: { board: Position; moves: Action[]; junk: boolean; middle?: boolean }[] = [];
     for (let tries = 0; units.length < drops && tries < drops * 30; tries++) {
-      const unit = rng.integer(0, 3) === 0 ? junkUnit(board, rng) : dropUnit(board, rng);
+      const middle = units.filter((u) => u.middle).length < 1;
+      const unit = rng.integer(0, 3) === 0 ? junkUnit(board, rng) : dropUnit(board, rng, middle);
       if (!unit) continue;
       units.unshift(unit);
       board = unit.board;
@@ -349,8 +350,10 @@ export function buildUp(final: Position, rng: Random, drops: number): Build | nu
 }
 
 /** Undoes one star: it fell in a random column, then its ring turned it to where it is now. */
-function dropUnit(board: Position, rng: Random): { board: Position; moves: Action[]; junk: boolean } | null {
-  const tops = [0, 1, 2, 3, 4, 5, 6, 7].map((octant) => ({ octant, ring: [0, 1, 2, 3].find((r) => board.cells[r * 8 + octant] !== EMPTY) ?? -1 })).filter((t) => t.ring >= 0);
+function dropUnit(board: Position, rng: Random, middle: boolean): { board: Position; moves: Action[]; junk: boolean; middle: boolean } | null {
+  // Finishing a combo: ring 1 is already built, and at most one ring 2 star is still to come.
+  const tops = [0, 1, 2, 3, 4, 5, 6, 7].map((octant) => ({ octant, ring: [0, 1, 2, 3].find((r) => board.cells[r * 8 + octant] !== EMPTY) ?? -1 }))
+    .filter((t) => t.ring >= 0 && t.ring < INNER && (middle || t.ring < MIDDLE));
   if (!tops.length) return null;
   const { octant: p, ring: r } = tops[rng.integer(0, tops.length - 1)];
   const e = rng.integer(0, 7);
@@ -366,7 +369,7 @@ function dropUnit(board: Position, rng: Random): { board: Position; moves: Actio
   before.cells[r * 8 + e] = EMPTY;
   before.entry = { colour, octant: e };
   if (!settled(before)) return null;
-  return { board: before, moves: [{ kind: 'drop' }, ...Array.from({ length: steps }, () => ({ kind: 'rotate' as const, ring: r, clockwise }))], junk: false };
+  return { board: before, moves: [{ kind: 'drop' }, ...Array.from({ length: steps }, () => ({ kind: 'rotate' as const, ring: r, clockwise }))], junk: false, middle: r === MIDDLE };
 }
 
 /** Undoes a junk clear: two stars of a colour wait side by side in a ring, and the third drops in beside them. */
@@ -374,7 +377,7 @@ function junkUnit(board: Position, rng: Random): { board: Position; moves: Actio
   const open = (ring: number, octant: number) => board.cells[ring * 8 + octant] === EMPTY &&
     (ring === RINGS - 1 || board.cells[(ring + 1) * 8 + octant] !== EMPTY) && [0, 1, 2, 3].every((q) => q >= ring || board.cells[q * 8 + octant] === EMPTY);
   const slots: { ring: number; octant: number }[] = [];
-  for (let ring = 1; ring < RINGS; ring++) for (let a = 0; a < 8; a++) if ([0, 1, 2].every((k) => open(ring, (a + k) % 8))) slots.push({ ring, octant: a });
+  for (let ring = 1; ring < INNER; ring++) for (let a = 0; a < 8; a++) if ([0, 1, 2].every((k) => open(ring, (a + k) % 8))) slots.push({ ring, octant: a });
   if (!slots.length) return null;
   const { ring, octant } = slots[rng.integer(0, slots.length - 1)];
   const colour = rng.integer(0, 4), missing = rng.integer(0, 2);
@@ -445,14 +448,17 @@ export function spoilBuild(build: Build, trigger: Action, accepts: (o: Outcome) 
 }
 
 /**
- * The stars, by their cell before the move, that a move's star runs clear (constellation stars aside).
- * Follows each star through the move's turn, falls and clears.
+ * The stars, by their cell before the move, whose clears make the chain: every clear before the
+ * constellation charts, and a cascade after it only if it charges the next constellation (its inner
+ * targets start wild, or a fourth inner target joins). Follows each star through the move's turn, falls and clears.
  */
 export function runStars(p: Position, action: Action): number[] {
   const game = gameAt(p);
   const scenes = act(game, action);
+  const links = outcome(scenes, positionOf(game)).links;
   const ids = p.cells.map((c, i) => (c === EMPTY ? -1 : i));
   const used = new Set<number>();
+  let previous: Target[] = p.targets;
   for (const scene of scenes) {
     if (scene.rotation) {
       const { ring, clockwise } = scene.rotation;
@@ -460,13 +466,24 @@ export function runStars(p: Position, action: Action): number[] {
       for (let i = 0; i < 8; i++) ids[ring * 8 + i] = row[(i + (clockwise ? 1 : 7)) % 8];
     }
     for (const f of scene.falls ?? []) { ids[f.ring * 8 + f.octant] = ids[f.from * 8 + f.octant]; ids[f.from * 8 + f.octant] = -1; }
-    if (scene.clear) for (const c of scene.clear.cells) {
-      const id = ids[c.ring * 8 + c.octant];
-      if (scene.clear.kind === 'run' && id >= 0) used.add(id);
-      ids[c.ring * 8 + c.octant] = -1;
+    if (scene.clear) {
+      const link = links.find((l) => l.scene === scene);
+      const counts = scene.clear.kind === 'run' && !!link && (!link.afterChart || charges(previous, scene.targets));
+      for (const c of scene.clear.cells) {
+        const id = ids[c.ring * 8 + c.octant];
+        if (counts && id >= 0) used.add(id);
+        ids[c.ring * 8 + c.octant] = -1;
+      }
     }
+    previous = scene.targets;
   }
   return [...used];
+}
+
+/** Whether a cascade charged the new constellation: its inner targets went wild, or a fourth inner target joined. */
+function charges(before: Target[], after: Target[]): boolean {
+  const innerWild = (ts: Target[]) => ts.some((t) => t.ring === INNER) && ts.filter((t) => t.ring === INNER).every((t) => t.wild);
+  return after.length > before.length || (innerWild(after) && !innerWild(before));
 }
 
 /** The longest build-up it can find of up to `drops` stars (at least 3). */

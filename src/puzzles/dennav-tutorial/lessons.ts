@@ -9,6 +9,8 @@ export interface Lesson {
   title: string;
   /** What the strategy is for, then how it works, as short paragraphs. */
   intro: string[];
+  /** What a practice board asks the player to set up, in one or two sentences. */
+  goal: string;
   /** What to check on a board before making the move. */
   lookFor: string[];
   /** Whether a move set this strategy off. */
@@ -34,6 +36,7 @@ export const LESSONS: Lesson[] = [
       'Charting counts as a clear. A clear that follows it in the same move charges the next constellation: its ring 1 targets are dealt already wild. So you can chain singles while keeping the inner ring wild.',
       'Set it up by fixing ring 1 so that two stars of one colour sit either side of a target, or two in a row on one side of it. When the constellation clears, the target cell empties and a star of that colour drops in to make three, usually from just above it in ring 2.',
     ],
+    goal: 'Fill every target so one move charts it as a single, with a ring 1 pair beside a target and a star of the pair’s colour above that target in ring 2, ready to drop in.',
     lookFor: [
       'A pair in ring 1 that a target sits beside or between.',
       'The star directly above that target, in ring 2, is the pair\'s colour.',
@@ -59,6 +62,7 @@ export const LESSONS: Lesson[] = [
       'The ring 3 clear is the first link and charting is the second, so the constellation goes as a double. A double charges the next constellation on its own, with no cascade needed.',
       'Ring 4 is the place to keep the colour you need: turn it so the right star sits over the target, then trigger the ring 3 clear.',
     ],
+    goal: 'Fill every target except the ring 3 one, put two of a colour beside it in ring 3, and keep the colour the target wants above it in ring 4.',
     lookFor: [
       'Two stars of one colour in ring 3 next to the ring 3 target, with the target holding (or about to hold) a third.',
       'The ring 4 star above the target is the target\'s colour.',
@@ -80,6 +84,7 @@ export const LESSONS: Lesson[] = [
       'A clear only turns targets wild if it is the second link or later in a move: the first clear after a move never does. So the ring 3 clear has to be set off by something else, here a first ring 3 clear whose drop-in completes a second one beside the target.',
       'Link 1 clears, link 2 (in ring 3, next to the target) turns it wild, and the constellation charts as the third link: a triple.',
     ],
+    goal: 'Fill every target except one in ring 3, and set up a first clear whose drop-in completes a ring 3 clear right beside that target.',
     lookFor: [
       'A ring 3 target filled with the wrong colour, with a pair beside it in ring 3.',
       'A first clear whose drop-in brings the pair\'s colour down next to them.',
@@ -99,6 +104,7 @@ export const LESSONS: Lesson[] = [
       'Pick that ring 4 star so it lands between or beside a ring 1 pair: it makes a horizontal clear in ring 1 as the second link. Being a second link, it turns every target next to it wild.',
       'With those targets wild the constellation charts as the third link: a triple.',
     ],
+    goal: 'Line up a vertical through rings 1–3, with the ring 4 star above it matching a ring 1 pair beside the column, and the unfilled targets next to where that ring 1 clear will be.',
     lookFor: [
       'Three of one colour lined up (or one turn away) through rings 1–3 in one column.',
       'The ring 4 star above that column matches a ring 1 pair next to the column.',
@@ -119,6 +125,7 @@ export const LESSONS: Lesson[] = [
       'That makes a vertical clear through rings 1, 2 and 3 as the second link, which turns every target bordering the column wild, even ones filled with the wrong colour.',
       'The constellation then charts as a triple.',
     ],
+    goal: 'Stack a pair in rings 1 and 2 of one column, set up a ring 3 clear over it, and keep a star of the pair’s colour in ring 4 above the column.',
     lookFor: [
       'A pair of one colour stacked in rings 1 and 2 of one column.',
       'A ring 3 clear you can set off that passes over that column.',
@@ -138,6 +145,7 @@ export const LESSONS: Lesson[] = [
       'Once a clear removes one ring 1 star, the star dropping in joins a pair and clears it, and the gap that leaves lets the next pair\'s third star drop in, and so on round the ring. Every link after the first turns the targets beside it wild, so most of the board goes wild.',
       'Only the ring 3 star that starts the chain off really matters: get that right and the inner ring runs itself, charting as a donkey (5) or better.',
     ],
+    goal: 'Build ring 1 as pairs, so each clear drops in the next pair’s third star, and set up the clear that knocks out the first ring 1 star.',
     lookFor: [
       'Ring 1 built from pairs, each pair\'s third star waiting above the next gap.',
       'The trigger: one clear (often a vertical) that knocks the first ring 1 star out.',
@@ -157,6 +165,7 @@ export const LESSONS: Lesson[] = [
       'That means no target may complete early. In your session 3 board, the ring 2 star that turns into the orange target was orange, so that target was filled correctly before the chain began. The constellation charted at link 5 as a donkey, and the yellow ring 1 clear came after it.',
       'Make that star any other colour and the target is filled wrong. It only turns wild when the yellow clear goes off next to it, so the constellation charts at link 6: a vegas.',
     ],
+    goal: 'Like the donkey, but make sure no target completes before the sixth link: every target is filled wrong or waits to go wild.',
     lookFor: [
       'Every target filled with the wrong colour or waiting to go wild, except the ones the chain fills last.',
       'Each ring 1 link turns the next target wild, in order.',
