@@ -430,6 +430,7 @@ export default (async ({ screen, panel, store, ticks }) => {
   function setMode(next: Mode): void {
     mode = next; store.set('mode', mode);
     scenes = []; marks = []; status = ''; mistake = null; history = null; game = null; start = null;
+    waiting = false; afterScenes = null;
     if (mode === 'learn') showExample(lesson().moments[momentIndex] ?? lesson().moments[0], (lesson().moments[momentIndex] ?? lesson().moments[0]).label);
     else if (mode === 'practise') newPractice();
     else newMistake();
@@ -453,8 +454,8 @@ export default (async ({ screen, panel, store, ticks }) => {
   renderText();
 
   const lessonGroup = panel.group('Lesson');
-  lessonGroup.select('Lesson', LESSONS.map((l, value) => ({ value, label: l.title })), () => lessonIndex, setLesson, { disabled: busy });
-  lessonGroup.select('Mode', MODES, () => mode, setMode, { disabled: busy });
+  lessonGroup.select('Lesson', LESSONS.map((l, value) => ({ value, label: l.title })), () => lessonIndex, setLesson);
+  lessonGroup.select('Mode', MODES, () => mode, setMode);
   lessonGroup.note(() => status);
 
   const rowBreak = () => document.createElement('div');
