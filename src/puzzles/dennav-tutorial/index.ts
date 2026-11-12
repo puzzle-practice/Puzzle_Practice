@@ -196,7 +196,7 @@ export default (async ({ screen, panel, store, ticks }) => {
       const ring3 = top.length ? (top.some((t) => under.includes(t.octant))
         ? ' The ring 3 target sits over the horizontal, so it gets filled in step 3.'
         : ' The ring 3 target isn’t over the horizontal, so fill it now, while you build the vertical.') : '';
-      status = `${STEP_TITLES[2]}. Build the ${colour(pl.vertical[0])} vertical through rings 1, 2 and 3 over that star (marked); ${offset}. While you build, make sure no other ring 2 star is the same colour as the ring 1 star under it, either as the rings sit now or after that last turn. ${pl.lineups.length ? 'The red star breaks that rule.' : 'None do here.'}${ring3}`;
+      status = `${STEP_TITLES[2]}. Build the ${colour(pl.vertical[0])} vertical through rings 1, 2 and 3 over that star (marked); ${offset}. While you build, never stack two of a colour anywhere else in rings 1 and 2 or rings 2 and 3, either as the rings sit now or after that last turn: one more of that colour turned or dropped onto them clears early. ${pl.lineups.length ? 'The red stars break that rule.' : 'Nothing does here.'}${ring3}`;
     } else {
       shown = ex.position;
       marks = [{ cell: pl.top, colour: yellow }];
@@ -262,7 +262,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     shown = positionOf(game);
     scenes = []; afterScenes = null; waiting = false; replaying = false; queued = []; settleAt = 0; stable = 0; judged = null; lastMove = null; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
     captionText = '';
-    status = 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked, and a buzz sounds if a ring 2 star lines up with the ring 1 star under it (as the rings sit, or after the turn you’re saving).';
+    status = 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked, and a buzz sounds if two of a colour are stacked in rings 1 and 2 or rings 2 and 3 (as the rings sit, or after the turn you’re saving), since one more of that colour would clear them early.';
   }
   /** When the board has sat still long enough to judge (ms), and how many judgements in a row saw the same build. */
   let settleAt = 0, stable = 0, judged: BuildGuess | null = null;
@@ -276,7 +276,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     if (!guess) { status = 'No vertical triple in sight yet.'; return; }
     for (const c of [...guess.vertical, ...guess.pair]) marks.push({ cell: c, colour: '#7fd8ff' });
     for (const [a, b] of guess.lineups) marks.push({ cell: a, colour: '#ff4040' }, { cell: b, colour: '#ff4040' });
-    status = `${buildText(guess)} ${guess.lineups.length ? 'Ring 2 lines up with ring 1 (marked red).' : 'Rings 1 and 2 are clear of line-ups.'}`;
+    status = `${buildText(guess)} ${guess.lineups.length ? 'Two of a colour are stacked (marked red).' : 'Nothing is stacked that could clear early.'}`;
   }
   function buildText(g: BuildGuess): string {
     return `Looks like a ${COLOUR_NAMES[g.colour].toLowerCase()} vertical over ${OCTANT_NAMES[g.column].toLowerCase()}${g.turn ? `, lined up by ${moveText(g.turn)}` : ''}.`;
@@ -295,7 +295,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     if (!sure) return;
     if ([...keys].some((k) => !buzzed.has(k))) {
       sounds.play('buzz', 0.6);
-      status = `${buildText(guess)} Ring 2 lines up with ring 1 (marked red): that pair will clear early or spoil the chain.`;
+      status = `${buildText(guess)} Two of a colour are stacked (marked red): one more of that colour on them clears early and can spoil the chain.`;
     }
     buzzed = keys;
   }

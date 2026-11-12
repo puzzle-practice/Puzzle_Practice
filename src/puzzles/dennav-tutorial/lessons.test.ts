@@ -135,6 +135,23 @@ describe('Dennav tutorial: the vertical triple, step by step', async () => {
     expect(guess.colour).toBe(2);
     expect(guess.lineups).toEqual([[24, 16]]);
   });
+  it('flags two of a colour stacked in rings 2 and 3, which a ring 4 star could clear', () => {
+    // Octants from east round: E, NE, N, NW, W, SW, S, SE. Colours: 0 blue, 1 orange, 2 red, 3 white, 4 yellow.
+    const rings = [
+      [2, -1, -1, -1, 2, 3, -1, -1], // ring 4
+      [4, 2, 3, 1, 3, 1, 0, 0], // ring 3: blue south
+      [3, 1, 4, 0, 3, 4, 0, 4], // ring 2: blue south
+      [0, 4, 2, 1, 1, 3, 2, 2], // ring 1: white south-west, red pair south and south-east
+    ];
+    const cells = rings.flat();
+    const t = (ring: number, octant: number, colour: number) => ({ ring, octant, colour, wild: false });
+    const guess = guessBuild(cells, [t(1, 1, 2), t(2, 3, 0), t(2, 7, 4), t(3, 5, 0)])!;
+    // The white vertical over the west, lined up by turning ring 1.
+    expect(guess.column).toBe(4);
+    expect(guess.colour).toBe(3);
+    // The blues stacked in rings 2 and 3 south: a blue dropped above them clears them.
+    expect(guess.lineups).toContainEqual([2 * 8 + 6, 1 * 8 + 6]);
+  });
   it('never guesses a vertical through a target', () => {
     const cells = Array<number>(32).fill(-1);
     [4, 3, 3, 0, 1, 1, 2, 0].forEach((c, o) => { cells[24 + o] = c; });

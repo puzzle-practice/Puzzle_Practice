@@ -537,7 +537,7 @@ export interface VerticalPlan {
   top: number;
   /** Targets the ring 1 clear turns wild. */
   wilded: Target[];
-  /** Ring 2 stars (outside the vertical's column) the same colour as the ring 1 star under them, once lined up. */
+  /** Stars (outside the vertical's column) stacked on one of their colour in rings 1–3, once lined up. */
   lineups: number[];
 }
 export function verticalPlan(ex: Example): VerticalPlan | null {
@@ -553,8 +553,14 @@ export function verticalPlan(ex: Example): VerticalPlan | null {
   const lineups: number[] = [];
   for (let o = 0; o < 8; o++) {
     if (o === column) continue;
-    const inner = cells[INNER * 8 + o], middle = cells[MIDDLE * 8 + o];
-    if (inner !== EMPTY && inner === middle) lineups.push(ex.position.cells.findIndex((_, i) => linedUp(ex.action, i) === MIDDLE * 8 + o));
+    for (const [lower, upper] of [[INNER, MIDDLE], [MIDDLE, TOP]]) {
+      const colour = cells[lower * 8 + o];
+      if (colour === EMPTY || colour !== cells[upper * 8 + o]) continue;
+      for (const ring of [lower, upper]) {
+        const cell = ex.position.cells.findIndex((_, i) => linedUp(ex.action, i) === ring * 8 + o);
+        if (!lineups.includes(cell)) lineups.push(cell);
+      }
+    }
   }
   return { vertical, gap, pair, top, wilded: links[1].link.wilded, lineups };
 }
@@ -582,7 +588,7 @@ export interface BuildGuess {
   /** The vertical's stars and the ring 1 pair beside its column, as cells of the board as it is. */
   vertical: number[];
   pair: number[];
-  /** Ring 1 and ring 2 stars of one colour, one above the other, before or after the turn: each as [ring 1 cell, ring 2 cell]. */
+  /** Stars of one colour stacked in rings 1 and 2, or 2 and 3, before or after the turn: each as [lower cell, upper cell]. */
   lineups: [number, number][];
   /** How far along it looks: 2 for each star of the vertical, more for a ring 4 star ready above it. */
   score: number;
@@ -624,16 +630,19 @@ export function guessBuild(cells: number[], targets: Target[] = [], previous: Bu
         if (best && best.score >= score) continue;
         const lineups: [number, number][] = [];
         const own = new Set(vertical.map((c) => unturned(turn, c)));
+        // Two of a colour stacked in rings 1 and 2, or 2 and 3: one more of that colour turned or
+        // dropped onto them makes a vertical that clears before it should.
         const check = (board: number[], from: (c: number) => number) => {
-          for (let o = 0; o < 8; o++) {
-            const inner = from(INNER * 8 + o), middle = from(MIDDLE * 8 + o);
-            if (own.has(inner) || own.has(middle) || board[INNER * 8 + o] === EMPTY || board[INNER * 8 + o] !== board[MIDDLE * 8 + o]) continue;
-            if (!lineups.some(([a, b]) => a === inner && b === middle)) lineups.push([inner, middle]);
+          for (let o = 0; o < 8; o++) for (const [lower, upper] of [[INNER, MIDDLE], [MIDDLE, TOP]]) {
+            const a = from(lower * 8 + o), b = from(upper * 8 + o);
+            if (own.has(a) || own.has(b) || board[lower * 8 + o] === EMPTY || board[lower * 8 + o] !== board[upper * 8 + o]) continue;
+            if (!lineups.some(([x, y]) => x === a && y === b)) lineups.push([a, b]);
           }
         };
         check(cells, (c) => c);
         if (turn) check(lined, (c) => unturned(turn, c));
-        best = { column, colour, turn, vertical: vertical.map((c) => unturned(turn, c)), pair: (pairs.find(([a]) => lined[EXTRA * 8 + column] === lined[a]) ?? pairs[0]).map((c) => unturned(turn, c)), lineups, score };
+        const pair = pairs.find(([a]) => lined[EXTRA * 8 + column] === lined[a]) ?? pairs[0];
+        best = { column, colour, turn, vertical: vertical.map((c) => unturned(turn, c)), pair: pair.map((c) => unturned(turn, c)), lineups, score };
       }
     }
   }
