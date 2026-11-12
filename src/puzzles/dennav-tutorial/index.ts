@@ -1,5 +1,5 @@
 // The Dennav tutorial: lessons on each kind of chain, played on the Dennav board.
-// Learn watches a move play out link by link; Practise deals the same strategy a few moves early;
+// Learn watches a move play out link by link; Practice deals the same strategy a few moves early;
 // Spot the wrong star hides one wrong star in a board; Find the wrong move spoils a build-up with one bad turn.
 import { Images } from '../../core/assets';
 import { Random } from '../../core/random';
@@ -23,7 +23,7 @@ const ringLabel = (ring: number) => `ring ${RINGS - ring}`;
 
 type Mode = 'learn' | 'practise' | 'spot' | 'when';
 const MODES: { value: Mode; label: string }[] = [
-  { value: 'learn', label: 'Learn' }, { value: 'practise', label: 'Practise' },
+  { value: 'learn', label: 'Learn' }, { value: 'practise', label: 'Practice' },
   { value: 'spot', label: 'Spot the wrong star' }, { value: 'when', label: 'Find the wrong move' },
 ];
 /** Practice stages: turns only (0–3 turns before the move), or building up the last few stars (negative: -n moves of build-up). */
@@ -95,6 +95,11 @@ export default (async ({ screen, panel, store, ticks }) => {
     sceneStart = ticks(); waiting = false; afterScenes = done;
     if (scenes[0]?.caption) captionText = scenes[0].caption;
   }
+  /** A move played back for the player to follow: turns slowed down, and a pause after it before the next. */
+  function paced(list: Scene[], g: NavigationGame): Scene[] {
+    const slowed = list.map((scene) => scene.rotation ? { ...scene, duration: 450 } : scene);
+    return [...slowed.slice(0, -1), ...slowed.slice(-1).map((scene) => ({ ...scene, duration: Math.max(scene.duration, 700) })), ...(slowed.length ? [] : [{ ...g.scene(700) }])];
+  }
   function captionsFor(o: Outcome): Map<Scene, string> {
     return new Map(o.links.map((link, i) => [link.scene, caption(link, i)]));
   }
@@ -129,7 +134,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     showExample(generate(seed, lesson().accepts, rng), 'New example');
   }
 
-  // --- Practise ---
+  // --- Practice ---
   function newPractice(): void {
     const l = lesson();
     if (!STAGES.some((st) => st.value === stage)) stage = 0;
@@ -205,7 +210,7 @@ export default (async ({ screen, panel, store, ticks }) => {
       status = `Answer: ${answerText()}.`;
       captionText = moveText(action, before);
       stepping = false;
-      playScenes(list.length ? list : [g.scene(400)], captionsFor(o), () => { shown = positionOf(g); if (queue.length) next(); });
+      playScenes(paced(list, g), captionsFor(o), () => { shown = positionOf(g); if (queue.length) next(); });
     };
     next();
   }
@@ -303,7 +308,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     for (const link of o.links) if (link.kind === 'run') captions.set(link.scene, `Clear: ${link.runs.map(describeRun).join(' and ')}.`);
     stepping = false; marks = []; arrowRing = null;
     captionText = `Move ${k + 1}: ${moveText(move, move.kind === 'drop' ? bad.boards[k].entry : undefined)}`;
-    playScenes(list.length ? list : [g.scene(250)], captions, () => showBuild(k + 1));
+    playScenes(paced(list, g), captions, () => showBuild(k + 1));
   }
   function wrongMoveText(): string {
     const b = bad!, k = b.culprit, move = b.moves[k];
@@ -507,7 +512,7 @@ export default (async ({ screen, panel, store, ticks }) => {
   learn.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); })
     .toggle('Ring the chain stars', () => ringChain, (on) => { ringChain = on; store.set('ringChain', on); if (!busy()) showExample(example, exampleLabel); }, { title: 'Before the move, ring the stars its clears will use' });
 
-  const practise = panel.group('Practise', { hidden: () => mode !== 'practise' });
+  const practise = panel.group('Practice', { hidden: () => mode !== 'practise' });
   practise.select('Stage', STAGES, () => stage, (value) => { stage = value; store.set('stage', value); newPractice(); }, { disabled: busy, title: 'How many moves before the board sets the strategy off' });
   practise.button('New board', newPractice, { variant: 'primary', disabled: busy })
     .button('Reset', resetPractice, { disabled: () => busy() || !start })
