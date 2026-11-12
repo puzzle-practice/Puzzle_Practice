@@ -584,6 +584,8 @@ export interface BuildGuess {
   pair: number[];
   /** Ring 1 and ring 2 stars of one colour, one above the other, before or after the turn: each as [ring 1 cell, ring 2 cell]. */
   lineups: [number, number][];
+  /** How far along it looks: 2 for each star of the vertical, more for a ring 4 star ready above it. */
+  score: number;
 }
 const TURNS: (Action | null)[] = [null, ...[INNER, MIDDLE, TOP].flatMap((ring) => [true, false].map((clockwise): Action => ({ kind: 'rotate', ring, clockwise })))];
 /** Where a cell of the lined-up board was before the turn. */
@@ -595,11 +597,13 @@ function unturned(turn: Action | null, cell: number): number {
  * Guesses the vertical triple a player is building: two or three of one colour through rings 1–3 in
  * one column (now, or after one turn), with a ring 1 pair of another colour beside that column.
  */
-export function guessBuild(cells: number[], targets: Target[] = []): BuildGuess | null {
-  let best: (BuildGuess & { score: number }) | null = null;
+export function guessBuild(cells: number[], targets: Target[] = [], previous: BuildGuess | null = null): BuildGuess | null {
+  let best: BuildGuess | null = null;
   for (const turn of TURNS) {
     const lined = turn ? linedUpCells({ cells, targets: [], entry: { colour: 0, octant: 0 } }, turn) : cells;
     for (let column = 0; column < 8; column++) {
+      // A vertical can't go through a target: clearing it would empty the target.
+      if (targets.some((t) => t.octant === column && t.ring >= TOP)) continue;
       const stack = [INNER, MIDDLE, TOP].map((ring) => ring * 8 + column).filter((c) => lined[c] !== EMPTY);
       for (const colour of new Set(stack.map((c) => lined[c]))) {
         const vertical = stack.filter((c) => lined[c] === colour);
@@ -614,7 +618,9 @@ export function guessBuild(cells: number[], targets: Target[] = []): BuildGuess 
         // Between builds that look as far along, the one whose horizontal turns more unfilled targets wild.
         const open = targets.filter((t) => lined[t.ring * 8 + t.octant] !== t.colour);
         const wild = Math.max(...pairs.map((pair) => wildedBy(open, [INNER * 8 + column, ...pair]).length));
-        const score = vertical.length * 2 + (topped ? 1 : 0) + wild * 0.1 + (turn ? 0 : 0.05);
+        // The build already guessed keeps its place unless another is clearly further along.
+        const kept = previous && previous.column === column && previous.colour === colour ? 1.5 : 0;
+        const score = vertical.length * 2 + (topped ? 1 : 0) + wild * 0.1 + (turn ? 0 : 0.05) + kept;
         if (best && best.score >= score) continue;
         const lineups: [number, number][] = [];
         const own = new Set(vertical.map((c) => unturned(turn, c)));
@@ -631,7 +637,5 @@ export function guessBuild(cells: number[], targets: Target[] = []): BuildGuess 
       }
     }
   }
-  if (!best) return null;
-  const { score: _score, ...guess } = best;
-  return guess;
+  return best;
 }

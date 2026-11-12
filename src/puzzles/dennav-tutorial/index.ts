@@ -260,24 +260,43 @@ export default (async ({ screen, panel, store, ticks }) => {
     game = new NavigationGame(SETTINGS, rng.integer(1, 0x7fffffff));
     start = null; upcoming = []; goal = null;
     shown = positionOf(game);
-    scenes = []; afterScenes = null; waiting = false; replaying = false; queued = []; lastMove = null; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
+    scenes = []; afterScenes = null; waiting = false; replaying = false; queued = []; settleAt = 0; stable = 0; judged = null; lastMove = null; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
     captionText = '';
     status = 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked, and a buzz sounds if a ring 2 star lines up with the ring 1 star under it (as the rings sit, or after the turn you’re saving).';
   }
+  /** When the board has sat still long enough to judge (ms), and how many judgements in a row saw the same build. */
+  let settleAt = 0, stable = 0, judged: BuildGuess | null = null;
+  const SETTLE_MS = 700;
+  /** After each move: mark what the board looks like it's building, and judge it once play pauses. */
   function checkScratch(): void {
     if (!game) return;
-    guess = guessBuild(game.board.cells, game.targets);
+    guess = guessBuild(game.board.cells, game.targets, guess);
     marks = [];
-    if (!guess) { buzzed = new Set(); return; }
+    settleAt = ticks() + SETTLE_MS;
+    if (!guess) { status = 'No vertical triple in sight yet.'; return; }
     for (const c of [...guess.vertical, ...guess.pair]) marks.push({ cell: c, colour: '#7fd8ff' });
-    const keys = new Set(guess.lineups.map(([a, b]) => `${a}-${b}-${game!.board.cells[a]}`));
-    const fresh = [...keys].filter((k) => !buzzed.has(k));
     for (const [a, b] of guess.lineups) marks.push({ cell: a, colour: '#ff4040' }, { cell: b, colour: '#ff4040' });
-    const what = `Looks like a ${COLOUR_NAMES[guess.colour].toLowerCase()} vertical over ${OCTANT_NAMES[guess.column].toLowerCase()}${guess.turn ? `, lined up by ${moveText(guess.turn)}` : ''}.`;
-    if (fresh.length) {
+    status = `${buildText(guess)} ${guess.lineups.length ? 'Ring 2 lines up with ring 1 (marked red).' : 'Rings 1 and 2 are clear of line-ups.'}`;
+  }
+  function buildText(g: BuildGuess): string {
+    return `Looks like a ${COLOUR_NAMES[g.colour].toLowerCase()} vertical over ${OCTANT_NAMES[g.column].toLowerCase()}${g.turn ? `, lined up by ${moveText(g.turn)}` : ''}.`;
+  }
+  /**
+   * Once play has paused: buzz for a new line-up, but only when sure of the build, that is when the
+   * same build has been seen two pauses running, or its vertical is complete bar the last turn.
+   */
+  function judgeScratch(): void {
+    settleAt = 0;
+    if (!game || !guess) { stable = 0; judged = null; buzzed = new Set(); return; }
+    const same = !!judged && judged.column === guess.column && judged.colour === guess.colour;
+    stable = same ? stable + 1 : 1; judged = guess;
+    const sure = stable >= 2 || guess.vertical.length === 3;
+    const keys = new Set(guess.lineups.map(([a, b]) => `${a}-${b}-${game!.board.cells[a]}`));
+    if (!sure) return;
+    if ([...keys].some((k) => !buzzed.has(k))) {
       sounds.play('buzz', 0.6);
-      status = `${what} Ring 2 lines up with ring 1 (marked red): that pair will clear early or spoil the chain.`;
-    } else status = guess.lineups.length ? `${what} Still a line-up between rings 1 and 2 (marked red).` : `${what} Rings 1 and 2 are clear of line-ups.`;
+      status = `${buildText(guess)} Ring 2 lines up with ring 1 (marked red): that pair will clear early or spoil the chain.`;
+    }
     buzzed = keys;
   }
 
@@ -787,6 +806,7 @@ export default (async ({ screen, panel, store, ticks }) => {
         }
       }
       advance(ticks());
+      if (mode === 'scratch' && settleAt && ticks() >= settleAt && !busy() && !queued.length) judgeScratch();
       draw(ticks());
     },
   };

@@ -135,6 +135,13 @@ describe('Dennav tutorial: the vertical triple, step by step', async () => {
     expect(guess.colour).toBe(2);
     expect(guess.lineups).toEqual([[24, 16]]);
   });
+  it('never guesses a vertical through a target', () => {
+    const cells = Array<number>(32).fill(-1);
+    [4, 3, 3, 0, 1, 1, 2, 0].forEach((c, o) => { cells[24 + o] = c; });
+    cells[16] = 4; cells[16 + 6] = 2;
+    // A ring 3 target over the south rules the red column out.
+    expect(guessBuild(cells, [{ ring: 1, octant: 6, colour: 0, wild: false }])?.column).not.toBe(6);
+  });
   it('finds ring 1 and ring 2 line-ups, in line and after the saved turn', () => {
     const E = -1;
     // Ring indices: 0 outer (ring 4) … 3 inner (ring 1). A blue (0) vertical over octant 0 with ring 1
