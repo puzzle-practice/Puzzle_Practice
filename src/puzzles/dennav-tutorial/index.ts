@@ -246,8 +246,11 @@ export default (async ({ screen, panel, store, ticks }) => {
   let guess: BuildGuess | null = null, buzzed = new Set<string>();
   /** Moves made while the last was playing out, and the last move with the board before it, to replay slowly. */
   let queued: Action[] = [], lastMove: { before: Position; action: Action } | null = null;
+  let replayWanted = false;
   function replayLast(): void {
-    if (!lastMove || busy() || !game) return;
+    if (!lastMove || !game || replaying) return;
+    // Pressed while a move plays out: replay once it (and any moves waiting) have finished.
+    if (busy()) { replayWanted = true; return; }
     const g = gameAt(lastMove.before);
     const list = act(g, lastMove.action);
     const o = outcome(list, positionOf(g));
@@ -260,7 +263,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     game = new NavigationGame(SETTINGS, rng.integer(1, 0x7fffffff));
     start = null; upcoming = []; goal = null;
     shown = positionOf(game);
-    scenes = []; afterScenes = null; waiting = false; replaying = false; queued = []; settleAt = 0; stable = 0; judged = null; lastMove = null; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
+    scenes = []; afterScenes = null; waiting = false; replaying = false; replayWanted = false; queued = []; settleAt = 0; stable = 0; judged = null; lastMove = null; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
     captionText = '';
     status = 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked, and a buzz sounds if two of a colour are stacked in rings 1 and 2 or rings 2 and 3 (as the rings sit, or after the turn you’re saving), since one more of that colour would clear them early.';
   }
@@ -360,7 +363,13 @@ export default (async ({ screen, panel, store, ticks }) => {
     stepping = false;
     playScenes(list, captionsFor(o), () => {
       shown = positionOf(g);
-      if (mode === 'scratch') { checkScratch(); const nextMove = queued.shift(); if (nextMove) practiceMove(nextMove); return; }
+      if (mode === 'scratch') {
+        checkScratch();
+        const nextMove = queued.shift();
+        if (nextMove) practiceMove(nextMove);
+        else if (replayWanted) { replayWanted = false; replayLast(); }
+        return;
+      }
       if (!o.links.length) { status = `${moves} move${moves > 1 ? 's' : ''} so far.`; return; }
       if (lesson().accepts(o)) status = `Yes! ${lesson().success}`;
       else status = `That set off ${o.charted ? `a ${chainName(o.charted).toLowerCase()}` : 'a clear'}, but not a ${lesson().title.toLowerCase()}. Reset to try again, or Show answer.`;
@@ -725,7 +734,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     .button('Rotate right', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: true }))
     .button('Drop star', () => practiceMove({ kind: 'drop' }));
   scratch.append(rowBreak());
-  scratch.button('Replay last move slowly', replayLast, { disabled: () => busy() || !lastMove, title: 'Play your last move again, slowed down, to see what it set off' });
+  scratch.button('Replay last move slowly', replayLast, { disabled: () => !lastMove, title: 'Play your last move again, slowed down, to see what it set off' });
   scratch.append(rowBreak());
   scratch.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
