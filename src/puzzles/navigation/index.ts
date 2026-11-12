@@ -49,6 +49,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     store.set('wwTimerDefault', true);
   }
   let liveSettings = { ...settings };
+  /** Replays saved before a booch dealt a new board end on their booch, as they did then. */
+  let boochEnds = false;
   let savedSettings: NavigationSettings | null = null;
   let game: NavigationGame | null = null;
   /** In WW and quota runs, Dismiss deals a new board in the same run: its score, stats, timer and constellation count carry on. */
@@ -110,8 +112,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     pause.resume();
     rules = tapeRules;
     if (seed === undefined) seed = seedMode.next(); seedMode.remember(seed);
-    // Freeplay has no timer or quota, and each star waits at the top for Drop.
-    liveSettings = settings.create ? { ...settings, timerMs: 0, clears: false, slowDrop: true } : { ...settings };
+    // An old replay's booch ends its run. The rule is kept apart from the game's settings, which replays check.
+    const { boochEnds: oldBoochRule, ...played } = settings;
+    boochEnds = !!oldBoochRule;
+    // Freeplay keeps the chosen timer but has no quota, and each star waits at the top for Drop.
+    liveSettings = played.create ? { ...played, clears: false, slowDrop: true } : { ...played };
     duty.clear();
     layer = 'stars'; palette = paintWith = null; painting = false; setup = ''; pasteNote = '';
     runSeed = seed; board = 0; banked = NO_TOTALS; charts = []; longestChain = longestCascade = 0;
@@ -124,7 +129,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     incomingRadius = 220; lastTick = ticks();
     scenes = []; pendingCommands = []; fastDrop = false; message = '';
     warning.reset();
-    replays.begin(liveSettings, timerElapsedMs ? { boardSeed: seed, timerElapsedMs } : seed);
+    replays.begin(boochEnds ? { ...liveSettings, boochEnds } : liveSettings, timerElapsedMs ? { boardSeed: seed, timerElapsedMs } : seed);
     sounds.play('fanfare');
   }
   /** A fresh board in the same run (WW or quota-run Dismiss): what the run has scored stays. */
@@ -166,10 +171,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     });
     message = reason; messageAt = ticks(); messagePx = gameFont(1); messageFill = TEXT_WHITE;
   }
-  /** A finished board ends the run, except a Dennav or Old Dennav booch, which deals a fresh board in the same run while time is left. */
+  /** A finished board ends the run, except a booch in Dennav, Old Dennav or Freeplay, which deals a fresh board in the same run while time is left. */
   function boardDone(): void {
     if (!running || !game) return;
-    if (game.booched && isWerewolf(liveSettings.mode) && !liveSettings.create && !liveSettings.boochEnds && !timeUp()) { sounds.play('booched'); deal('Booched! New board', !!liveSettings.boochOpens); }
+    if (game.booched && (isWerewolf(liveSettings.mode) || liveSettings.create) && !boochEnds && !timeUp()) { sounds.play('booched'); deal('Booched! New board', !!liveSettings.boochOpens); }
     else end(game.booched ? 'Booched!' : 'Level complete');
   }
   function startScene(scene: Scene): void {
@@ -517,14 +522,20 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Version 1 had no looping: an untimed run then ended at the quota, as a quota run does now.
   // Before version 4 a booch ended every run, Dennav and Old Dennav included.
   // In version 4 the Dennav board a booch dealt opened on 1/2/1 again.
-  const codec: ReplaySettingsCodec = { currentVersion: 5, simulatorVersion: RULES, migrate: (version, value) => {
-    const read = version <= 5 ? readSettings(value) : null;
+  // Before version 6 Freeplay had no timer (its replays saved none) and a booch ended it.
+  const codec: ReplaySettingsCodec = { currentVersion: 6, simulatorVersion: RULES, migrate: (version, value) => {
+    const read = version <= 6 ? readSettings(value) : null;
     if (read?.mode === 'ww-test' && version < 3) return null;
-    if (!read || version === 5) return read;
-    if (version === 4) return { ...read, boochOpens: true };
+    if (!read || version === 6) return read;
+    const freeplay = read.create ? { boochEnds: true } : {};
+    if (version === 5) return { ...read, ...freeplay };
+    if (version === 4) return { ...read, boochOpens: true, ...freeplay };
     // Version 1 dealt Dismissed boards at once.
     return version === 1 ? { ...read, clears: !read.timerMs, dismissDelayMs: 0, boochEnds: true } : { ...read, boochEnds: true };
-  } };
+  },
+  // A booch never ends a game taken over from an old replay. Its boards so far had no booch, or it
+  // would have ended there, so the saved game plays the same without the old rule.
+  takeOver: value => { const { boochEnds: _, ...rest } = value as NavigationSettings; return rest; } };
   replays = new ReplayRecorder('navigation', store, panel, ticks, tape => {
     savedSettings ??= { ...settings };
     settings = readSettings(tape.settings)!;
@@ -542,10 +553,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (running) end('Stopped'); });
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
-  // Freeplay and games with no timer have no end of their own: their replays are kept however they stop.
+  // Freeplay and games with no timer have no end they must reach: their replays are kept however they stop.
   replays.openEnded = () => running && (liveSettings.create || !liveSettings.timerMs);
-  // An old replay's booch rule stays with the run taken over, not with the next one started.
-  replays.onTakeOver = () => { savedSettings = null; delete settings.boochEnds; delete settings.boochOpens; };
+  // An old replay's 1/2/1 booch rule stays with the run taken over, not with the next one started.
+  replays.onTakeOver = () => { savedSettings = null; boochEnds = false; delete settings.boochEnds; delete settings.boochOpens; };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(game, running, finished, selected, runSeed, board, banked, startTime, timerElapsedBeforeBoard,
     incomingRadius, fastDrop, dealAt, scenes, sceneStart);

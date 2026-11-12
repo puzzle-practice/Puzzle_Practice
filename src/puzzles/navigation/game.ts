@@ -7,7 +7,7 @@ import { EMPTY, NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, LEVEL_TA
  * `slowDrop` holds each incoming star at the top until Drop is pressed, for practice without the fall.
  */
 export interface NavigationSettings { mode: 'normal' | 'ww' | 'ww-test'; difficulty: number; extraRing: boolean; wildTargets: boolean; timerMs: number; clears: boolean; dismissDelayMs: number; slowDrop: boolean;
-  /** Freeplay mode paints the board, with no timer, quota or history, and each star waits for Drop. */
+  /** Freeplay mode paints the board, with the chosen timer but no quota or history, and each star waits for Drop. A booch deals a fresh board. */
   create: boolean;
   /** Replays saved before a Dennav booch dealt a new board: the booch ends the run, as it did then. */
   boochEnds?: boolean;
@@ -31,8 +31,8 @@ export function readSettings(value: unknown): NavigationSettings | null {
 export const isWerewolf = (mode: NavigationSettings['mode']): boolean => mode === 'ww' || mode === 'ww-test';
 export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal';
 export const settingsKey = (s: NavigationSettings): string => `${s.mode}:${s.difficulty}:${isWerewolf(s.mode) && s.extraRing ? 4 : 3}:${isWerewolf(s.mode) && s.wildTargets ? 1 : 0}:${s.timerMs}${s.clears ? ':c' : ''}${s.slowDrop ? ':s' : ''}`;
-/** The constellations a run is played to: the quota, except with no timer, which loops. */
-export const runGoal = (s: NavigationSettings): number => s.timerMs || s.clears ? LEVEL_TARGETS[s.difficulty] : Infinity;
+/** The constellations a run is played to: the quota, except with no timer or in Freeplay, which loop. */
+export const runGoal = (s: NavigationSettings): number => !s.create && (s.timerMs || s.clears) ? LEVEL_TARGETS[s.difficulty] : Infinity;
 export interface NavigationSeed { boardSeed: number; timerElapsedMs: number }
 export function readNavigationSeed(value: unknown): NavigationSeed | null {
   const seed = typeof value === 'number' ? { boardSeed: value, timerElapsedMs: 0 } : value as NavigationSeed | null;

@@ -2067,6 +2067,55 @@ describe('Navigation sessions and replay', () => {
     instance.dispose?.();
   });
 
+  it('a game taken over from a replay whose booch ended the run deals a fresh board on a booch, and its replay still plays', async () => {
+    const { DEFAULT_SETTINGS } = await import('./navigation/game');
+    // An old replay's rule: the booch ends the run.
+    const store = new Store('navigation');
+    store.set('settings', { ...DEFAULT_SETTINGS, mode: 'ww', timerMs: 120000, dismissDelayMs: 0, boochEnds: true });
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    const results: string[] = [];
+    const finish = recorder.finish.bind(recorder);
+    recorder.finish = ((result: string, ...rest: unknown[]) => { results.push(result.split(' · ')[0]); return (finish as (...args: unknown[]) => unknown)(result, ...rest); }) as typeof recorder.finish;
+    const drop = [{ type: 'keydown', key: 'space' }, { type: 'keyup', key: 'space' }] as InputEvent[];
+    buttons.get('Play::Start')!();
+    for (now = 100; !results.length && now < 120000; now += 100) instance.frame(now % 500 === 0 ? drop : []);
+    expect(results).toEqual(['Booched!']);
+    await replayWrites.idle();
+    const [tape] = await listReplayFiles('navigation');
+    // Take over a second before the booch and keep dropping: the run carries on past it.
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration - 1000); instance.frame([]);
+    expect(recorder.takeOver()).toBe(true);
+    perf.mockRestore();
+    const booches = captured.sounds.filter(sound => sound === 'booched').length;
+    for (let i = 0; i < 300; i++) { now += 100; instance.frame(i % 5 === 0 ? drop : []); }
+    expect(captured.sounds.filter(sound => sound === 'booched').length).toBeGreaterThan(booches + 1);
+    expect(results).toEqual(['Booched!']);
+    buttons.get('Play::Start')!();
+    expect(results).toEqual(['Booched!', 'Stopped']);
+    await replayWrites.idle();
+    const taken = (await listReplayFiles('navigation')).find(replay => /taken over at/.test(replay.result))!;
+    expect(taken).toBeDefined();
+    // Played back, the taken-over game follows the same boards to the end.
+    const replay = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(taken.at, taken.runId)).toBe(true);
+    const before = captured.sounds.filter(sound => sound === 'booched').length;
+    for (let t = 0; t <= taken.duration; t += 100) { replay.mockReturnValue(t); instance.frame([]); }
+    expect(recorder.divergedAt).toBeNull();
+    expect(captured.sounds.filter(sound => sound === 'booched').length - before).toBeGreaterThan(1);
+    // The old rule stayed behind: the replay never ends on a booch.
+    expect(results).toEqual(['Booched!', 'Stopped']);
+    replay.mockRestore();
+    instance.dispose?.();
+  });
+
   it.each(['normal', 'ww', 'ww-test'] as const)('%s Dismiss restarts a paused board and a finished board without duplicating history', async mode => {
     const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
     const settings = { ...DEFAULT_SETTINGS, mode, timerMs: 120000, dismissDelayMs: 0 };
@@ -2221,6 +2270,78 @@ describe('Navigation sessions and replay', () => {
       expect(click()).toBe(0);
       expect(click()).toBe(rings - 1);
     }
+    instance.dispose?.();
+  });
+
+  it.each(['normal', 'ww', 'ww-test'] as const)('Freeplay under %s rules keeps the 5-minute timer, and a booch deals a fresh board', async (mode) => {
+    const { DEFAULT_SETTINGS } = await import('./navigation/game');
+    const settings = { ...DEFAULT_SETTINGS, mode, create: true, timerMs: 300000, dismissDelayMs: 0 };
+    const store = new Store('navigation');
+    store.set('settings', settings);
+    const { panel, buttons, clocks } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders[0];
+    const ended: string[] = [];
+    const finish = recorder.finish.bind(recorder);
+    recorder.finish = ((result: string, ...rest: unknown[]) => { ended.push(`${result.split(' · ')[0]} at ${now}`); return (finish as (...args: unknown[]) => unknown)(result, ...rest); }) as typeof recorder.finish;
+    buttons.get('Play::Start')!();
+    expect(clocks()[0]).toMatchObject({ label: 'Time left', ms: 300000, countdown: true });
+    // Drop every star at once and never turn a ring, so the board booches again and again.
+    const booches = () => captured.sounds.filter(sound => sound === 'booched').length;
+    for (now = 100; now <= 310000 && !ended.length; now += 100) instance.frame(now % 500 === 0 ? [{ type: 'keydown', key: 'space' }, { type: 'keyup', key: 'space' }] : []);
+    expect(booches()).toBeGreaterThan(1);
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatch(/^Time up at 300\d{3}$/);
+    expect(Number(ended[0].split(' at ')[1])).toBeLessThan(301000);
+    instance.dispose?.();
+  });
+
+  it('a Freeplay replay saved before Freeplay dealt a new board still ends on its booch', async () => {
+    const { DEFAULT_SETTINGS } = await import('./navigation/game');
+    const store = new Store('navigation');
+    // Played by the old rule: Freeplay had no timer, and a booch ended it.
+    store.set('settings', { ...DEFAULT_SETTINGS, mode: 'ww', create: true, timerMs: 0, dismissDelayMs: 0, boochEnds: true });
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const context = { screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext;
+    const factory = (await import('./navigation/index')).default;
+    let instance = await factory(context);
+    const results: string[] = [];
+    const watch = (recorder: ReplayRecorder) => {
+      const finish = recorder.finish.bind(recorder);
+      recorder.finish = ((result: string, ...rest: unknown[]) => { results.push(result.split(' · ')[0]); return (finish as (...args: unknown[]) => unknown)(result, ...rest); }) as typeof recorder.finish;
+    };
+    watch(captured.recorders[0]);
+    buttons.get('Play::Start')!();
+    for (now = 100; !results.length && now < 120000; now += 100) instance.frame(now % 500 === 0 ? [{ type: 'keydown', key: 'space' }, { type: 'keyup', key: 'space' }] : []);
+    expect(results).toEqual(['Booched!']);
+    await replayWrites.idle();
+    const { decodeReplayBlob, encodeReplayBlob, replayMetadata } = await import('../core/replay');
+    const { readReplayFile, saveReplayFile } = await import('../core/replay-storage');
+    const [saved] = await listReplayFiles('navigation');
+    const tape = (await decodeReplayBlob((await readReplayFile(saved))!))!;
+    // As version 5 saved it: no booch rule of its own.
+    tape.at++; tape.settingsVersion = 5;
+    delete (tape.settings as Record<string, unknown>).boochEnds;
+    const blob = await encodeReplayBlob(tape);
+    await saveReplayFile({ metadata: replayMetadata(tape, blob.size), blob });
+    instance.dispose?.(); instance = await factory(context);
+    const recorder = captured.recorders.at(-1)!;
+    watch(recorder);
+    await vi.waitFor(() => expect(recorder.hasPlayableAt(tape.at, tape.runId)).toBe(true));
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+    for (let t = 0; t <= tape.duration; t += 100) { perf.mockReturnValue(t); instance.frame([]); }
+    perf.mockRestore();
+    expect(recorder.divergedAt).toBeNull();
+    // Leaving the puzzle in between ends nothing that was recorded.
+    expect(results).toEqual(['Booched!', 'Stopped when leaving puzzle', 'Booched!']);
     instance.dispose?.();
   });
 
