@@ -92,7 +92,7 @@ describe('Dennav tutorial build-up stages', async () => {
 });
 
 describe('Dennav tutorial: the vertical triple, step by step', async () => {
-  const { verticalPlan, horizontalAt, guessBuild, linedUp, INNER } = await import('./engine');
+  const { verticalPlan, bestHorizontals, wildedBy, planHorizontal, guessBuild, linedUp, INNER } = await import('./engine');
   const lesson = LESSONS.find((l) => l.id === 'vertical-triple')!;
   it('takes every session board and new example apart', () => {
     const rng = new Random(3);
@@ -105,12 +105,22 @@ describe('Dennav tutorial: the vertical triple, step by step', async () => {
       expect(Math.floor(plan.gap / 8)).toBe(INNER);
       // The pair is the colour of the star that drops in, and a horizontal at the gap is found.
       expect(plan.pair.every((c) => ex.position.cells[c] === ex.position.cells[plan.top])).toBe(true);
-      expect(horizontalAt(ex, plan.gap).pair).toBe(true);
+      expect(wildedBy(ex.position.targets, planHorizontal(ex, plan)).length).toBeLessThanOrEqual(bestHorizontals(ex.position.targets).wild);
       // Seen from the board, it looks like a vertical being built over that column.
       const guess = guessBuild(ex.position.cells)!;
       expect(guess).not.toBeNull();
       expect(guess.column).toBe(linedUp(ex.action, plan.gap) % 8);
     }
+  });
+  it('scores where the horizontal goes like the board in the screenshot', () => {
+    // Ring 1 targets north, north-east and south-east; ring 2 targets north and west; ring 3 north.
+    const t = (ring: number, octant: number) => ({ ring, octant, colour: 0, wild: false });
+    const targets = [t(3, 2), t(3, 1), t(3, 7), t(2, 2), t(2, 4), t(1, 2)];
+    // East, north-east, north: both ring 1 targets in it, the south-east one beside it, and ring 2 north above it.
+    expect(wildedBy(targets, [24, 25, 26])).toHaveLength(4);
+    // Under the west ring 2 target, reaching the north ring 1 target, does as well.
+    expect(wildedBy(targets, [26, 27, 28])).toHaveLength(4);
+    expect(bestHorizontals(targets)).toEqual({ wild: 4, starts: [0, 2] });
   });
   it('finds ring 1 and ring 2 line-ups, in line and after the saved turn', () => {
     const E = -1;

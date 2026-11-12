@@ -10,7 +10,7 @@ import { NavigationGame, type Scene } from '../navigation/game';
 import { COLOUR_NAMES, OCTANT_NAMES } from '../navigation/create';
 import { EMPTY, type Run } from '../navigation/logic';
 import {
-  RINGS, INNER, MIDDLE, TOP, act, play, runStars, verticalPlan, horizontalAt, guessBuild, linedUp, SETTINGS, buildUpAtMost, dropEntries, spoilBuild, chainName, fixes, gameAt, generate, makeMistake, outcome, positionOf, scramble,
+  RINGS, INNER, MIDDLE, TOP, act, play, runStars, verticalPlan, bestHorizontals, wildedBy, planHorizontal, innerRun, guessBuild, linedUp, SETTINGS, buildUpAtMost, dropEntries, spoilBuild, chainName, fixes, gameAt, generate, makeMistake, outcome, positionOf, scramble,
   type Action, type BadBuild, type BuildGuess, type VerticalPlan, type Example, type Link, type Mistake, type Outcome, type Position,
 } from './engine';
 import { LESSONS, VEGAS_AS_PLAYED, type Lesson } from './lessons';
@@ -144,7 +144,7 @@ export default (async ({ screen, panel, store, ticks }) => {
 
 
   // --- Build it step by step (the vertical triple) ---
-  let stepEx: Example | null = null, plan: VerticalPlan | null = null, stepAt = 0, picked = false;
+  let stepEx: Example | null = null, plan: VerticalPlan | null = null, stepAt = 0, picked = false, chosen: number[] = [];
   const STEP_TITLES = ['The goal', 'Step 1: where the horizontal goes', 'Step 2: build the vertical', 'Step 3: the star on top'];
   const hasSteps = () => lesson().id === 'vertical-triple';
   /** The board with only some rings on it. */
@@ -158,7 +158,8 @@ export default (async ({ screen, panel, store, ticks }) => {
       const ex: Example = fromSession ? l.moments[momentIndex = (momentIndex + (tries ? 1 : 0)) % l.moments.length]
         : generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng);
       const pl = verticalPlan(ex);
-      if (!pl || (pl.lineups.length && tries < 39)) continue;
+      // New examples put the horizontal where it turns the most targets wild, as step 1 teaches.
+      if (!pl || (!fromSession && tries < 39 && (pl.lineups.length || wildedBy(ex.position.targets, planHorizontal(ex, pl)).length < bestHorizontals(ex.position.targets).wild))) continue;
       stepEx = ex; plan = pl;
       showStep(0);
       return;
@@ -168,7 +169,7 @@ export default (async ({ screen, panel, store, ticks }) => {
   function showStep(k: number): void {
     if (!stepEx || !plan || busy()) return;
     const ex = stepEx, pl = plan;
-    stepAt = Math.max(0, Math.min(3, k)); picked = false; scenes = []; game = null;
+    stepAt = Math.max(0, Math.min(3, k)); picked = false; chosen = []; scenes = []; game = null;
     const yellow = '#ffd84a', red = '#ff4040';
     const colour = (cell: number) => COLOUR_NAMES[ex.position.cells[cell]].toLowerCase();
     arrowRing = null; marks = [];
@@ -178,8 +179,8 @@ export default (async ({ screen, panel, store, ticks }) => {
       arrowRing = ex.action.kind === 'rotate' ? { ring: ex.action.ring, clockwise: ex.action.clockwise } : null;
       status = `${STEP_TITLES[0]}. This is the finished board: ${moveText(ex.action)} lines the ${colour(pl.vertical[0])} vertical up through rings 1–3 and it clears. The ring 4 star above it drops all the way into ring 1 and joins the ${colour(pl.pair[0])} pair there, and that second clear turns the targets beside it wild, so the constellation charts as a triple. Press Play move to watch, then Next step to see how it's built.`;
     } else if (stepAt === 1) {
-      shown = only(ex.position, [INNER]);
-      status = `${STEP_TITLES[1]}. Start with ring 1. Choose where the ring 1 horizontal will go: a star with a pair of another colour beside it, which the vertical will knock out. Put it next to as many unfilled targets as you can, because the targets beside that clear go wild. Click the ring 1 star you'd build the vertical on.`;
+      shown = only(ex.position, []);
+      status = `${STEP_TITLES[1]}. Plan it from the targets, before ring 1 is built. The ring 1 horizontal is the second clear, so every target beside it goes wild: targets in ring 1 next to or under it, and ring 2 targets directly above it. Click the three ring 1 cells where it turns the most targets wild (they're marked green).`;
     } else if (stepAt === 2) {
       shown = only(ex.position, [INNER, MIDDLE, TOP]);
       marks = pl.vertical.map((cell) => ({ cell, colour: yellow }));
@@ -202,23 +203,27 @@ export default (async ({ screen, panel, store, ticks }) => {
   }
   function pickHorizontal(cell: number): void {
     if (!stepEx || !plan || stepAt !== 1 || picked || busy()) return;
-    if (Math.floor(cell / 8) !== INNER || stepEx.position.cells[cell] === EMPTY) return;
-    const ex = stepEx, pl = plan;
-    const best = horizontalAt(ex, pl.gap), here = horizontalAt(ex, cell);
-    const reveal = () => {
-      marks = [pl.gap, ...pl.pair].map((c) => ({ cell: c, colour: '#ffd84a' }));
-      for (const t of pl.wilded) marks.push({ cell: t.ring * 8 + t.octant, colour: '#7fd8ff' });
-    };
-    if (cell === pl.gap || (here.pair && here.wild >= best.wild)) {
-      picked = true; reveal();
-      status = `${cell === pl.gap ? 'Yes.' : 'That works as well as the one used here.'} The vertical goes on the marked star, and the dropped star makes a horizontal with the pair beside it. The ${pl.wilded.length} target${pl.wilded.length === 1 ? '' : 's'} marked blue go${pl.wilded.length === 1 ? 'es' : ''} wild when it clears. Press Next step.`;
-    } else if (here.pair) {
-      marks = [{ cell, colour: '#ff4040' }];
-      status = `A horizontal there would work, but only ${here.wild} unfilled target${here.wild === 1 ? '' : 's'} sit${here.wild === 1 ? 's' : ''} beside it. There's a spot next to ${best.wild}. Try again.`;
-    } else {
-      marks = [{ cell, colour: '#ff4040' }];
-      status = 'There’s no pair beside that star, so the star dropped in wouldn’t make a horizontal. Try again.';
+    if (Math.floor(cell / 8) !== INNER) return;
+    const ex = stepEx, pl = plan, targets = ex.position.targets;
+    const yellow = '#40ff70', blue = '#7fd8ff';
+    chosen = chosen.includes(cell) ? chosen.filter((c) => c !== cell) : [...chosen, cell];
+    marks = chosen.map((c) => ({ cell: c, colour: yellow }));
+    if (chosen.length < 3) { status = `${chosen.length} of 3 picked. Click a picked cell again to unpick it.`; return; }
+    const start = [0, 1, 2, 3, 4, 5, 6, 7].find((o) => innerRun(o).every((c) => chosen.includes(c)));
+    if (start === undefined) { chosen = []; marks = []; status = 'A horizontal is three cells in a row in ring 1. Pick again.'; return; }
+    const best = bestHorizontals(targets), wilded = wildedBy(targets, chosen);
+    const where = (start: number) => innerRun(start).map((c) => OCTANT_NAMES[c % 8].toLowerCase()).join(', ');
+    if (wilded.length < best.wild) {
+      chosen = []; marks = [];
+      status = `That turns ${wilded.length} target${wilded.length === 1 ? '' : 's'} wild. There's a spot that turns ${best.wild} wild: look for one under a ring 2 target that also reaches ring 1 targets either side. Pick again.`;
+      return;
     }
+    picked = true;
+    for (const t of wilded) marks.push({ cell: t.ring * 8 + t.octant, colour: blue });
+    const own = planHorizontal(ex, pl), ownWild = wildedBy(targets, own).length;
+    const others = best.starts.filter((st) => st !== start);
+    const same = own.length === 3 && own.every((c) => chosen.includes(c));
+    status = `Yes: that turns ${wilded.length} target${wilded.length === 1 ? '' : 's'} wild (marked blue).${others.length ? ` ${others.length === 1 ? `So would ${where(others[0])}` : `${others.length} other spots do as well`}: which to build depends on the order the stars come in.` : ''} The vertical goes through one of the three cells: the ring 4 star drops into ring 1 there.${same ? ' It’s where this board builds it.' : ` This board builds it at ${own.map((c) => OCTANT_NAMES[c % 8].toLowerCase()).join(', ')}, turning ${ownWild} wild.`} Press Next step.`;
   }
   function playSteps(): void {
     if (!stepEx || busy()) return;
@@ -483,8 +488,11 @@ export default (async ({ screen, panel, store, ticks }) => {
         ctx.drawImage(images.get('star_wild'), ((matches ? 8 : 0) + (t.octant + 2) % 8) * 56, 0, 56, 56, Math.trunc(x) - 28, Math.trunc(y) - 28, 56, 56);
       } else star(t.colour, t.octant, radius(t.ring), matches, true);
     }
-    // Glows go over the targets (added light, so a target still shows through) and under the stars.
-    for (const m of glows) ringMark(m.cell, m.colour);
+    // Marks go over the targets (a target's is a ring round it) and under the stars.
+    for (const m of glows) {
+      const target = scene.targets.some((t) => t.ring * 8 + t.octant === m.cell);
+      ringMark(m.cell, m.colour, target ? 28 : scene.cells[m.cell] < 0 ? 17 : 0);
+    }
     for (let ring = 0; ring < RINGS; ring++) for (let o = 0; o < 8; o++) {
       const colour = scene.cells[ring * 8 + o];
       if (colour < 0) continue;
@@ -504,11 +512,17 @@ export default (async ({ screen, panel, store, ticks }) => {
     }
   }
   /** A glow behind a star, added as light so a target under it still shows. */
-  function ringMark(cell: number, colour: string): void {
+  /** `outline`: draw a ring of that radius instead, round a target (so it stays readable) or an empty cell. */
+  function ringMark(cell: number, colour: string, outline = 0): void {
     const [x, y] = position(cell % 8, radius(Math.floor(cell / 8)));
+    if (outline) {
+      ctx.save(); ctx.strokeStyle = colour; ctx.lineWidth = 4; ctx.shadowColor = colour; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(x, y, outline, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+      return;
+    }
     const glow = ctx.createRadialGradient(x, y, 8, x, y, 30);
     glow.addColorStop(0, colour); glow.addColorStop(0.55, colour); glow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.save(); ctx.globalAlpha = 0.85; ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = glow;
+    ctx.save(); ctx.globalAlpha = 0.85; ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(x, y, 30, 0, Math.PI * 2); ctx.fill(); ctx.restore();
   }
   /** The finished board, faint, wherever the board in play doesn't match it yet. */

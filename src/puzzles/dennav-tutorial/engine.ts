@@ -522,7 +522,7 @@ export function linedUpCells(p: Position, action: Action): number[] {
 export const besideClear = (t: Target, cells: number[]): boolean =>
   cells.some((c) => {
     const ring = Math.floor(c / 8), octant = c % 8;
-    return (t.ring === ring && (t.octant === octant || Math.abs(((t.octant - octant + 12) % 8) - 4) === 3)) || (t.octant === octant && Math.abs(t.ring - ring) === 1);
+    return (t.ring === ring && (t.octant === octant || Math.abs(((t.octant - octant + 12) % 8) - 4) === 1)) || (t.octant === octant && Math.abs(t.ring - ring) === 1);
   });
 
 /** A vertical triple taken apart for teaching: what goes where, as cells of the board before the move. */
@@ -559,25 +559,18 @@ export function verticalPlan(ex: Example): VerticalPlan | null {
   return { vertical, gap, pair, top, wilded: links[1].link.wilded, lineups };
 }
 
-/**
- * Picking where the ring 1 horizontal goes: if the ring 4 star dropped into ring 1 at `cell` (a cell of
- * the board before the move), whether a pair beside it would make a clear, and how many targets that
- * clear would turn wild (counting only targets not already filled or wild).
- */
-export function horizontalAt(ex: Example, cell: number): { pair: boolean; wild: number } {
-  const cells = linedUpCells(ex.position, ex.action);
-  const at = linedUp(ex.action, cell);
-  if (Math.floor(at / 8) !== INNER) return { pair: false, wild: 0 };
-  const o = at % 8, colour = (k: number) => cells[INNER * 8 + ((o + k + 8) % 8)];
-  const options = [[-1, 1], [1, 2], [-2, -1]].filter(([a, b]) => colour(a) !== EMPTY && colour(a) === colour(b));
-  if (!options.length) return { pair: false, wild: 0 };
-  const open = ex.position.targets.filter((t) => !t.wild && cells[t.ring * 8 + t.octant] !== t.colour);
-  const wild = Math.max(...options.map(([a, b]) => {
-    const run = [0, a, b].map((k) => INNER * 8 + ((o + k + 8) % 8));
-    return open.filter((t) => besideClear(t, run)).length;
-  }));
-  return { pair: true, wild };
+/** Ring 1 cells from `start` round `length` octants anticlockwise. */
+export const innerRun = (start: number, length = 3): number[] => Array.from({ length }, (_, k) => INNER * 8 + (start + k) % 8);
+/** The targets a ring 1 clear of `cells` would turn wild (those not wild already). */
+export const wildedBy = (targets: Target[], cells: number[]): Target[] => targets.filter((t) => !t.wild && besideClear(t, cells));
+/** The most targets a ring 1 horizontal of three could turn wild on this constellation, and where. */
+export function bestHorizontals(targets: Target[]): { wild: number; starts: number[] } {
+  const counts = Array.from({ length: 8 }, (_, start) => wildedBy(targets, innerRun(start)).length);
+  const wild = Math.max(...counts);
+  return { wild, starts: counts.flatMap((c, start) => (c === wild ? [start] : [])) };
 }
+/** The ring 1 cells a vertical triple's horizontal clears, as cells of the lined-up board. */
+export const planHorizontal = (ex: Example, plan: VerticalPlan): number[] => [plan.gap, ...plan.pair].map((c) => linedUp(ex.action, c));
 
 /** A vertical triple a player seems to be building on a board, read from where its parts are. */
 export interface BuildGuess {
