@@ -1,6 +1,6 @@
 // The Dennav tutorial: lessons on each kind of chain, played on the Dennav board.
 // Learn watches a move play out link by link; Practise deals the same strategy a few moves early;
-// Spot the mistake hides one wrong star in a board (or one wrong move in how it was built).
+// Spot the wrong star hides one wrong star in a board; Find the wrong move spoils a build-up with one bad turn.
 import { Images } from '../../core/assets';
 import { Random } from '../../core/random';
 import { keyMatches } from '../../core/controls';
@@ -9,8 +9,8 @@ import type { NavigationGame, Scene } from '../navigation/game';
 import { COLOUR_NAMES, OCTANT_NAMES } from '../navigation/create';
 import { EMPTY, type Run } from '../navigation/logic';
 import {
-  RINGS, act, play, runStars, buildHistory, chainName, fixes, gameAt, generate, makeMistake, outcome, positionOf, scramble,
-  type Action, type Example, type History, type Link, type Mistake, type Outcome, type Position,
+  RINGS, act, play, runStars, buildUpAtMost, dropEntries, spoilBuild, chainName, fixes, gameAt, generate, makeMistake, outcome, positionOf, scramble,
+  type Action, type BadBuild, type Example, type Link, type Mistake, type Outcome, type Position,
 } from './engine';
 import { LESSONS, VEGAS_AS_PLAYED, type Lesson } from './lessons';
 
@@ -29,7 +29,7 @@ const MODES: { value: Mode; label: string }[] = [
 /** Practice stages: turns only (0–3 turns before the move), or building up the last few stars (negative: -n moves of build-up). */
 const STAGES = [
   ...[0, 1, 2, 3].map((value) => ({ value, label: value ? `${value + 1} moves out (turns only)` : 'One move to go' })),
-  ...[6, 10, 16].map((n) => ({ value: -n, label: `Build it: last ${n} moves` })),
+  ...[3, 5, 8].map((n) => ({ value: -n, label: `Build it: last ${n} stars` })),
 ];
 
 function describeRun(run: Run): string {
@@ -84,7 +84,8 @@ export default (async ({ screen, panel, store, ticks }) => {
   let marks: { cell: number; colour: string }[] = [];
   let arrowRing: { ring: number; clockwise: boolean } | null = null;
   let mistake: Mistake | null = null, found = false;
-  let history: History | null = null, historyAt = 0, historyGuesses = 0;
+  /** Find the wrong move: the spoiled build, how far through it the board is, and the working board it was meant to reach. */
+  let bad: BadBuild | null = null, buildAt = 0, goodFinal: Position | null = null, buildTrigger: Action | null = null;
 
   const speed = () => (slow ? 2 : 1);
   const busy = () => scenes.length > 0;
@@ -101,7 +102,7 @@ export default (async ({ screen, panel, store, ticks }) => {
   // --- Learn ---
   function showExample(next: Example, label: string): void {
     example = next; exampleLabel = label; shown = next.position; game = null;
-    scenes = []; marks = []; status = ''; mistake = null; history = null;
+    scenes = []; marks = []; status = ''; mistake = null; bad = null;
     arrowRing = next.action.kind === 'rotate' ? { ring: next.action.ring, clockwise: next.action.clockwise } : null;
     if (ringChain) marks = runStars(next.position, next.action).map((cell) => ({ cell, colour: '#ffd84a' }));
     captionText = `${label}: ${moveText(next.action, next.position.entry)} sets it off.`;
@@ -138,18 +139,17 @@ export default (async ({ screen, panel, store, ticks }) => {
       let dealt: { position: Position; solution: Action[] } | null;
       dealtUpcoming = [];
       if (stage < 0) {
-        const h = buildHistory(ex.position, -1, rng, -stage);
+        const h = buildUpAtMost(ex.position, rng, -stage);
         if (!h) continue;
         dealt = { position: h.boards[0], solution: [...h.moves, ex.action] };
-        dealtUpcoming = h.moves.map((m, i) => m.kind === 'drop' ? h.boards[i].entry : null).filter((e): e is { colour: number; octant: number } => !!e);
-        dealtUpcoming.push(ex.position.entry);
+        dealtUpcoming = [...dropEntries(h), ex.position.entry];
       } else dealt = stage ? scramble(ex, stage, l.accepts, rng) : { position: ex.position, solution: [ex.action] };
       if (!dealt) continue;
       start = dealt.position; solution = dealt.solution;
       resetPractice();
       const drops = solution.filter((a) => a.kind === 'drop').length;
       status = stage < 0
-        ? `${l.title}: build it up. ${drops} star${drops === 1 ? '' : 's'} still to come, in a fixed order; place them with your turns, then set it off.`
+        ? `${l.title}: build it up. ${drops} star${drops === 1 ? '' : 's'} still to come, each falling where the game puts it; turn the rings to take them where they belong, then set it off.`
         : `${l.title}: ${stage ? `${stage + 1} moves` : 'one move'} to set it off. Make the chain happen.`;
       return;
     }
@@ -217,18 +217,11 @@ export default (async ({ screen, panel, store, ticks }) => {
       const ex = asPlayed ? VEGAS_AS_PLAYED : generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng);
       const m = asPlayed ? { ...VEGAS_AS_PLAYED, cell: 2 * 8 + 7, fix: 0, result: play(ex.position, ex.action) } : makeMistake(ex, l.accepts, rng);
       if (!m) continue;
-      if (mode === 'when') {
-        const h = buildHistory(m.position, m.cell, rng, rng.integer(3, 8));
-        if (!h) continue;
-        history = h; historyAt = h.boards.length - 1; historyGuesses = 0;
-      }
       mistake = m; found = false; game = null; shown = m.position; example = m;
       scenes = []; marks = [];
       arrowRing = m.action.kind === 'rotate' ? { ring: m.action.ring, clockwise: m.action.clockwise } : null;
       captionText = `Meant to be a ${l.title.toLowerCase()} when you ${moveText(m.action, m.position.entry)}.`;
-      status = mode === 'when'
-        ? 'One star on this board spoils the chain. Step back through how it was built (◀ Earlier) and press This move on the move that brought it in.'
-        : 'One star on this board spoils the chain. Click it.';
+      status = 'One star on this board spoils the chain. Click it.';
       return;
     }
     status = 'Couldn’t make one of those just now. Try again.';
@@ -271,32 +264,74 @@ export default (async ({ screen, panel, store, ticks }) => {
   }
 
   // --- Find the wrong move ---
-  /** Where the star dropped by move `k` (counting from 1) landed. */
-  function landed(k: number): number {
-    const h = history!, before = h.boards[k - 1], after = h.boards[k];
-    return after.cells.findIndex((c, i) => c !== EMPTY && before.cells[i] === EMPTY);
+  /** A build-up toward the lesson's strategy with one wrong move in it. */
+  function newBadBuild(): void {
+    const l = lesson();
+    for (let tries = 0; tries < 20; tries++) {
+      const ex = generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng);
+      const build = buildUpAtMost(ex.position, rng, rng.integer(6, 10));
+      const spoiled = build && spoilBuild(build, ex.action, l.accepts, rng);
+      if (!spoiled) continue;
+      bad = spoiled; goodFinal = ex.position; buildTrigger = ex.action; found = false;
+      game = null; scenes = []; marks = []; arrowRing = null;
+      showBuild(0);
+      status = `This board is being built for a ${l.title.toLowerCase()}, set off by ${moveText(ex.action)}. One move on the way spoils it. Step through with Later ▶ (or →), and press That move was wrong just after the move you think did it.`;
+      return;
+    }
+    status = 'Couldn’t make one of those just now. Try again.';
   }
-  /** Shows the board after move `k` of the build-up (0: before any of them), ringing the star a drop brought in. */
+  /** Shows the board after `k` moves of the build, with the next falling star waiting above it. */
   function showBuild(k: number): void {
-    const h = history!;
-    historyAt = Math.max(0, Math.min(h.boards.length - 1, k));
-    shown = h.boards[historyAt]; arrowRing = null;
-    const move = h.moves[historyAt - 1];
-    marks = move?.kind === 'drop' ? [{ cell: landed(historyAt), colour: '#ffd84a' }] : [];
-    captionText = move ? `After move ${historyAt} of ${h.moves.length}: ${moveText(move, h.boards[historyAt - 1].entry)}.` : 'Before the build-up shown.';
+    const b = bad!;
+    buildAt = Math.max(0, Math.min(b.moves.length, k));
+    shown = b.boards[buildAt]; marks = [];
+    const done = b.moves[buildAt - 1], next = b.moves[buildAt];
+    captionText = buildAt === 0 ? `Start. ${b.moves.length} moves to come.`
+      : `Move ${buildAt} of ${b.moves.length}: ${moveText(done, done.kind === 'drop' ? b.boards[buildAt - 1].entry : undefined)}.${next ? '' : ' The board is built.'}`;
+    arrowRing = !next && buildTrigger?.kind === 'rotate' ? { ring: buildTrigger.ring, clockwise: buildTrigger.clockwise } : null;
   }
-  function historyStep(delta: number): void {
-    if (!history || busy()) return;
-    showBuild(historyAt + delta);
+  function buildStep(delta: number): void {
+    if (!bad || busy()) return;
+    if (delta < 0) { showBuild(buildAt - 1); return; }
+    if (buildAt >= bad.moves.length) return;
+    // Play the move out, so any clear it sets off can be seen.
+    const k = buildAt, move = bad.moves[k];
+    const g = gameAt(bad.boards[k]);
+    const list = act(g, move);
+    const o = outcome(list, positionOf(g));
+    const captions = captionsFor(o);
+    for (const link of o.links) if (link.kind === 'run') captions.set(link.scene, `Clear: ${link.runs.map(describeRun).join(' and ')}.`);
+    stepping = false; marks = []; arrowRing = null;
+    captionText = `Move ${k + 1}: ${moveText(move, move.kind === 'drop' ? bad.boards[k].entry : undefined)}`;
+    playScenes(list.length ? list : [g.scene(250)], captions, () => showBuild(k + 1));
+  }
+  function wrongMoveText(): string {
+    const b = bad!, k = b.culprit, move = b.moves[k];
+    const what = b.skipped ? `Before move ${k + 1} a turn was missed: ${moveText(b.meant!)}.`
+      : b.meant ? `Move ${k + 1} should have been ${moveText(b.meant)}, not ${moveText(move)}.`
+      : `Move ${k + 1}, ${moveText(move)}, shouldn’t have been made before that drop.`;
+    const why = b.kind === 'clear' ? 'It set off a clear that wasn’t meant, taking stars out of the setup.'
+      : 'It left a star that should have filled a target somewhere else, so that target ends up filled wrong.';
+    const result = b.result.charted ? `The trigger then only charts a ${chainName(b.result.charted).toLowerCase()}.` : 'The trigger then doesn’t chart the constellation.';
+    return `${what} ${why} ${result}`;
   }
   function guessMove(): void {
-    if (!history || !mistake || historyAt === 0) return;
-    historyGuesses++;
-    const culprit = history.culprit + 1;
-    if (historyAt === culprit) {
-      found = true;
-      status = `Yes: move ${culprit}, ${moveText(history.moves[culprit - 1], history.boards[culprit - 1].entry)}, brought in the star that ${spoilText()}.`;
-    } else status = `Not move ${historyAt}. The wrong star came ${historyAt < culprit ? 'later' : 'earlier'}.`;
+    if (!bad || buildAt === 0 || found) return;
+    const k = buildAt - 1;
+    if (k === bad.culprit) { found = true; status = `Yes! ${wrongMoveText()}`; }
+    else status = `Not move ${k + 1}. The wrong move came ${k < bad.culprit ? 'later' : 'earlier'}.`;
+  }
+  function watchBuildTrigger(right: boolean): void {
+    if (!bad || !buildTrigger || busy()) return;
+    const p = right ? goodFinal! : bad.boards[bad.moves.length];
+    const g = gameAt(p);
+    const list = act(g, buildTrigger);
+    const o = outcome(list, positionOf(g));
+    shown = p; stepping = false; marks = []; arrowRing = null;
+    playScenes(list, captionsFor(o), () => {
+      shown = positionOf(g);
+      captionText = `${right ? 'Built right' : 'As built'}: ${o.charted ? `charted as a ${chainName(o.charted).toLowerCase()}` : 'nothing charted'}.`;
+    });
   }
 
   // --- Drawing ---
@@ -390,6 +425,7 @@ export default (async ({ screen, panel, store, ticks }) => {
       for (const m of marks) ringMark(m.cell, m.colour);
       if (arrowRing) drawArrow(arrowRing.ring, arrowRing.clockwise);
       if (mode === 'practise' && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
+      if (mode === 'when' && bad && bad.moves[buildAt]?.kind === 'drop') star(bad.boards[buildAt].entry.colour, bad.boards[buildAt].entry.octant, 205);
     }
     drawCaption(captionText);
   }
@@ -429,10 +465,11 @@ export default (async ({ screen, panel, store, ticks }) => {
 
   function setMode(next: Mode): void {
     mode = next; store.set('mode', mode);
-    scenes = []; marks = []; status = ''; mistake = null; history = null; game = null; start = null;
+    scenes = []; marks = []; status = ''; mistake = null; bad = null; game = null; start = null;
     waiting = false; afterScenes = null;
     if (mode === 'learn') showExample(lesson().moments[momentIndex] ?? lesson().moments[0], (lesson().moments[momentIndex] ?? lesson().moments[0]).label);
     else if (mode === 'practise') newPractice();
+    else if (mode === 'when') newBadBuild();
     else newMistake();
   }
   function setLesson(index: number): void {
@@ -481,13 +518,9 @@ export default (async ({ screen, panel, store, ticks }) => {
     .button('Drop star', () => practiceMove({ kind: 'drop' }), { disabled: busy });
   practise.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
-  const spot = panel.group('Spot the mistake', { hidden: () => mode !== 'spot' && mode !== 'when' });
+  const spot = panel.group('Spot the mistake', { hidden: () => mode !== 'spot' });
   spot.button('New board', () => newMistake(), { variant: 'primary', disabled: busy })
     .button('Your vegas board', () => newMistake(true), { disabled: busy, hidden: () => lesson().id !== 'vegas', title: 'Session 3: the board that charted a donkey' });
-  spot.append(rowBreak());
-  spot.button('◀ Earlier', () => historyStep(-1), { disabled: () => busy() || !history || historyAt === 0, hidden: () => mode !== 'when' })
-    .button('Later ▶', () => historyStep(1), { disabled: () => busy() || !history || historyAt >= history.boards.length - 1, hidden: () => mode !== 'when' })
-    .button('This move', guessMove, { disabled: () => busy() || !history || found || historyAt === 0, hidden: () => mode !== 'when', title: 'The move just shown is the one that brought in the wrong star' });
   spot.append(rowBreak());
   spot.button('Watch it go wrong', () => watchMistake(false), { disabled: () => busy() || !mistake })
     .button('Watch it fixed', () => watchMistake(true), { disabled: () => busy() || !mistake || !found });
@@ -495,10 +528,22 @@ export default (async ({ screen, panel, store, ticks }) => {
   spot.button('Show answer', () => {
     if (!mistake) return;
     found = true; marks = [{ cell: mistake.cell, colour: '#40ff70' }];
-    if (history) showBuild(history.culprit + 1);
     status = `The ${COLOUR_NAMES[mistake.position.cells[mistake.cell]].toLowerCase()} star in ${ringLabel(Math.floor(mistake.cell / 8))} should be ${COLOUR_NAMES[mistake.fix].toLowerCase()}: as it is, it ${spoilText()}.`;
   }, { disabled: () => busy() || !mistake || found });
   spot.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
+
+  const when = panel.group('Find the wrong move', { hidden: () => mode !== 'when' });
+  when.button('New build', newBadBuild, { variant: 'primary', disabled: busy });
+  when.append(rowBreak());
+  when.button('◀ Earlier', () => buildStep(-1), { disabled: () => busy() || !bad || buildAt === 0 })
+    .button('Later ▶', () => buildStep(1), { disabled: () => busy() || !bad || buildAt >= bad.moves.length });
+  when.button('That move was wrong', guessMove, { disabled: () => busy() || !bad || found || buildAt === 0, title: 'The move just played is the one that spoiled the build' });
+  when.append(rowBreak());
+  when.button('Watch it go wrong', () => watchBuildTrigger(false), { disabled: () => busy() || !bad || buildAt < bad.moves.length })
+    .button('Watch it built right', () => watchBuildTrigger(true), { disabled: () => busy() || !bad || !found });
+  when.append(rowBreak());
+  when.button('Show answer', () => { if (!bad) return; found = true; showBuild(bad.culprit + 1); status = wrongMoveText(); }, { disabled: () => busy() || !bad || found });
+  when.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
   panel.group('About this strategy', { collapsed: false }).append(text);
 
@@ -511,8 +556,8 @@ export default (async ({ screen, panel, store, ticks }) => {
         if (event.type === 'keydown') {
           if (key(event.key, 'drop', 'space') && waiting) { next(); continue; }
           if (mode === 'when') {
-            if (key(event.key, 'ccw', 'arrowleft')) historyStep(-1);
-            else if (key(event.key, 'cw', 'arrowright')) historyStep(1);
+            if (key(event.key, 'ccw', 'arrowleft')) buildStep(-1);
+            else if (key(event.key, 'cw', 'arrowright')) buildStep(1);
             continue;
           }
           if (mode !== 'practise') continue;

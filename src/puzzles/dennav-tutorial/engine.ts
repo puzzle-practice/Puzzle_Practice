@@ -276,80 +276,170 @@ export function fixes(mistake: Example, cell: number, accepts: (o: Outcome) => b
 
 // --- Building a board up, move by move ---------------------------------------------------------
 
-export interface History {
-  /** Board before each move, then the finished board last. */
+/** How a board was built: the board before each move (a drop's falling star is its entry), then the finished board. */
+export interface Build {
   boards: Position[];
   moves: Action[];
-  /** The move (index into `moves`) that dropped the wrong star. */
-  culprit: number;
+  /** Moves whose clears were meant: junk stars cleared out of the way. */
+  junk: number[];
 }
 
-/**
- * Works a finished board backwards into the moves that built it: taking stars off the tops of
- * columns (undoing their drops) and turning rings back, with nothing clearing on the way.
- * The history runs until a few moves before the wrong star (in `cell`) was dropped; with no cell
- * (-1), it is just the last `extra` moves.
- */
-export function buildHistory(final: Position, cell: number, rng: Random, extra = 4): History | null {
-  for (let attempt = 0; attempt < 300; attempt++) {
-    let board = clonePosition(final);
-    let tracked = cell;
-    const boards: Position[] = [];
-    const moves: Action[] = [];
-    let culprit = cell < 0 ? 0 : -1, after = 0;
-    for (let step = 0; step < 60; step++) {
-      if (culprit >= 0 && after >= extra) break;
-      const tops = [0, 1, 2, 3, 4, 5, 6, 7].map((o) => [0, 1, 2, 3].find((r) => board.cells[r * 8 + o] !== EMPTY) ?? -1)
-        .map((ring, octant) => ({ ring, octant })).filter(({ ring }) => ring >= 0);
-      const trackedTop = culprit < 0 && tops.some(({ ring, octant }) => ring * 8 + octant === tracked);
-      // Undo a drop most of the time; the wrong star's drop is undone as soon as it can be.
-      if (tops.length && (trackedTop || rng.integer(0, 1))) {
-        const pick = trackedTop ? tops.find(({ ring, octant }) => ring * 8 + octant === tracked)! : tops[rng.integer(0, tops.length - 1)];
-        const index = pick.ring * 8 + pick.octant;
-        if (culprit < 0 && index === tracked && !trackedTop) continue;
-        const before = clonePosition(board);
-        const colour = before.cells[index];
-        before.cells[index] = EMPTY;
-        before.entry = { colour, octant: pick.octant };
-        // Dropping it again must land it back where it was, with nothing clearing.
-        const game = gameAt(before);
-        if (!settled(before) || game.drop().some((s) => s.clear)) continue;
-        if (game.board.cells.some((c, i) => c !== board.cells[i])) continue;
-        boards.unshift(before); moves.unshift({ kind: 'drop' });
-        if (index === tracked && culprit < 0) culprit = 0; else if (culprit >= 0) { culprit++; after++; }
-        board = before;
-      } else {
-        const rings = [0, 1, 2, 3].filter((r) => board.cells.slice(r * 8, r * 8 + 8).some((c) => c !== EMPTY));
-        if (!rings.length) break;
-        const ring = rings[rng.integer(0, rings.length - 1)], clockwise = rng.integer(0, 1) === 1;
-        const before = rotateCells(board, ring, !clockwise);
-        before.entry = { ...board.entry };
-        if (!settled(before) || gameAt(before).rotate(ring, clockwise).some((s) => s.clear)) continue;
-        // Follow the wrong star round its ring.
-        if (culprit < 0 && Math.floor(tracked / 8) === ring) tracked = ring * 8 + (tracked % 8 + (clockwise ? 1 : 7)) % 8;
-        boards.unshift(before); moves.unshift({ kind: 'rotate', ring, clockwise });
-        if (culprit >= 0) { culprit++; after++; }
-        board = before;
-      }
+/** Plays a build's moves from its first board, each drop with its own star. Null if a drop booches. */
+export function replayBuild(build: { boards: Position[]; moves: Action[] }, entries = dropEntries(build)): { boards: Position[]; clears: number[][] } | null {
+  const game = gameAt(build.boards[0]);
+  const boards: Position[] = [];
+  const clears: number[][] = [];
+  let next = 0;
+  for (const move of build.moves) {
+    if (move.kind === 'drop') {
+      const entry = entries[next++];
+      if (!entry) return null;
+      game.entry = { ...entry };
+      if (game.board.get(entry.octant, 0) !== EMPTY) return null;
     }
-    if (culprit < 0) continue;
-    // Each board's next star is the one its move drops.
-    boards.forEach((b, i) => {
-      const next = boards[i + 1] ?? final;
-      if (moves[i].kind === 'drop') {
-        const landed = next.cells.findIndex((c, j) => c !== EMPTY && b.cells[j] === EMPTY);
-        b.entry = { colour: next.cells[landed], octant: landed % 8 };
-      }
-    });
-    // Check the whole build plays forward to the finished board with nothing clearing.
-    const game = gameAt(boards[0]);
-    let clean = true;
-    moves.forEach((move, i) => {
-      game.entry = { ...boards[i].entry };
-      if (act(game, move).some((s) => s.clear)) clean = false;
-    });
-    if (!clean || game.board.cells.some((c, i) => c !== final.cells[i])) continue;
-    return { boards: [...boards, clonePosition(final)], moves, culprit };
+    boards.push(positionOf(game));
+    const scenes = act(game, move);
+    clears.push(scenes.flatMap((s) => s.clear?.kind === 'run' ? s.clear.cells.map((c) => c.ring * 8 + c.octant) : []));
+    if (scenes.some((s) => s.clear?.kind === 'target')) clears[clears.length - 1].push(-1);
+  }
+  boards.push(positionOf(game));
+  return { boards, clears };
+}
+export const dropEntries = (build: { boards: Position[]; moves: Action[] }) =>
+  build.moves.map((m, i) => (m.kind === 'drop' ? build.boards[i].entry : null)).filter((e): e is Position['entry'] => !!e);
+
+/**
+ * Works a finished board backwards into the last `drops` stars that built it, as the game deals them:
+ * each star falls in a random column and the player turns its ring to take it where it belongs
+ * (turning that ring's other stars with it). Now and then a junk star is cleared out of the way:
+ * two of a colour waiting in a ring, and the third dropped beside them.
+ */
+export function buildUp(final: Position, rng: Random, drops: number): Build | null {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    let board = clonePosition(final);
+    const units: { board: Position; moves: Action[]; junk: boolean }[] = [];
+    for (let tries = 0; units.length < drops && tries < drops * 30; tries++) {
+      const unit = rng.integer(0, 3) === 0 ? junkUnit(board, rng) : dropUnit(board, rng);
+      if (!unit) continue;
+      units.unshift(unit);
+      board = unit.board;
+    }
+    if (units.length < drops) continue;
+    const boards: Position[] = [], moves: Action[] = [], junk: number[] = [];
+    for (const unit of units) {
+      unit.moves.forEach((move, i) => {
+        if (i === 0) boards.push(unit.board);
+        else boards.push(clonePosition(unit.board));
+        if (unit.junk) junk.push(moves.length);
+        moves.push(move);
+      });
+    }
+    const build: Build = { boards: [...boards, clonePosition(final)], moves, junk };
+    const played = replayBuild(build);
+    if (!played || played.boards.at(-1)!.cells.some((c, i) => c !== final.cells[i])) continue;
+    if (played.clears.some((c, i) => c.length > 0 && !junk.includes(i))) continue;
+    // Keep the boards as played, each drop's board showing its falling star.
+    const entries = dropEntries(build);
+    let next = 0;
+    build.boards = played.boards.map((b, i) => ({ ...b, entry: build.moves[i]?.kind === 'drop' ? { ...entries[next++] } : b.entry }));
+    build.boards[build.boards.length - 1] = { ...build.boards[build.boards.length - 1], entry: { ...final.entry } };
+    return build;
+  }
+  return null;
+}
+
+/** Undoes one star: it fell in a random column, then its ring turned it to where it is now. */
+function dropUnit(board: Position, rng: Random): { board: Position; moves: Action[]; junk: boolean } | null {
+  const tops = [0, 1, 2, 3, 4, 5, 6, 7].map((octant) => ({ octant, ring: [0, 1, 2, 3].find((r) => board.cells[r * 8 + octant] !== EMPTY) ?? -1 })).filter((t) => t.ring >= 0);
+  if (!tops.length) return null;
+  const { octant: p, ring: r } = tops[rng.integer(0, tops.length - 1)];
+  const e = rng.integer(0, 7);
+  const diff = (e - p + 8) % 8;
+  // Turning clockwise takes a star one octant down; the shorter way round.
+  const clockwise = diff <= 4, steps = clockwise ? diff : 8 - diff;
+  let before = clonePosition(board);
+  for (let i = 0; i < steps; i++) before = rotateCells(before, r, !clockwise);
+  if (before.cells[r * 8 + e] !== board.cells[r * 8 + p]) return null;
+  if ([0, 1, 2, 3].some((q) => q < r && before.cells[q * 8 + e] !== EMPTY)) return null;
+  if (r < RINGS - 1 && before.cells[(r + 1) * 8 + e] === EMPTY) return null;
+  const colour = before.cells[r * 8 + e];
+  before.cells[r * 8 + e] = EMPTY;
+  before.entry = { colour, octant: e };
+  if (!settled(before)) return null;
+  return { board: before, moves: [{ kind: 'drop' }, ...Array.from({ length: steps }, () => ({ kind: 'rotate' as const, ring: r, clockwise }))], junk: false };
+}
+
+/** Undoes a junk clear: two stars of a colour wait side by side in a ring, and the third drops in beside them. */
+function junkUnit(board: Position, rng: Random): { board: Position; moves: Action[]; junk: boolean } | null {
+  const open = (ring: number, octant: number) => board.cells[ring * 8 + octant] === EMPTY &&
+    (ring === RINGS - 1 || board.cells[(ring + 1) * 8 + octant] !== EMPTY) && [0, 1, 2, 3].every((q) => q >= ring || board.cells[q * 8 + octant] === EMPTY);
+  const slots: { ring: number; octant: number }[] = [];
+  for (let ring = 1; ring < RINGS; ring++) for (let a = 0; a < 8; a++) if ([0, 1, 2].every((k) => open(ring, (a + k) % 8))) slots.push({ ring, octant: a });
+  if (!slots.length) return null;
+  const { ring, octant } = slots[rng.integer(0, slots.length - 1)];
+  const colour = rng.integer(0, 4), missing = rng.integer(0, 2);
+  const before = clonePosition(board);
+  [0, 1, 2].forEach((k) => { if (k !== missing) before.cells[ring * 8 + (octant + k) % 8] = colour; });
+  before.entry = { colour, octant: (octant + missing) % 8 };
+  if (!settled(before)) return null;
+  return { board: before, moves: [{ kind: 'drop' }], junk: true };
+}
+
+/** A build with one wrong move in it. */
+export interface BadBuild extends Build {
+  /** The wrong move (index into `moves`) and what it should have been (null: no move). */
+  culprit: number;
+  meant: Action | null;
+  /** The planned turn was left out: `culprit` is the move made in its place. */
+  skipped: boolean;
+  kind: 'clear' | 'target';
+  /** Clears each move set off as played: cells, and -1 for a charted constellation. */
+  clears: number[][];
+  result: Outcome;
+}
+
+const ROTATIONS: Action[] = [0, 1, 2, 3].flatMap((ring) => [true, false].map((clockwise) => ({ kind: 'rotate' as const, ring, clockwise })));
+const sameMove = (a: Action | null, b: Action | null) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Spoils a build with one wrong turn, as players do: a turn the wrong way or of the wrong ring, a
+ * turn too few, or an extra one before a drop. The rest of the build is played as planned. Kept only
+ * if the wrong turn sets off a clear that wasn't meant (an accidental clear), or quietly leaves a
+ * target it should have filled wrong; either way the trigger no longer sets the strategy off.
+ */
+export function spoilBuild(build: Build, trigger: Action, accepts: (o: Outcome) => boolean, rng: Random, want?: 'clear' | 'target'): BadBuild | null {
+  const entries = dropEntries(build);
+  const good = replayBuild(build, entries)!;
+  const goodFinal = good.boards.at(-1)!;
+  const filled = (p: Position, t: Target) => t.wild ? p.cells[t.ring * 8 + t.octant] !== EMPTY : p.cells[t.ring * 8 + t.octant] === t.colour;
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const i = rng.integer(Math.floor(build.moves.length / 3), build.moves.length - 1);
+    const planned = build.moves[i];
+    const options: (Action | null)[] = planned.kind === 'rotate' ? [null, ...ROTATIONS.filter((r) => !sameMove(r, planned))] : ROTATIONS;
+    const wrong = options[rng.integer(0, options.length - 1)];
+    // A wrong turn before a drop is an extra move; otherwise it replaces the planned move.
+    const moves = planned.kind === 'drop' ? [...build.moves.slice(0, i), wrong!, ...build.moves.slice(i)]
+      : [...build.moves.slice(0, i), ...(wrong ? [wrong] : []), ...build.moves.slice(i + 1)];
+    if (!wrong && i >= moves.length) continue;
+    const played = replayBuild({ boards: build.boards, moves }, entries);
+    if (!played) continue;
+    const final = played.boards.at(-1)!;
+    if (!settled(final)) continue;
+    const result = play(final, trigger);
+    if (accepts(result)) continue;
+    // The move to point at: the wrong turn itself, or for a missing turn, the move that came instead.
+    const culprit = i;
+    const junkPlayed = new Set(build.junk.map((j) => (planned.kind === 'drop' && j >= i ? j + 1 : !wrong && j > i ? j - 1 : j)));
+    const accidental = played.clears.some((c, k) => k >= culprit && c.length > 0 && !junkPlayed.has(k));
+    const missed = final.targets.some((t) => filled(goodFinal, t) && !filled(final, t));
+    const kind = accidental ? 'clear' : missed ? 'target' : null;
+    if (!kind || (want && kind !== want)) continue;
+    // An accidental clear should come from the wrong move itself, not long after it.
+    if (kind === 'clear' && !(played.clears[culprit]?.length)) continue;
+    const meant = planned.kind === 'drop' ? null : planned;
+    let next = 0;
+    const boards = played.boards.map((b, k) => ({ ...b, entry: moves[k]?.kind === 'drop' ? { ...entries[next++] } : b.entry }));
+    return { boards, moves, junk: [...junkPlayed], culprit, meant, skipped: !wrong, kind, clears: played.clears, result };
   }
   return null;
 }
@@ -377,4 +467,13 @@ export function runStars(p: Position, action: Action): number[] {
     }
   }
   return [...used];
+}
+
+/** The longest build-up it can find of up to `drops` stars (at least 3). */
+export function buildUpAtMost(final: Position, rng: Random, drops: number): Build | null {
+  for (let n = drops; n >= 3; n--) {
+    const build = buildUp(final, rng, n);
+    if (build) return build;
+  }
+  return null;
 }
