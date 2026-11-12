@@ -539,7 +539,8 @@ export default (async ({ screen, panel, store, ticks }) => {
     // Marks go over the targets (a target's is a ring round it) and under the stars.
     for (const m of glows) {
       const target = scene.targets.some((t) => t.ring * 8 + t.octant === m.cell);
-      ringMark(m.cell, m.colour, target ? 28 : scene.cells[m.cell] < 0 ? 17 : 0);
+      const empty = scene.cells[m.cell] < 0;
+      ringMark(m.cell, m.colour, empty ? (target ? 28 : 17) : 0, target ? 21 : 30);
     }
     for (let ring = 0; ring < RINGS; ring++) for (let o = 0; o < 8; o++) {
       const colour = scene.cells[ring * 8 + o];
@@ -561,17 +562,18 @@ export default (async ({ screen, panel, store, ticks }) => {
   }
   /** A glow behind a star, added as light so a target under it still shows. */
   /** `outline`: draw a ring of that radius instead, round a target (so it stays readable) or an empty cell. */
-  function ringMark(cell: number, colour: string, outline = 0): void {
+  /** `size`: the glow's radius (smaller on a target, so its frame still shows). */
+  function ringMark(cell: number, colour: string, outline = 0, size = 30): void {
     const [x, y] = position(cell % 8, radius(Math.floor(cell / 8)));
     if (outline) {
       ctx.save(); ctx.strokeStyle = colour; ctx.lineWidth = 4; ctx.shadowColor = colour; ctx.shadowBlur = 10;
       ctx.beginPath(); ctx.arc(x, y, outline, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
       return;
     }
-    const glow = ctx.createRadialGradient(x, y, 8, x, y, 30);
+    const glow = ctx.createRadialGradient(x, y, 8, x, y, size);
     glow.addColorStop(0, colour); glow.addColorStop(0.55, colour); glow.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.save(); ctx.globalAlpha = 0.85; ctx.fillStyle = glow;
-    ctx.beginPath(); ctx.arc(x, y, 30, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI * 2); ctx.fill(); ctx.restore();
   }
   /** The finished board, faint, wherever the board in play doesn't match it yet. */
   function drawGoal(target: Position, cells: number[]): void {

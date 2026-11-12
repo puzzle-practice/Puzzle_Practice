@@ -641,7 +641,16 @@ export function guessBuild(cells: number[], targets: Target[] = [], previous: Bu
         };
         check(cells, (c) => c);
         if (turn) check(lined, (c) => unturned(turn, c));
-        const pair = pairs.find(([a]) => lined[EXTRA * 8 + column] === lined[a]) ?? pairs[0];
+        // The horizontal is every ring 1 star of the pair's colour running on from the pair, not just the two.
+        const pair = [...(pairs.find(([a]) => lined[EXTRA * 8 + column] === lined[a]) ?? pairs[0])];
+        for (const step of [1, -1]) {
+          for (let k = step; Math.abs(k) < 8; k += step) {
+            const c = at(k);
+            if (pair.includes(c)) continue;
+            if (lined[c] !== lined[pair[0]] || pair.length >= 7) break;
+            pair.push(c);
+          }
+        }
         best = { column, colour, turn, vertical: vertical.map((c) => unturned(turn, c)), pair: pair.map((c) => unturned(turn, c)), lineups, score };
       }
     }
