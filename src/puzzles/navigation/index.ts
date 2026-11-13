@@ -18,7 +18,7 @@ const MOONS = ['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-do
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { InputEvent } from '../../core/input';
-import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, type NavigationSettings, type RunTotals, type Scene } from './game';
+import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, targetLit, type NavigationSettings, type RunTotals, type Scene } from './game';
 import { LEVEL_TARGETS } from './logic';
 import { copyText, pasteText } from '../../core/clipboard';
 import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
@@ -275,8 +275,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (scene) {
       // Draw targets first so settled and moving stars stay in front of them.
       for (const t of scene.targets) {
-        const colour = scene.cells[t.ring*8+t.octant];
-        const matches = colour !== -1 && (t.wild || colour === t.colour) && !falling.has(t.ring*8+t.octant) && scene.rotation?.ring !== t.ring;
+        const matches = targetLit(scene, t);
         if (t.wild) {
           // A wild target is ringed in every colour, lit once any star fills it.
           const [x,y] = position(t.octant,radius(t.ring));
@@ -292,7 +291,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         const r = fall ? radius(fall.from) + (radius(fall.ring)-radius(fall.from))*fallProgress : radius(ring);
         const angle = scene.rotation?.ring === ring ? o + (scene.rotation.clockwise ? -1 : 1)*progress : o;
         // Sprite orientation stays at the starting octant during a turn; only its position moves.
-        if (angle === o) star(colour, o, r, !!target && (target.wild || target.colour === colour), false, cleared.has(ring*8+o) ? 1-progress : 1);
+        // A star a run clear is removing fades out unlit, as the target it leaves is empty.
+        const lit = !!target && (target.wild || target.colour === colour) && !(scene.clear?.kind === 'run' && cleared.has(ring*8+o));
+        if (angle === o) star(colour, o, r, lit, false, cleared.has(ring*8+o) ? 1-progress : 1);
         else {
           const [x,y] = position(angle,r);
           ctx.drawImage(images.get(`star_${COLOURS[colour]}`), ((o+2)%8)*56,0,56,56,x-28,y-28,56,56);

@@ -60,6 +60,18 @@ export interface Scene {
   cells: number[]; targets: Target[]; duration: number;
   falls?: Fall[]; clear?: Clear; rotation?: { ring: number; clockwise: boolean };
 }
+/**
+ * Whether a scene draws a target lit (filled to match). A star a run clear is removing counts as
+ * gone, as on the client, which takes it off the board before the clear animates: a target the
+ * same clear turns wild must not light up under the star that is fading out of it.
+ */
+export function targetLit(scene: Scene, t: Target): boolean {
+  const index = t.ring*8 + t.octant;
+  const colour = scene.cells[index];
+  if (colour === EMPTY || !(t.wild || colour === t.colour)) return false;
+  if (scene.clear?.kind === 'run' && scene.clear.cells.some(c => c.ring*8 + c.octant === index)) return false;
+  return !scene.falls?.some(f => f.from*8 + f.octant === index) && scene.rotation?.ring !== t.ring;
+}
 export class NavigationGame {
   readonly board: NaviBoard;
   readonly wild: WildTargets;
