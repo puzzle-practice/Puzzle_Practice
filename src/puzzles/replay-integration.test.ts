@@ -2697,6 +2697,8 @@ describe('puzzle completion during replay', () => {
     // Den's five minutes, at a coarser step.
     ['forage', 302000, 100, { settings: { mode: 'ci', den: 'den' } }],
     ['forage', 302000, 100, { settings: { mode: 'ci', den: 'exp' } }],
+    // Den with the 2-minute time limit ends at two minutes and scores apart from five.
+    ['forage', 122000, 100, { settings: { mode: 'ci', den: 'den', denSeconds: 120 } }],
     // The first test's Werewolf mode comes back as Den.
     ['forage', 302000, 100, { settings: { mode: 'werewolf', roundSeconds: 5 } }],
     ['swordfight', 90000, 20, { settings: { opponents: 1, skill: 5, difficulty: 5, breakers: 12.5, sword: [2, 0, 0], enemySword: [6, 4, 2] } }],
@@ -2770,10 +2772,12 @@ describe('puzzle completion during replay', () => {
           ? ['werewolf-chest-small', 'werewolf-chest-medium', 'werewolf-chest-large']
           : ['ci-bone-box', 'ci-fetish-jar', 'ci-cursed-chest']);
         expect(histories[0][0]).toContain('ci:');
-        expect(histories[0][0].endsWith(':den')).toBe(den === 'den');
-        expect(histories[0][0].endsWith(':den-exp')).toBe(den === 'exp');
+        const denSeconds = store.get<{ denSeconds?: number }>('settings', {}).denSeconds;
+        const timer = den && denSeconds !== undefined && denSeconds !== 300 ? `:timer:${denSeconds}` : '';
+        expect(histories[0][0].endsWith(`:den${timer}`)).toBe(den === 'den');
+        expect(histories[0][0].endsWith(`:den-exp${timer}`)).toBe(den === 'exp');
         expect(Object.keys(data).some((k) => k.endsWith(':normalBestPerMove'))).toBe(false);
-        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 9 });
+        expect(replay).toMatchObject({ settingsVersion: 2, simulatorVersion: 10 });
       }
     }
     if (puzzle === 'treasure-haul') {
