@@ -46,6 +46,8 @@ const SHORT_LABELS: Record<string, string> = {
   'Most cursed chests in one forage': 'Most in one forage',
   'Most cursed chests in one forage, cursed chests only': 'Most in one forage, cursed chests only',
   'Most frays in one entry': 'Frays in one entry',
+  'Most dire chests in one DR': 'Dire chests in one DR',
+  'Best forage score in one DR': 'Forage score in one DR',
 };
 const POINTS_PER_FORAGE = 'Most points in one forage, one pirate';
 

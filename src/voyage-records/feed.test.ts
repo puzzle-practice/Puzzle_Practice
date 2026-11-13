@@ -44,6 +44,13 @@ describe('records feed', () => {
     expect(feed.otherRecords[1].screenshots).toEqual(['voyage-records/screenshots/a.png', 'voyage-records/screenshots/b.png']);
   });
 
+  it("lists the Woodhallow duty report records by crew size, with each forager's share", () => {
+    const record = feed.otherRecords.find((entry) => entry.id === 'woodhallow/emerald/most-dire-chests-in-one-dr/7');
+    expect(record).toMatchObject({ category: 'Most dire chests in one DR', crewSize: 7 });
+    expect(record!.pirateScores!.reduce((sum, share) => sum + share, 0)).toBe(Number(record!.value));
+    expect(feed.otherRecords.some((entry) => entry.id === 'woodhallow/emerald/best-forage-score-in-one-dr/7')).toBe(true);
+  });
+
   it('keeps screenshot paths relative to the site root, where the feed sits', () => {
     for (const record of [...feed.crewSizeRecords, ...feed.otherRecords]) {
       for (const shot of record.screenshots) expect(shot).toMatch(/^voyage-records\/screenshots\//);
