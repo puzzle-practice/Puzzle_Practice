@@ -26,6 +26,16 @@ describe('shipwide records', () => {
     expect(groups.get('Fastest')!.map((record) => record.crewSize)).toEqual([3, 6]);
   });
 
+  it('splits the Woodhallow duty report records by crew size, so they show as crew table columns', () => {
+    const groups = otherCategories('woodhallow', 'emerald');
+    for (const category of ['Most dire chests in one DR', 'Best forage score in one DR']) {
+      const records = groups.get(category)!;
+      expect(records.length).toBeGreaterThan(0);
+      expect(records.every((record) => record.crewSize !== undefined)).toBe(true);
+      for (const record of records) expect(record.pirateScores!.reduce((sum, share) => sum + share, 0)).toBe(Number(record.value));
+    }
+  });
+
   it('rejects screenshots outside the screenshots folder', () => {
     expect(sheetProblems([{ voyage: 'cursedIsles', ocean: 'emerald', category: 'X', value: '1', screenshot: 'https://i.imgur.com/a.png' }])).toHaveLength(1);
   });

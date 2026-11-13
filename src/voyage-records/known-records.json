@@ -1,7 +1,7 @@
 {
   "records": [
     {"voyage":"woodhallow","ocean":"emerald","crewSize":1,"kind":"chests","value":7,"date":"2026-10-28","pirates":["Jice"],"source":"Jice's chatlog (emerald)"},
-    {"voyage":"woodhallow","ocean":"emerald","crewSize":1,"kind":"score","value":94,"date":"2026-10-28","pirates":["Jice"],"source":"Jice's chatlog (emerald)"},
+    {"voyage":"woodhallow","ocean":"emerald","crewSize":1,"kind":"score","value":108,"date":"2026-11-11","pirates":["Jice"],"source":"Given by Jared on 2026-11-13"},
     {"voyage":"woodhallow","ocean":"emerald","crewSize":2,"kind":"chests","value":36,"date":"2026-10-29","pirates":["Jice","Vackert"],"source":"Jice's chatlog (emerald)"},
     {"voyage":"woodhallow","ocean":"emerald","crewSize":2,"kind":"score","value":414,"date":"2026-10-29","pirates":["Jice","Vackert"],"source":"Jice's chatlog (emerald)"},
     {"voyage":"woodhallow","ocean":"emerald","crewSize":3,"kind":"chests","value":67,"date":"2026-10-29","pirates":["Cono","Jice","Rock"],"source":"Jice's chatlog (emerald)"},
