@@ -236,7 +236,7 @@ export class Fighter {
   private fire(fist: number, now: number): void {
     let piece = this.hand[fist];
     // Held a second or more: charged, even if the frame that would have shown it hasn't come.
-    if (this.charging === fist && (this.chargedHand || now - this.chargeStart >= CHARGE_MS)) piece = charged(piece);
+    if (this.charging === fist && (this.chargedHand || now - this.chargeStart >= CHARGE_MS) && this.board.canCharge(piece)) piece = charged(piece);
     let dir = this.dir[fist];
     if (this.wobble) {
       const [lo, hi] = this.board.ranges[fist];
@@ -328,7 +328,7 @@ export class Fighter {
       case 'control': {
         if (this.halted) return false;
         const controlNow = this.sandbox.shotTimer ? Math.min(now, this.controlAt + AUTO_FIRE_MS) : now;
-        if (this.charging >= 0 && !this.chargedHand && controlNow - this.chargeStart >= CHARGE_MS) {
+        if (this.charging >= 0 && !this.chargedHand && controlNow - this.chargeStart >= CHARGE_MS && this.board.canCharge(this.hand[this.charging])) {
           this.chargedHand = true;
         }
         if (!this.sandbox.shotTimer) return false;
@@ -528,6 +528,25 @@ export class Fighter {
       this.punchHits.push({ side: i % 2 ? 1 - side : side, row, at });
       this.later(at, KUNG_FU[i % 3]);
     });
+  }
+
+  /**
+   * Freeplay mode: the board drops a row now, as it would on the eighth shot, and the count of
+   * shots to the next drop starts over. Returns false if a ball or strike is still moving.
+   */
+  dropNow(now: number): boolean {
+    if (!this.canFire || this.punch || this.sprinkle || this.flight) return false;
+    this.board.drop();
+    this.stats.drops++;
+    this.dropAt = now;
+    this.shotAt = now;
+    this.shakeSounds = 0;
+    this.charging = -1;
+    this.warned = false;
+    this.busyUntil = now + DROP_MS;
+    this.phase = 'drop';
+    if (this.board.isDead() && !this.sandbox.endless) this.knockOut(this.busyUntil);
+    return true;
   }
 
   /** Freeplay mode: the board was edited, so the turn's clock starts over. */

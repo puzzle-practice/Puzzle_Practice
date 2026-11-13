@@ -1,4 +1,5 @@
 import { seedControls } from '../../core/seeds';
+import { copyText, pasteText } from '../../core/clipboard';
 // Rumble (the game calls it boxing), from Puzzle Pirates: the board rules are in board.ts, a board
 // in play is fighter.ts, the NPCs are npc.ts, and the fight between boards is match.ts. This file
 // is the panel on top: the 450x600 panel with the board at (93, 41), each side's
@@ -39,6 +40,7 @@ import {
   type BoardSnapshot, convertSnapshot, dealInto, floating, MAX_COLOURS, MAX_LENGTH, MAX_ROWS, MAX_WIDTH, type PunchChoices,
   type PunchSpec, resetSparks, restoreBoard, rollPunch, shaftOf, SIM_BLUDGEONS, SimGlove, snapshotBoard, ballCount,
   furballColours, furballSlots, recolour, VIEWER_KINDS, viewerBoard, viewerBruises, werewolfPiece,
+  applyBoardCode, boardCode, readBoardCode,
 } from './create';
 import type { Board } from './board';
 import { AIM_BOARD_SHOTS, AIM_DIFFICULTIES, AIM_HISTORY, AIM_LIVES, AIM_MS, AIM_REPLAY_VERSION, AimTrainer, type AimDifficulty, type AimTarget } from './aim';
@@ -236,6 +238,7 @@ const CREATE_KEYS = [
   { id: 'roll', label: 'Freeplay: roll the punch again', defaultKey: 'R' },
   { id: 'deal', label: 'Freeplay: deal a board', defaultKey: 'G' },
   { id: 'undo', label: 'Freeplay: undo', defaultKey: 'U' },
+  { id: 'drop', label: 'Freeplay: drop a row', defaultKey: 'D' },
   { id: 'preview', label: 'Freeplay: preview on board', defaultKey: 'V' },
 ];
 const UNDO_LIMIT = 100;
@@ -271,9 +274,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const files = SOUND_FILES[name] ?? [name];
     sounds.play(files[soundPick.integer(0, files.length - 1)]);
   };
-  /** Werewolf rumbling growls on a loop from the start of a match until it ends. */
-  let stopGrowl: (() => void) | null = null;
-  const quietGrowl = () => { stopGrowl?.(); stopGrowl = null; };
 
   const saved = store.get<unknown>('settings', DEFAULTS);
   // Settings saved before NPCs had an aim error get the default, and lose the spark break chance.
@@ -344,7 +344,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     match = new Match(fightSettings, s, now, {
       sound: (name, fighter) => {
         if (fighter !== 0) return;
-        if (name === 'game_over') quietGrowl();
         play(name);
       },
       message: (text, fighter) => {
@@ -358,8 +357,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     aim = as === 'Aim trainer' ? new AimTrainer(match.player, s, now, play, aimDifficulty) : null;
     if (as === 'Create') startCreate(s);
     play('game_start');
-    quietGrowl();
-    if (match.settings.werewolf) stopGrowl = sounds.loop('werewolf_growl');
   }
 
   function outcome(): string {
@@ -420,7 +417,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       store.set('record', record);
     }
     if (!match.result) match.endedAt = now;
-    quietGrowl();
     running = false;
     finished = true;
   }
@@ -431,6 +427,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let undo: BoardSnapshot[] = [];
   /** A board to carry into the next Freeplay start (the werewolf swap restarts with the same board). */
   let carry: BoardSnapshot | null = null;
+  /** A Freeplay replay recorded before Freeplay started on a fight's starting board. */
+  let legacyStart = false;
   let spec: PunchSpec = roll();
   /** The palette's colour: while one is picked, the left button paints it and the right erases. */
   let palette: number | null = null;
@@ -480,20 +478,25 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function startCreate(seed: number): void {
     // The board's own random numbers come from the start's seed, so a replay deals the same boards.
     createRng.seed(seed);
-    replays.begin({ ...structuredClone(settings), freeplay: structuredClone(create) },
-      { seed, ...(carry ? { board: structuredClone(carry), undo: structuredClone(undo), punches, destroyed } : {}) });
     const f = match!.player;
     f.sandbox.endless = true;
     f.sandbox.shotTimer = create.shotTimer;
     f.sandbox.drops = create.drops;
+    const carried = carry ? structuredClone(carry) : null;
     if (carry) restoreBoard(f.board, carry);
     else {
-      dealInto(f.board, createRng, create.rows, create.density, settings.werewolf);
+      // Freeplay starts on a fight's starting board. Replays recorded before that start on a board
+      // dealt from the rows and density.
+      if (legacyStart) dealInto(f.board, createRng, create.rows, create.density, settings.werewolf);
+      else dealInto(f.board, createRng, settings.startRows, 100, settings.werewolf);
       undo = [];
       punches = destroyed = 0;
-      createMessage = `Dealt ${ballCount(f.board)} balls.`;
+      createMessage = legacyStart ? `Dealt ${ballCount(f.board)} balls.` : 'A fight’s starting board.';
     }
+    replays.begin({ ...structuredClone(settings), freeplay: structuredClone(create) },
+      carried ? { seed, board: carried, undo: structuredClone(undo), punches, destroyed } : { seed, start: 'fight' });
     carry = null;
+    legacyStart = false;
     palette = paintKey = null;
     stroke = 0;
     strokeStart = null;
@@ -521,6 +524,27 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     dealInto(b, createRng, create.rows, create.density, settings.werewolf);
     edited();
     createMessage = `Dealt ${ballCount(b)} balls.`;
+  }
+
+  /** A new fight's starting board, of the Starting rows. */
+  function generate(): void {
+    if (!settled()) return;
+    remember();
+    const b = createBoard()!;
+    dealInto(b, createRng, settings.startRows, 100, settings.werewolf);
+    edited();
+    createMessage = 'A fight’s starting board.';
+  }
+
+  /** Plays on a board from a copied code. */
+  function load(text: string): void {
+    if (!settled()) return;
+    const code = readBoardCode(text);
+    if (!code) return;
+    remember();
+    const fitted = applyBoardCode(createBoard()!, code, settings.werewolf);
+    edited();
+    createMessage = fitted ? 'Board pasted.' : 'Board pasted. Rows past the bottom were left out.';
   }
 
   function clearBoard(): void {
@@ -552,6 +576,17 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     for (const p of loose) b.set(p, EMPTY);
     edited();
     createMessage = `Dropped ${loose.length} floating ball${loose.length === 1 ? '' : 's'}.`;
+  }
+
+  /** The board drops a row now, as on every eighth shot. */
+  function dropRow(): void {
+    if (!settled()) return;
+    const before = snapshotBoard(match!.player.board);
+    if (!match!.player.dropNow(ticks())) return;
+    undo.push(before);
+    if (undo.length > UNDO_LIMIT) undo.shift();
+    createMessage = 'The board dropped a row.';
+    if (match!.player.board.isDead()) createMessage += ' In a fight that would knock ye out.';
   }
 
   /** Werewolf rumbling changes the fists' balls too, so Freeplay starts again on the same board, its oranges swapped. */
@@ -615,6 +650,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     } else if (name === 'fp-palette') palette = value === '' ? null : Number(value);
     else if (name === 'fp-viewer') viewer.on = value === '1';
     else if (name === 'fp-deal') deal();
+    else if (name === 'fp-generate') generate();
+    else if (name === 'fp-droprow') dropRow();
+    else if (name === 'fp-load') load(value);
     else if (name === 'fp-clear') clearBoard();
     else if (name === 'fp-drop') dropFloating();
     else if (name === 'fp-undo') undoLast();
@@ -788,6 +826,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       else if (key(event.key, 'roll')) spec = roll();
       else if (key(event.key, 'deal')) deal();
       else if (key(event.key, 'undo')) undoLast();
+      else if (key(event.key, 'drop')) dropRow();
       else if (key(event.key, 'preview')) { create.previewOnBoard = !create.previewOnBoard; saveCreate(); }
       else return false;
       return true;
@@ -1562,8 +1601,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         else { match.update(now); if (match.settledAt) stop(); }
       } else if (aiming() && aim?.result) aim.update(now);
     }
-    rumbleAudio.sync(running && !aiming() && !replays.isSeeking && !replays.isAdvancing ? match?.player ?? null : null);
+    // A replay steps the game several times a frame: its sustained sounds follow the frame it
+    // shows, not each step, so they aren't stopped and started again every frame.
     if (replays.isSeeking || replays.isAdvancing) return;
+    rumbleAudio.sync(running && !aiming() ? match?.player ?? null : null);
     draw(now);
   }
 
@@ -1591,7 +1632,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     ] : mode === 'Create' ? [
       'Freeplay: a board of your own that never ends.',
       '',
-      'Start deals a board of the rows and density you pick. Shoot it as in a fight, or change it between shots:',
+      'Start gives you a fight’s starting board. Shoot it as in a fight, or change it between shots on the Play tab:',
       'hold 1–5 to paint red, yellow, orange, cyan or blue under the mouse and 0 to erase, or pick a colour in the panel and click or drag. The wheel changes a ball’s colour, C charges it and B bruises it.',
       '',
       'Pick a bludgeon, its colours and a punch’s size, or leave them random, and press Punch! (P) to land it on your board. Preview on board (V) shows where it will land first.',
@@ -1786,7 +1827,18 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const createOff = () => !editable();
   /** Freeplay's rules wait while a replay plays: it makes its own changes. */
   const watching = () => !!replays?.isPlaying;
-  const boardGroup = panel.controlSettings.group('Board', { hidden: createHidden });
+  const boardGroup = panel.group('Board', { hidden: createHidden });
+  let pasteNote = '';
+  const copyBoard = () => { const b = createBoard(); if (b) copyText(boardCode(b), 'Copy this board:'); };
+  boardGroup.button('Copy', copyBoard, { disabled: () => !running || !creating(), title: 'Copy the board as text, to paste back later or share' });
+  boardGroup.button('Paste', () => void pasteText('Paste a board:').then((text) => {
+    if (text === null) return;
+    if (readBoardCode(text)) { pasteNote = ''; freeplay(`fp-load:${text.trim()}`); }
+    else pasteNote = 'That isn’t a rumble board. Boards copied here start with R:.';
+  }), { disabled: createOff, title: 'Play on a board from a pasted copy' });
+  boardGroup.button('Generate', () => { freeplay('fp-generate'); copyBoard(); }, {
+    disabled: createOff, title: 'A fight’s starting board of the Starting rows, copied as text' });
+  boardGroup.note(() => pasteNote);
   const paletteRow = document.createElement('div');
   paletteRow.className = 'piece-palette';
   PAINT_NAMES.forEach((name, i) => {
@@ -1817,22 +1869,36 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     });
     paletteRow.append(button);
   });
+  const eraseButton = document.createElement('button');
+  eraseButton.type = 'button';
+  eraseButton.className = 'panel-button';
+  eraseButton.textContent = '0 · Erase';
+  eraseButton.title = 'Click or drag to empty cells. Hold 0 or Delete to erase under the mouse.';
+  eraseButton.addEventListener('click', () => { freeplay(`fp-palette:${palette === -1 ? '' : -1}`); panel.used(); });
+  panel.addSync(() => {
+    eraseButton.disabled = !running || !creating();
+    eraseButton.setAttribute('aria-pressed', String(palette === -1));
+  });
+  paletteRow.append(eraseButton);
   boardGroup.append(paletteRow);
-  boardGroup.hint(() => 'Hold 1–5 to paint under the mouse and 0 to erase, or pick a colour above: then the left button paints and the right erases. Pick it again to fire again. The wheel changes a ball’s colour, C charges it and B bruises it. U undoes.');
+  boardGroup.hint(() => 'Hold 1–5 to paint under the mouse and 0 or Delete to erase, or pick a colour or Erase above: then the left button paints and the right erases. Pick it again to fire again. The wheel changes a ball’s colour, C charges it and B bruises it. U undoes.');
   boardGroup
+    .button('Drop a row (D)', () => freeplay('fp-droprow'), { disabled: createOff, title: 'The board drops a row now, as it does every eighth shot, with a new row at the top.' })
+    .button('Undo (U)', () => freeplay('fp-undo'), { disabled: () => createOff() || !undo.length })
     .toggle('Werewolf (orange is furball)', () => settings.werewolf, setWerewolf, {
       disabled: () => !!replays?.isPlaying,
       title: 'Werewolf rumbling: orange balls are brown furballs, on the board, in your fists and in punches. Freeplay starts again on the same board, its oranges swapped.' })
     .toggle('Show colour numbers', () => create.showNumbers, (on) => { create.showNumbers = on; saveCreate(); })
     .toggle('Preview on board (V)', () => create.previewOnBoard, (on) => { create.previewOnBoard = on; saveCreate(); }, {
       title: 'Shows the next punch landed on the board, its balls bright and the rest dimmed. Punch! still lands it for real.' })
+    .number('Starting rows', () => settings.startRows, (v) => { settings.startRows = Math.round(v); save(); }, { min: 0, max: 12, step: 1,
+      disabled: () => running || watching(), title: 'Rows of balls on a fight’s starting board: Freeplay starts on one, and Generate deals one.' })
     .number('Rows', () => create.rows, (v) => { create.rows = Math.round(v); recordRules(); }, { min: 0, max: MAX_ROWS, step: 1, disabled: watching })
     .range('Density %', () => create.density, (v) => { create.density = v; recordRules(); }, { min: 0, max: 100, outputWidth: 4, disabled: watching })
-    .button('Deal (G)', () => freeplay('fp-deal'), { variant: 'primary', disabled: createOff, title: 'A new board of these rows and density. Start deals one too.' })
+    .button('Deal (G)', () => freeplay('fp-deal'), { disabled: createOff, title: 'A new board of these rows and density, with gaps.' })
     .button('Clear', () => freeplay('fp-clear'), { disabled: createOff })
     .button('Drop floating', () => freeplay('fp-drop'), { disabled: createOff, title: 'Removes balls no longer attached to the top, e.g. after editing.' })
-    .button('Undo (U)', () => freeplay('fp-undo'), { disabled: () => createOff() || !undo.length })
-    .hint(() => (creating() ? createMessage : 'Start to deal a board.'));
+    .hint(() => (creating() ? createMessage : 'Start to play on a fight’s starting board.'));
 
   const bludgeonOptions: Option<number>[] = [
     { value: -1, label: 'Random' },
@@ -1869,7 +1935,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     c.fillText('Sprinkle, 2 layers', 0, 56);
     for (let j = 0; j < 2; j++) for (let i = 0; i < 9; i++) icon(g.piece(i, j, false), i * SPRINKLE_BALL + (j * SPRINKLE_BALL) / 2, 62 + j * SPRINKLE_BALL * 0.8);
   });
-  panel.controlSettings.group('Punch', { hidden: createHidden })
+  panel.group('Punch', { hidden: createHidden })
     .hint(() => {
       const view = creating() ? preview(match!.player.board) : null;
       return `Next: ${describe(spec)}, colours ${spec.colours}${spec.bruises ? `, ${spec.bruises} bruises` : ''}.${view?.destroyed ? ` Destroys ${view.destroyed} ball${view.destroyed === 1 ? '' : 's'}.` : ''}`;
@@ -1890,7 +1956,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     .button('Roll again (R)', () => freeplay('fp-roll'), { disabled: watching, title: 'Re-rolls whatever is random, and the wall when it is random.' })
     .append(sprinkleCanvas);
 
-  const viewerGroup = panel.controlSettings.group('Bludgeon viewer (werewolf)', { hidden: createHidden });
+  const viewerGroup = panel.group('Bludgeon viewer (werewolf)', { hidden: createHidden });
   const viewerHidden = () => !viewer.on;
   viewerGroup.toggle('Show viewer', () => viewer.on, (on) => freeplay(`fp-viewer:${on ? 1 : 0}`), {
     disabled: () => !creating() || watching(),
@@ -2078,8 +2144,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       savedCreate ??= structuredClone(create);
       Object.assign(create, settings.freeplay);
       // A Freeplay replay starts on the board it was recorded on, with that board's undo steps.
-      const start = tape.seed as { board?: BoardSnapshot; undo?: BoardSnapshot[]; punches?: number; destroyed?: number };
+      const start = tape.seed as { board?: BoardSnapshot; undo?: BoardSnapshot[]; punches?: number; destroyed?: number; start?: string };
       carry = start.board ? structuredClone(start.board) : null;
+      legacyStart = !carry && start.start !== 'fight';
       if (carry) { undo = structuredClone(start.undo ?? []); punches = start.punches ?? 0; destroyed = start.destroyed ?? 0; }
       palette = null;
       viewer.on = false;
@@ -2128,5 +2195,5 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (running) stop(); });
-  return { frame, dispose: () => { rumbleAudio.sync(null); quietGrowl(); replays.dispose(); sounds.dispose(); } };
+  return { frame, dispose: () => { rumbleAudio.sync(null); replays.dispose(); sounds.dispose(); } };
 }) satisfies PuzzleFactory;

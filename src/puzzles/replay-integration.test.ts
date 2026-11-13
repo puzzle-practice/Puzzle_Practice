@@ -3391,6 +3391,8 @@ describe('untimed and Freeplay sessions keep their replays', () => {
     };
     harness.buttons.get('Play::Start')!();
     advance(200);
+    // Freeplay starts on a fight's starting board: three full rows.
+    expect(match().player.board.cells.filter((piece) => piece !== 0).length).toBe(10 + 9 + 10);
     // Paint with a held key while the mouse moves, then charge and bruise a ball.
     input.mouse = [140, 90];
     advance(50, [{ type: 'keydown', key: '1' }]);
@@ -3399,17 +3401,35 @@ describe('untimed and Freeplay sessions keep their replays', () => {
     advance(50, [{ type: 'keydown', key: 'c' }, { type: 'keyup', key: 'c' }]);
     advance(50, [{ type: 'keydown', key: 'b' }, { type: 'keyup', key: 'b' }]);
     // Panel changes: new rows and a random bludgeon, a fresh deal, a punch and an undo.
-    harness.setters.get('Controls:Board:Rows')!(5);
-    harness.selections.get('Controls:Punch:Bludgeon')!(-1);
+    harness.setters.get('Play:Board:Rows')!(5);
+    harness.selections.get('Play:Punch:Bludgeon')!(-1);
     advance(100);
-    harness.buttons.get('Controls:Board:Deal (G)')!();
+    harness.buttons.get('Play:Board:Deal (G)')!();
     advance(100);
-    harness.buttons.get('Controls:Punch:Punch! (P)')!();
+    harness.buttons.get('Play:Punch:Punch! (P)')!();
     advance(4000);
-    harness.buttons.get('Controls:Punch:Punch! (P)')!();
+    harness.buttons.get('Play:Punch:Punch! (P)')!();
     advance(4000);
-    harness.buttons.get('Controls:Board:Undo (U)')!();
+    harness.buttons.get('Play:Board:Undo (U)')!();
     advance(100);
+    // Generate copies a fight's starting board; Paste plays on it again after another deal.
+    const clip = { text: '' };
+    Object.assign(navigator, { clipboard: { writeText: async (text: string) => { clip.text = text; }, readText: async () => clip.text } });
+    harness.buttons.get('Play:Board:Generate')!();
+    advance(100);
+    expect(clip.text).toMatch(/^R:[01]:/);
+    const generated = [...match().player.board.cells];
+    harness.buttons.get('Play:Board:Deal (G)')!();
+    advance(100);
+    harness.buttons.get('Play:Board:Paste')!();
+    await Promise.resolve(); await Promise.resolve();
+    advance(100);
+    expect(match().player.board.cells).toEqual(generated);
+    // Drop a row now, as on the eighth shot.
+    const drops = match().player.stats.drops;
+    harness.buttons.get('Play:Board:Drop a row (D)')!();
+    advance(500);
+    expect(match().player.stats.drops).toBe(drops + 1);
     // Shots, as in a fight.
     input.mouse = [200, 300];
     for (let shot = 0; shot < 4; shot++) advance(3000, [{ type: 'mousedown', button: shot % 2 ? 3 : 1, pos: [200, 300] }, { type: 'mouseup', button: shot % 2 ? 3 : 1, pos: [200, 300] }]);

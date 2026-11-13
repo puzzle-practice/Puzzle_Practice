@@ -113,7 +113,7 @@ export class NpcBrain {
       if (piece === EMPTY) continue;
       for (const { rest, dir } of reachable(board, fist)) {
         candidates.push({ fist, dir, charge: false, value: this.score(board, rest, piece, target, urgency) });
-        if (board.sparks.length < target) candidates.push({ fist, dir, charge: true, value: this.score(board, rest, charged(piece), target, urgency) });
+        if (board.sparks.length < target && board.canCharge(piece)) candidates.push({ fist, dir, charge: true, value: this.score(board, rest, charged(piece), target, urgency) });
       }
     }
     // Weaker pirates misjudge: each shot's worth is blurred more the lower the skill.
