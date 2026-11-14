@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import legacyFixture from './navigation-parity.json';
 import testFixture from './navigation-test-parity.json';
 import { NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, type Target, type Run } from './logic';
-import { NavigationGame, DEFAULT_SETTINGS, NO_TOTALS, addBoard, boardSeed, readSettings, readNavigationSeed, runGoal, settingsKey } from './game';
+import { NavigationGame, DEFAULT_SETTINGS, NO_TOTALS, addBoard, boardSeed, readSettings, readNavigationSeed, runGoal, settingsKey, targetLit } from './game';
 
 const targets = (rows: (number | boolean)[][]): Target[] => rows.map(r => ({ octant: r[0] as number, ring: r[1] as number, colour: r[2] as number, wild: r[3] as boolean }));
 const runs = (rows: number[][]): Run[] => rows.map(r => ({ direction: r[0] as 0 | 1, octant: r[1], ring: r[2], length: r[3] }));
@@ -175,5 +175,28 @@ describe('navigation sessions', () => {
       { boardSeed: 42, timerElapsedMs: 300001 }, { boardSeed: 42, timerElapsedMs: '60000' }]) {
       expect(readNavigationSeed(value)).toBeNull();
     }
+  });
+});
+
+describe('target highlights', () => {
+  it('never lights a target under a star its run clear is removing, even one the clear turned wild', () => {
+    // The last move of a reported replay: the third cascade pass clears 2s round ring 1 and turns
+    // the target at octant 3 wild, but the star filling it is one of those cleared.
+    const game = new NavigationGame({ ...DEFAULT_SETTINGS, mode: 'ww-test' }, 1317292347);
+    const rows = ['...23...', '12240340', '34240211', '11303024'];
+    rows.forEach((row, ring) => [...row].forEach((c, octant) => game.board.set(octant, ring, c === '.' ? -1 : Number(c))));
+    game.targets = [{ octant: 2, ring: 3, colour: 1, wild: false }, { octant: 3, ring: 2, colour: 2, wild: false },
+      { octant: 0, ring: 2, colour: 3, wild: false }, { octant: 3, ring: 1, colour: 1, wild: false }];
+    const scenes = game.rotate(3, false);
+    const last = scenes.filter(s => s.clear?.kind === 'run').at(-1)!;
+    const target = last.targets.find(t => t.octant === 3 && t.ring === 1)!;
+    expect(last.clear!.chain).toBe(3);
+    expect(target.wild).toBe(true);
+    expect(last.cells[1*8 + 3]).toBe(2);
+    expect(targetLit(last, target)).toBe(false);
+    // The rest of the constellation is filled, but that target is left empty, so it doesn't chart.
+    expect(last.targets.filter(t => t !== target).every(t => targetLit(last, t))).toBe(true);
+    expect(game.constellations).toBe(0);
+    expect(game.board.get(3, 1)).toBe(-1);
   });
 });
