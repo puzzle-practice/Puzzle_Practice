@@ -32,7 +32,10 @@ describe('shipwide records', () => {
       const records = groups.get(category)!;
       expect(records.length).toBeGreaterThan(0);
       expect(records.every((record) => record.crewSize !== undefined)).toBe(true);
-      for (const record of records) expect(record.pirateScores!.reduce((sum, share) => sum + share, 0)).toBe(Number(record.value));
+      // Records sent in without each forager's share leave pirateScores out.
+      for (const record of records) {
+        if (record.pirateScores) expect(record.pirateScores.reduce((sum, share) => sum + share, 0)).toBe(Number(record.value));
+      }
     }
   });
 
