@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { againstRecords, exportRecords, knownRecords, tableProblems, type KnownRecord } from './known-records';
+import { againstRecords, claimedRecords, exportRecords, knownRecords, standingFor, tableProblems, type KnownRecord } from './known-records';
 import type { Run } from './records';
 
 const voyage = (overrides: Partial<Run> = {}) => ({
@@ -77,11 +77,25 @@ describe('exportRecords', () => {
     expect(result.records[3]).not.toHaveProperty('date');
     expect(tableProblems(result.records)).toEqual([]);
   });
+
+  it('skips the reviewed chest-only run and submits the next eligible best', () => {
+    const excluded = voyage({
+      crewSize: 6, startedAt: Date.UTC(2026, 10, 2, 0, 35, 21), loot: [139, 0, 15], score: 432,
+      players: ['Rock', 'amizing', 'Cono', 'Kriosussy', 'Mikethyson', 'Mrraffo'],
+    });
+    const eligible = voyage({ ...excluded, startedAt: Date.UTC(2026, 10, 2, 2), loot: [125, 300, 600], score: 1575 });
+
+    expect(standingFor(excluded, 'chests')).toBeNull();
+    expect(againstRecords([excluded, eligible])).toEqual(new Map([[eligible, { score: null, chests: 'beat' }]]));
+    expect(exportRecords([excluded], []).records).toEqual([]);
+    expect(claimedRecords(exportRecords([excluded, eligible], []))).toMatchObject([{ kind: 'chests', value: 125 }]);
+    expect(standingFor({ ...excluded, startedAt: Date.UTC(2026, 10, 3) }, 'chests')).toBe('beat');
+  });
 });
 
 describe('recordsMessage', () => {
   it('lists only beaten records, readable and as data', async () => {
-    const { recordsMessage, claimedRecords } = await import('./known-records');
+    const { recordsMessage } = await import('./known-records');
     const base = { voyage: 'cursedIsles' as const, ocean: 'emerald', crewSize: 3, pirates: ['A', 'B', 'C'], source: '', loot: [140, 1, 1] as [number, number, number], time: '2026-11-03T20:00:00', date: '2026-11-03' };
     const exported = {
       exported: '2026-11-07T00:00:00Z',
