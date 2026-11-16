@@ -1,6 +1,6 @@
 # Voyage records feed
 
-Every standing voyage record, as JSON, for bots (a Discord bot, say) and other sites. Nothing on the site links to it.
+Standing voyage records as JSON for bots and other sites. Vampire Lair records with a crew size are published for crews of 1–12. Nothing on the site links to the feed.
 
 **URL:** https://puzzle-practice.github.io/Puzzle_Practice/voyage-records.json
 
