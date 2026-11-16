@@ -1,9 +1,9 @@
-// The records feed: every standing voyage record as one JSON file, for bots and other sites to read.
+// The records feed: standing voyage records as one JSON file, for bots and other sites to read.
 // The build writes it to voyage-records.json at the site root (see vite.config.ts). Nothing on the site
 // links to it. Its shape is described in docs/voyage-records-feed.md; change FEED_VERSION when a field
 // is renamed or removed, so readers can tell.
 import { expeditions, type ExpeditionId } from './records';
-import { knownRecords, type KnownRecord } from './known-records';
+import { knownRecords, MAX_SENT_CREW, type KnownRecord } from './known-records';
 import { recordKey, sheetFetched, sheetRecords, sheetSources, screenshotsFor, type SheetRecord, type SheetSource } from './shipwide';
 
 export const FEED_VERSION = 1;
@@ -108,7 +108,11 @@ function otherRecord(record: SheetRecord, id: string): FeedOtherRecord {
 
 const VOYAGE_ORDER = Object.keys(expeditions) as ExpeditionId[];
 
-/** Every record, in a steady order: voyage, ocean, then crew size (and kind or category). */
+function isPublishedRecord({ voyage, crewSize }: Pick<SheetRecord, 'voyage' | 'crewSize'>): boolean {
+  return voyage !== 'vampireLairs' || crewSize === undefined || (crewSize >= 1 && crewSize <= MAX_SENT_CREW.vampireLairs);
+}
+
+/** Published records, in a steady order: voyage, ocean, then crew size (and kind or category). */
 export function recordsFeed({
   now = new Date(),
   known = knownRecords,
@@ -117,13 +121,13 @@ export function recordsFeed({
   const byPlace = (a: { voyage: ExpeditionId; ocean: string }, b: { voyage: ExpeditionId; ocean: string }) =>
     VOYAGE_ORDER.indexOf(a.voyage) - VOYAGE_ORDER.indexOf(b.voyage) || a.ocean.localeCompare(b.ocean);
 
-  const crewSizeRecords = [...known]
+  const crewSizeRecords = known.filter(isPublishedRecord)
     .sort((a, b) => byPlace(a, b) || a.crewSize - b.crewSize || a.kind.localeCompare(b.kind))
     .map(crewSizeRecord);
 
   // The sheets list some categories more than once (ties, or one row per crew size), so the id counts them.
   const seen = new Map<string, number>();
-  const otherRecords = other.map((record) => {
+  const otherRecords = other.filter(isPublishedRecord).map((record) => {
     const base = [record.voyage, record.ocean, slug(record.category), record.crewSize ?? 'any'].join('/');
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);

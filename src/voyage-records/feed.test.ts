@@ -6,12 +6,40 @@ import { sheetRecords } from './shipwide';
 describe('records feed', () => {
   const feed = recordsFeed({ now: new Date('2026-11-13T12:00:00Z') });
 
-  it('holds every record from both tables', () => {
+  it('holds the published records from both tables', () => {
     expect(feed.version).toBe(FEED_VERSION);
     expect(feed.generated).toBe('2026-11-13T12:00:00.000Z');
-    expect(feed.crewSizeRecords).toHaveLength(knownRecords.length);
-    expect(feed.otherRecords).toHaveLength(sheetRecords.length);
+    for (const [published, source] of [[feed.crewSizeRecords, knownRecords], [feed.otherRecords, sheetRecords]] as const) {
+      const oversizedLairCrews = source.filter((record) => record.voyage === 'vampireLairs' && (record.crewSize ?? 0) > 12);
+      expect(published).toHaveLength(source.length - oversizedLairCrews.length);
+    }
     expect(feed.voyages.map((voyage) => voyage.id)).toEqual(['woodhallow', 'cursedIsles', 'vampireLairs']);
+  });
+
+  it('publishes Vampire Lair crew sizes 1–12 and categories without a crew size', () => {
+    const lair = { voyage: 'vampireLairs' as const, ocean: 'emerald' };
+    const { crewSizeRecords, otherRecords } = recordsFeed({
+      known: [
+        ...[0, 1, 12, 13, 159].map((crewSize) => ({ ...lair, crewSize, kind: 'score' as const, value: 30 })),
+        { voyage: 'woodhallow', ocean: 'emerald', crewSize: 13, kind: 'score', value: 30 },
+      ],
+      other: [
+        ...[12, 13].map((crewSize) => ({ ...lair, crewSize, category: 'Fastest', value: '20:00' })),
+        { ...lair, category: 'Most vampire proof', value: '12' },
+        { voyage: 'cursedIsles', ocean: 'emerald', crewSize: 13, category: 'Fastest', value: '20:00' },
+      ],
+    });
+
+    expect(crewSizeRecords.map((record) => record.id)).toEqual([
+      'woodhallow/emerald/13/score',
+      'vampireLairs/emerald/1/score',
+      'vampireLairs/emerald/12/score',
+    ]);
+    expect(otherRecords.map((record) => record.id)).toEqual([
+      'vampireLairs/emerald/fastest/12',
+      'vampireLairs/emerald/most-vampire-proof/any',
+      'cursedIsles/emerald/fastest/13',
+    ]);
   });
 
   it('gives every record its own id', () => {
