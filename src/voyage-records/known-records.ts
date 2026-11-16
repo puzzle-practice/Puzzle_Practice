@@ -160,8 +160,6 @@ export function recordsMessage(exported: RecordsExport, records: KnownRecord[] =
     `Hi Jice, I've beaten ${claimed.length === 1 ? 'a voyage record' : `${claimed.length} voyage records`} on Puzzle Practice:`,
     ...lines,
     '',
-    `I'll send a picture, image or video of ${claimed.length === 1 ? 'it' : 'each one'}, numbered as above.`,
-    '',
     'Data for the records table:',
     JSON.stringify(data),
   ].join('\n');
