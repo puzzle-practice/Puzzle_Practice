@@ -120,6 +120,11 @@ export function expectedFamiliars(share: number): number {
   return share / 1000;
 }
 
+/** Names in alphabetical order, ignoring capitals, for lists with no number to order them by. */
+export function byName(names: readonly string[]): string[] {
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }) || a.localeCompare(b));
+}
+
 /** Each name once, whatever its capitals, in alphabetical order. */
 export function cleanIgnoreList(names: string[]): string[] {
   const unique = new Map(names.map(name => name.trim()).filter(Boolean).map(name => [name.toLowerCase(), name]));

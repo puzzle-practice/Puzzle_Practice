@@ -1,7 +1,7 @@
 // The current shipwide records: the best any crew has managed, kept in known-records.json.
 // On the Voyage Records page, a player's voyage that ties one is yellow and one that beats it is red.
 import table from './known-records.json';
-import { recordsByCrewSize, type ExpeditionId, type Run } from './records';
+import { byName, recordsByCrewSize, type ExpeditionId, type Run } from './records';
 import { hasIgnoredPirate } from './ignored-pirates';
 import reviewedRuns from './excluded-runs.json';
 
@@ -167,7 +167,7 @@ export function recordsMessage(exported: RecordsExport, records: KnownRecord[] =
     const what = record.kind === 'score' ? 'best score' : `most ${TOP_CHESTS[record.voyage]}`;
     const ocean = `${record.ocean[0].toUpperCase()}${record.ocean.slice(1)}`;
     const verb = `beats ${standing?.value ?? '?'}`;
-    return `${index + 1}. ${VOYAGE_NAMES[record.voyage]} (${ocean}), ${record.crewSize} pirates, ${what}: ${record.value} (${verb}) on ${record.time ?? record.date ?? 'an unknown date'}. Loot ${record.loot.join('/')}. Crew: ${record.pirates?.join(', ') || 'not in the log'}`;
+    return `${index + 1}. ${VOYAGE_NAMES[record.voyage]} (${ocean}), ${record.crewSize} pirates, ${what}: ${record.value} (${verb}) on ${record.time ?? record.date ?? 'an unknown date'}. Loot ${record.loot.join('/')}. Crew: ${byName(record.pirates ?? []).join(', ') || 'not in the log'}`;
   });
   const data = claimed.map(({ voyage, ocean, crewSize, kind, value, date, time, pirates, loot }) => ({ voyage, ocean, crewSize, kind, value, date, time, pirates, loot }));
   return [
