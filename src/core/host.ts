@@ -1,5 +1,6 @@
 // Runs one puzzle on a canvas: builds its context, then calls frame() at up to 60 fps.
 import { FrameClock } from './frame-clock';
+import { GameTime } from './game-time';
 import { loadUiFont } from './fonts';
 import { Input } from './input';
 import { Panel } from './panel';
@@ -21,13 +22,13 @@ export async function runPuzzle(
   factory: PuzzleFactory,
 ): Promise<RunningPuzzle> {
   const screen = new Screen(canvas, meta.width ?? 800, meta.height ?? 600);
-  let start = realNow();
-  const input = new Input(screen, () => realNow() - start);
+  const simulation = new Simulation();
+  const time = new GameTime(realNow, () => simulation.time, document.hidden, () => !isVirtualTime());
+  const input = new Input(screen, time.elapsed);
   const store = new Store(id);
   const panel = new Panel(panelRoot, canvas);
   panel.onUsed = () => canvas.focus();
   await loadUiFont();
-  const simulation = new Simulation();
   const clock = new FrameClock(() => simulation.time);
   const { ticks, setReplayTime } = clock;
 
@@ -38,19 +39,13 @@ export async function runPuzzle(
     input.dispose();
     throw error;
   }
-  start = realNow();
+  time.reset();
   input.drain();
-  // A hidden tab gets no animation frames. Leave that time out of the game clock, or on return
-  // the simulation would play the whole gap back as fast catch-up steps at up to 240x speed.
-  // A video export runs on its own clock and keeps going while the tab is hidden.
-  let hiddenAt = document.hidden ? start : null;
-  const onVisibility = () => {
-    if (isVirtualTime()) { hiddenAt = null; return; }
-    if (document.hidden) hiddenAt ??= realNow();
-    else if (hiddenAt !== null) { start += realNow() - hiddenAt; hiddenAt = null; }
-  };
+  // A hidden tab stops the game clock (see GameTime). A video export runs on its own clock and
+  // keeps going while the tab is hidden.
+  const onVisibility = () => { if (document.hidden) time.hide(); else time.show(); };
   document.addEventListener('visibilitychange', onVisibility);
-  const catchUp = () => simulation.advance(realNow() - start, time => clock.frame(() => instance.frame(input.drain(time))));
+  const catchUp = () => simulation.advance(time.elapsed(), at => clock.frame(() => instance.frame(input.drain(at))));
   // A video export steps the game itself, one video frame at a time, while the clock is virtual.
   const unregister = setFrameRunner({ canvas, run: catchUp });
   // Panel actions use the same logical time even if a display has not painted yet.
