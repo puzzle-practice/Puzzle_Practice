@@ -15,6 +15,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ignoredPirates = new Set(JSON.parse(readFileSync(join(ROOT, 'src', 'voyage-records', 'ignored-pirates.json'), 'utf8')).map((name) => name.toLowerCase()));
 export const SHEET = join(ROOT, 'src', 'voyage-records', 'sheet-records.json');
 const DEFAULT_EXPORTS = join(process.env.LOCALAPPDATA ?? '', 'Puzzle Pirates', 'app', 'exported_data');
 
@@ -33,6 +34,7 @@ export function readRun(text, file = 'run') {
   return text.split(/\r?\n/).filter((line) => line.trim()).flatMap((line) => {
     const report = JSON.parse(line);
     const rows = Array.isArray(report.rows) ? report.rows : [];
+    if (rows.some((row) => ignoredPirates.has(String(row.pirate).trim().toLowerCase()))) return [];
     const foragers = rows
       .filter((row) => row.station === 'Foraging' && Array.isArray(row.tokens))
       .map((row) => ({ pirate: row.pirate, score: row.score, chests: row.tokens[2] ?? 0 }));

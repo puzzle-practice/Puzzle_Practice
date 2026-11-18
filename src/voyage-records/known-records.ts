@@ -2,6 +2,8 @@
 // On the Voyage Records page, a player's voyage that ties one is yellow and one that beats it is red.
 import table from './known-records.json';
 import { recordsByCrewSize, type ExpeditionId, type Run } from './records';
+import { hasIgnoredPirate } from './ignored-pirates';
+import reviewedRuns from './excluded-runs.json';
 
 export interface KnownRecord {
   voyage: ExpeditionId;
@@ -51,15 +53,10 @@ export function tableProblems(records: unknown[]): string[] {
 export const knownRecords = table.records as KnownRecord[];
 
 // Reviewed runs that can stay in personal history but are ineligible for global records.
-const excludedRuns: (Pick<Run, 'expedition' | 'ocean' | 'crewSize' | 'loot' | 'players'> & { date: string })[] = [
-  {
-    // The crew sailed this den for dire chests only.
-    expedition: 'woodhallow', ocean: 'emerald', crewSize: 6, date: '2026-11-02',
-    loot: [139, 0, 15], players: ['Amizing', 'Cono', 'Kriosussy', 'Mikethyson', 'Mrraffo', 'Rock'],
-  },
-];
+const excludedRuns = reviewedRuns;
 
-function isExcludedRun(run: Run): boolean {
+export function isExcludedRun(run: Run): boolean {
+  if (hasIgnoredPirate(run.players)) return true;
   const { startedAt } = run;
   return startedAt !== null && excludedRuns.some((excluded) =>
     run.expedition === excluded.expedition && run.ocean === excluded.ocean && run.crewSize === excluded.crewSize &&
@@ -154,7 +151,7 @@ export const MAX_SENT_CREW: Record<ExpeditionId, number> = { woodhallow: 12, cur
  * crews bigger than MAX_SENT_CREW aren't asked for, so neither is sent.
  */
 export function claimedRecords(exported: RecordsExport): ExportedRecord[] {
-  return exported.records.filter((record) => record.standing === 'beat' && record.crewSize <= MAX_SENT_CREW[record.voyage]);
+  return exported.records.filter((record) => !hasIgnoredPirate(record.pirates) && record.standing === 'beat' && record.crewSize <= MAX_SENT_CREW[record.voyage]);
 }
 
 /**

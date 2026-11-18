@@ -91,6 +91,29 @@ describe('exportRecords', () => {
     expect(claimedRecords(exportRecords([excluded, eligible], []))).toMatchObject([{ kind: 'chests', value: 125 }]);
     expect(standingFor({ ...excluded, startedAt: Date.UTC(2026, 10, 3) }, 'chests')).toBe('beat');
   });
+
+  it('excludes ignored crews from standings and sends the next eligible best', () => {
+    const excluded = voyage({
+      crewSize: 5, startedAt: null, loot: [126, 258, 512], score: 1406,
+      players: ['Bkvi', 'Gummybears', 'Mikethyson', 'Xioch', 'zIkAtO'],
+    });
+    const eligible = voyage({ ...excluded, players: ['Bkvi', 'Gummybears', 'Mikethyson', 'Xioch', 'Aster'], loot: [125, 258, 512], score: 1403 });
+    const records = [record({ crewSize: 5, kind: 'chests', value: 100 })];
+
+    expect(standingFor(excluded, 'chests', records)).toBeNull();
+    expect(againstRecords([excluded], records).size).toBe(0);
+    expect(exportRecords([excluded], [], new Date(), records).records).toEqual([]);
+    const exported = exportRecords([excluded, eligible], [], new Date(), records);
+    expect(claimedRecords(exported)).toMatchObject([{ kind: 'chests', value: 125 }]);
+    expect(claimedRecords({ ...exported, records: exported.records.map((entry) => ({ ...entry, pirates: excluded.players })) })).toEqual([]);
+  });
+
+  it('excludes the reviewed bugged Vampire Lairs run without excluding its crew on other dates', () => {
+    const bugged = voyage({ expedition: 'vampireLairs', crewSize: 2, startedAt: Date.UTC(2026, 1, 7, 2, 7, 49), players: ['ragnarlothbr', 'Fortunae'], loot: [68, 109, 253], score: 430 });
+    expect(exportRecords([bugged], []).records).toEqual([]);
+    expect(againstRecords([bugged]).size).toBe(0);
+    expect(exportRecords([{ ...bugged, startedAt: Date.UTC(2026, 1, 8) }], []).records).toHaveLength(2);
+  });
 });
 
 describe('recordsMessage', () => {

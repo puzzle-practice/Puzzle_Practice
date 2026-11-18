@@ -15,6 +15,11 @@ const run = [
 ].join('\n');
 
 describe('readRun', () => {
+  it('skips reports with an ignored pirate, including navigators', () => {
+    const excluded = report(Date.UTC(2026, 10, 18), [row('Navigating', 'zIkAtO', [0, 0, 0]), row('Foraging', 'Jice', [0, 0, 999])]);
+    expect(readRun(`${run}\n${excluded}`)).toEqual(readRun(run));
+  });
+
   it('reads each duty report with foraging, counting the crew and the dire chests', () => {
     const reports = readRun(run, 'C:/runs/run_x.jsonl');
     expect(reports).toHaveLength(2);

@@ -12,7 +12,7 @@ const survivors = /^(\d+) o' (\d+) still standin'! (?:To yer stations!|Plunder t
 const aboard = /^Ye have taken aboard (?:(\d+) (dire chests?|lunar lockers?|wolf boxes|wolf box)|m\.werewolf_(small|medium|large)_treasure\((\d+)\))!$/i;
 const tierIndex: Record<string, number> = { dire: 0, large: 0, lunar: 1, medium: 1, wolf: 2, small: 2 };
 
-export function parseWoodhallow(events: Iterable<ChatEvent>): RunDetails | null {
+export function parseWoodhallow(events: Iterable<ChatEvent>, onEvent?: (event: ChatEvent) => void): RunDetails | null {
   const rounds = Array<Round | null>(6).fill(null);
   const loot: RunDetails['loot'] = [0, 0, 0];
   let crew = null as string[] | null;
@@ -22,9 +22,14 @@ export function parseWoodhallow(events: Iterable<ChatEvent>): RunDetails | null 
   let result = null as RunResult | null;
   let terminalAt = null as number | null;
 
-  for (const { message, at } of events) {
-    if (ended && leftVessel.test(message)) break;
+  for (const event of events) {
+    const { message, at } = event;
+    if (ended && leftVessel.test(message)) {
+      onEvent?.(event);
+      break;
+    }
     if (terminalAt !== null && at !== null && at - terminalAt > 120_000) break;
+    onEvent?.(event);
     const chest = aboard.exec(message);
     if (chest) {
       const kind = (chest[2]?.split(" ")[0] ?? chest[3]).toLowerCase();

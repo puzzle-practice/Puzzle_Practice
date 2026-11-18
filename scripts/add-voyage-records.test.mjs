@@ -24,6 +24,22 @@ describe('readSubmission', () => {
 });
 
 describe('mergeRecords', () => {
+  it('rejects both claims from the reviewed bugged voyage while accepting another date', () => {
+    const bugged = { voyage: 'vampireLairs', ocean: 'emerald', crewSize: 2, date: '2026-02-07', time: '2026-02-07T02:07:49', pirates: ['Fortunae', 'ragnarlothbr'], loot: [68, 109, 253] };
+    const submitted = [{ ...bugged, kind: 'score', value: 430 }, { ...bugged, kind: 'chests', value: 68 }];
+    expect(mergeRecords([], submitted, 'Sent in').results.map((result) => result.outcome)).toEqual(['skipped', 'skipped']);
+    expect(mergeRecords([], submitted.map((record) => ({ ...record, date: '2026-02-08' })), 'Sent in').records).toHaveLength(2);
+  });
+
+  it('rejects a higher record from an ignored crew without replacing the standing record', () => {
+    const { records, results } = mergeRecords(table, [
+      sent({ kind: 'chests', value: 999, pirates: ['A', 'zIkAtO', 'C'] }),
+    ], 'Sent in');
+    expect(records).toEqual(table);
+    expect(results).toMatchObject([{ outcome: 'skipped', text: '' }]);
+    expect(historyLines(results, 'submission.json')).toBe('');
+  });
+
   it('replaces beaten records in place, adds new crew sizes, and keeps ties and lower values', () => {
     const { records, results } = mergeRecords(table, [
       sent({ kind: 'chests', value: 140 }),
@@ -105,7 +121,7 @@ describe('pictures in a send-in folder', () => {
 
   it('rewrites only the screenshots part of sheet-records.json, in the same layout', async () => {
     const { SHEET, screenshotEntry, withScreenshots } = await import('./add-voyage-records.mjs');
-    const text = readFileSync(SHEET, 'utf8');
+    const text = readFileSync(SHEET, 'utf8').replaceAll('\r\n', '\n');
     const { screenshots } = JSON.parse(text);
     expect(withScreenshots(text, screenshots)).toBe(text);
     const next = withScreenshots(text, { ...screenshots, 'woodhallow/emerald/4/score': screenshotEntry(['a.png', 'b.mp4']) });

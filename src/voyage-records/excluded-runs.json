@@ -1,0 +1,10 @@
+[
+  {
+    "expedition": "woodhallow", "ocean": "emerald", "crewSize": 6, "date": "2026-11-02",
+    "loot": [139, 0, 15], "players": ["Amizing", "Cono", "Kriosussy", "Mikethyson", "Mrraffo", "Rock"]
+  },
+  {
+    "expedition": "vampireLairs", "ocean": "emerald", "crewSize": 2, "date": "2026-02-07",
+    "loot": [68, 109, 253], "players": ["Fortunae", "Ragnarlothbr"]
+  }
+]
