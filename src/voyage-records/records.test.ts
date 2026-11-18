@@ -109,6 +109,7 @@ it("leaves out voyages with an ignored pirate aboard, whatever the capitals", ()
   const kept = voyage("Aster", "Birch");
   expect(withoutIgnored([kept, voyage("Aster", "Cedar")], ["cedar"])).toEqual([kept]);
   expect(withoutIgnored([kept], [])).toEqual([kept]);
+  expect(withoutIgnored([kept, voyage("Aster", "zIkAtO")], [])).toEqual([kept]);
 });
 
 it("keeps each ignored name once, tidied and sorted", () => {

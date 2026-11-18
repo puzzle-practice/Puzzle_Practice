@@ -2281,3 +2281,122 @@ a {
   color: #4fe3c1;
   font-weight: 700;
 }
+
+/* Individual voyage review and local exclusions. */
+.vr-run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.vr-run > .vr-run-actions {
+  margin-top: auto;
+  padding-top: 6px;
+}
+
+.vr-run-actions-cell {
+  min-width: 150px;
+}
+
+.vr-run-actions-cell .vr-run-actions {
+  justify-content: flex-end;
+}
+
+.vr-run-actions .vr-expand {
+  white-space: nowrap;
+}
+
+.vr-run-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.vr-run-notice > span {
+  flex: 1 1 240px;
+}
+
+.vr-send {
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+
+.vr-debug-dialog {
+  width: min(900px, 94vw);
+}
+
+.vr-debug-text {
+  margin-top: 12px;
+  white-space: pre;
+  overflow-wrap: normal;
+  max-height: 50dvh;
+}
+
+.vr-send .vr-debug-source {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.vr-debug-includes {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.vr-debug-includes summary {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.vr-debug-includes ul {
+  margin-block: 6px 10px;
+  padding-left: 20px;
+}
+
+.vr-send-runs,
+.vr-ignored-runs {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.vr-review-run,
+.vr-ignored-run {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 0.82rem;
+}
+
+.vr-review-run > span,
+.vr-ignored-run > span {
+  flex: 1 1 230px;
+}
+
+@media (max-width: 1000px) {
+  .vr-run-actions-heading {
+    display: none;
+  }
+
+  .vr-all .vr-run-actions-cell {
+    grid-column: 1 / -1;
+    order: 3;
+    padding-block: 4px 10px;
+  }
+
+  .vr-run-actions-cell .vr-run-actions {
+    justify-content: flex-start;
+  }
+}

@@ -11,6 +11,8 @@ export type RunResult = 'Won' | 'Lost' | 'Retreated' | 'Returned';
 
 export interface ChatEvent {
   message: string;
+  /** One-based line in the original file, for voyage debug excerpts. */
+  line?: number;
   /** The date and time written in the log, as if it were UTC. Null before the first date line. */
   at: number | null;
 }
@@ -44,7 +46,9 @@ export function alphabetize(names: Iterable<string>): string[] {
 export function* chatEvents(text: string): Generator<ChatEvent> {
   let day: number | null = null;
   let previousClock = 0;
-  for (const raw of text.split('\n')) {
+  const lines = text.split('\n');
+  for (let index = 0; index < lines.length; index++) {
+    const raw = lines[index];
     const line = raw.trim();
     const date = /^=+ (\d{4})\/(\d{1,2})\/(\d{1,2}) =+$/.exec(line);
     if (date) {
@@ -57,6 +61,6 @@ export function* chatEvents(text: string): Generator<ChatEvent> {
     const clock = (+event[1] * 3600 + +event[2] * 60 + +event[3]) * 1000;
     if (day !== null && previousClock - clock > dayMs / 2) day += dayMs;
     previousClock = clock;
-    yield { message: event[4], at: day === null ? null : day + clock };
+    yield { message: event[4], at: day === null ? null : day + clock, line: index + 1 };
   }
 }

@@ -2,6 +2,7 @@
 import { arrivals, chatEvents, type ChatEvent, type ExpeditionId, type RunDetails } from './chat';
 import { parseIslesOrLair } from './isles-and-lairs';
 import { parseWoodhallow } from './woodhallow';
+import { hasIgnoredPirate } from './ignored-pirates';
 
 export type { ExpeditionId, Fray, RunResult } from './chat';
 
@@ -22,6 +23,8 @@ export interface Run extends RunDetails {
   ocean: string | null;
   startedAt: number | null;
   score: number;
+  /** Original lines consumed by the parser, held in memory only. */
+  source?: { text: string; firstLine: number; lastLine: number };
 }
 
 export interface CrewRecord {
@@ -51,7 +54,8 @@ export async function parseChatlogFile(file: File, { ocean = null }: { ocean?: s
 }
 
 export function parseExpeditionLog(text: string, { ocean = null }: { ocean?: string | null } = {}): Run[] {
-  const sections: { expedition: ExpeditionId; startedAt: number | null; events: ChatEvent[] }[] = [];
+  const lines = text.split('\n');
+  const sections: { expedition: ExpeditionId; startedAt: number | null; firstLine: number; events: ChatEvent[] }[] = [];
   const oceans = new Set(ocean ? [ocean.toLowerCase()] : []);
   let section: (typeof sections)[number] | undefined;
   for (const event of chatEvents(text)) {
@@ -59,7 +63,7 @@ export function parseExpeditionLog(text: string, { ocean = null }: { ocean?: str
     const reportedOcean = serverOcean.exec(event.message)?.[1];
     if (reportedOcean) oceans.add(reportedOcean.toLowerCase());
     if (expedition) {
-      section = { expedition, startedAt: event.at, events: [] };
+      section = { expedition, startedAt: event.at, firstLine: event.line!, events: [] };
       sections.push(section);
     } else if (section) {
       section.events.push(event);
@@ -67,15 +71,19 @@ export function parseExpeditionLog(text: string, { ocean = null }: { ocean?: str
   }
   if (oceans.size > 1) throw new Error('The log contains more than one ocean or conflicts with the selected ocean.');
   const [scope = null] = oceans;
-  return sections.flatMap(({ expedition, startedAt, events }) => {
+  return sections.flatMap(({ expedition, startedAt, firstLine, events }) => {
+    let lastLine = firstLine;
+    const consumed = (event: ChatEvent) => { lastLine = event.line!; };
     const run = expedition === 'woodhallow'
-      ? parseWoodhallow(events)
-      : parseIslesOrLair(events, expedition);
+      ? parseWoodhallow(events, consumed)
+      : parseIslesOrLair(events, expedition, consumed);
     if (!run) return [];
     const [tier3, tier2, tier1] = run.loot;
     // Vampire Lairs hauls count every chest the same.
     const score = expedition === 'vampireLairs' ? tier3 + tier2 + tier1 : 3 * tier3 + 2 * tier2 + tier1;
-    return [{ expedition, ocean: scope, startedAt, ...run, score }];
+    const date = startedAt === null ? '' : `====== ${new Date(startedAt).toISOString().slice(0, 10).replaceAll('-', '/')} ======\n`;
+    const source = { text: `${date}${lines.slice(firstLine - 1, lastLine).join('\n').trimEnd()}\n`, firstLine, lastLine };
+    return [{ expedition, ocean: scope, startedAt, ...run, score, source }];
   });
 }
 
@@ -118,10 +126,10 @@ export function cleanIgnoreList(names: string[]): string[] {
   return [...unique.values()].sort((a, b) => a.localeCompare(b));
 }
 
-/** Voyages with none of these pirates aboard. Chatlogs and the list can differ in capitals. */
+/** Voyages with no shared or personally ignored pirates aboard, regardless of capitals. */
 export function withoutIgnored(runs: Run[], ignored: string[]): Run[] {
   const names = new Set(ignored.map(name => name.toLowerCase()));
-  return runs.filter(run => !run.players.some(player => names.has(player.toLowerCase())));
+  return runs.filter(run => !hasIgnoredPirate(run.players) && !run.players.some(player => names.has(player.toLowerCase())));
 }
 
 export interface NewBest {

@@ -6,7 +6,7 @@ const tierIndex: Record<string, number> = { cursed: 0, fetish: 1, bone: 2, immor
 const returned = /^Ye (?:abandoned the (?:island|gauntlet|sanctum)|return(?:ed)? to (?:yer|the) (?:ship|vessel))\b/i;
 const rustling = "Ye hear the sound of rustling in coffins.";
 
-export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: ExpeditionId): RunDetails | null {
+export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: ExpeditionId, onEvent?: (event: ChatEvent) => void): RunDetails | null {
   const isLair = expedition === "vampireLairs";
   const lootPattern = isLair ? lairLoot : islandLoot;
   const loot: RunDetails['loot'] = [0, 0, 0];
@@ -32,12 +32,15 @@ export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: Expedi
     eliminated.clear();
   }
 
-  for (const { message, at } of events) {
+  for (const event of events) {
+    const { message, at } = event;
     if (terminalAt !== null && at !== null && at - terminalAt > 120_000) break;
     if (leftVessel.test(message) && (result || lootReported)) {
+      onEvent?.(event);
       result ??= "Returned";
       break;
     }
+    onEvent?.(event);
     const chest = lootPattern.exec(message);
     if (chest) {
       loot[tierIndex[chest[2].split(" ")[0].toLowerCase()]] += Number(chest[1]);
