@@ -27,6 +27,7 @@ import {
   type LogHandle,
 } from './saved';
 import {
+  byName,
   cleanIgnoreList,
   expeditions,
   expectedFamiliars,
@@ -604,7 +605,7 @@ function fraysRow(run: Run): HTMLElement | null {
   return el('div', 'vr-frays', ...run.frays.map((fray) => {
     const tone = fray.result === 'Won' ? ' is-good' : fray.result === 'Lost' ? ' is-bad' : '';
     const standing = fray.survivors === null ? '' : `, ${plural(fray.survivors, 'pirate')} standing`;
-    const deaths = fray.deaths.length ? `. Fell: ${fray.deaths.join(', ')}` : '';
+    const deaths = fray.deaths.length ? `. Fell: ${byName(fray.deaths).join(', ')}` : '';
     const pip = el('span', `vr-fray${tone}`, String(fray.number));
     pip.title = `Fray ${fray.number}: ${fray.result ?? 'unknown'}${standing}${deaths}`;
     return pip;
@@ -639,7 +640,7 @@ function recordCards(record: CrewRecord): HTMLElement {
 }
 
 function namesCell(run: Run, label: string): HTMLElement {
-  const cell = el('td', 'vr-names', run.players.join(', ') || 'Names not in the log');
+  const cell = el('td', 'vr-names', byName(run.players).join(', ') || 'Names not in the log');
   cell.dataset.label = label;
   return cell;
 }

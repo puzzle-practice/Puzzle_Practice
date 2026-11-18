@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { arrivals } from './chat';
-import { cleanIgnoreList, expectedFamiliars, mergeRuns, oceanFromFileName, parseChatlogFile, parseExpeditionLog, personalBests, recordsByCrewSize, topChestShare, withoutIgnored, type Run } from './records';
+import { byName, cleanIgnoreList, expectedFamiliars, mergeRuns, oceanFromFileName, parseChatlogFile, parseExpeditionLog, personalBests, recordsByCrewSize, topChestShare, withoutIgnored, type Run } from './records';
 
 function chat(messages: string[]) {
   return ["====== 2026/11/1 ======", ...messages.map((message, index) =>
@@ -114,6 +114,12 @@ it("leaves out voyages with an ignored pirate aboard, whatever the capitals", ()
 
 it("keeps each ignored name once, tidied and sorted", () => {
   expect(cleanIgnoreList([" Birch", "aster", "BIRCH", ""])).toEqual(["aster", "BIRCH"]);
+});
+
+it("lists names alphabetically, whatever their capitals, without changing the list it was given", () => {
+  const crew = ["Zikato", "birch", "Aster", "Moonbeam"];
+  expect(byName(crew)).toEqual(["Aster", "birch", "Moonbeam", "Zikato"]);
+  expect(crew).toEqual(["Zikato", "birch", "Aster", "Moonbeam"]);
 });
 
 it("marks voyages that beat the best so far at their own crew size", () => {
