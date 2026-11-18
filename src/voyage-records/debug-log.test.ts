@@ -146,7 +146,7 @@ it('includes actual calculations, duration and enemy evidence in a reparseable e
   const exported = debugExport(run);
   expect(exported).toMatch(/^# Voyage debug export v1/);
   expect(exported).toContain('# Crew size (inferred): 2');
-  expect(exported).toContain('# Global record eligibility: Excluded by current rules');
+  expect(exported).toContain('# Global record eligibility: Not excluded by current rules (not verification)');
   expect(exported).toContain('# Identified pirates (2): Fortunae, Ragnarlothbr');
   expect(exported).toContain('# Started: 2026-02-07 02:07:49');
   expect(exported).toContain('# Ended: 2026-02-07 02:20:03');
