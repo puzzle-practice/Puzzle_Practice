@@ -97,6 +97,38 @@ it("Vampire Lairs keeps a defeat when the crew brings loot back", () => {
   expect(run.loot).toEqual([0, 0, 2]);
 });
 
+it("Vampire Lairs takes the crew from the winner lists when the first frays have none", () => {
+  // Shape of a reported 12-pirate run that was recorded as 2: the log has no winner list for the
+  // first two frays, so only the two pirates eliminated in fray 1 were known when the crew was set.
+  const crew = ["Aster", "Birch", "Cedar", "Dahlia", "Elm", "Fern", "Gorse", "Hazel", "Iris", "Juniper", "Kale", "Larch"];
+  const winnerList = `Game over.  Winners: ${crew.join(", ")}.`;
+  const [run] = parseExpeditionLog(chat([
+    arrivals.vampireLairs,
+    "Immortal Westenra is eliminated!",
+    "Aster is eliminated!",
+    "Birch is eliminated!",
+    "Ye hear the sound of rustling in coffins.",
+    "Sunless Akasha is eliminated!",
+    "Ye hear the sound of rustling in coffins.",
+    "Gloaming Silas is eliminated!",
+    winnerList,
+    "Ye hear the sound of rustling in coffins.",
+    "Cedar is eliminated!",
+    "Dahlia is eliminated!",
+    winnerList,
+    "Larch ordered everyone back to the ship!",
+    "Ye hear the sound of rustling in coffins.",
+    "Ye have taken aboard 253 blood boxes!",
+    "Ye have taken aboard 109 nocturnal lockers!",
+    "Ye have taken aboard 68 immortal chests!",
+  ]));
+  expect(run.crewSize).toBe(12);
+  expect(run.players).toEqual(crew);
+  expect(run.loot).toEqual([68, 109, 253]);
+  expect(run.frays.map(fray => fray.survivors)).toEqual([10, 12, 12, 10]);
+  expect(run.frays[0].deaths).toEqual(["Aster", "Birch"]);
+});
+
 it("splits each voyage's tier 3 chests by its own crew, skipping unknown crews", () => {
   const voyage = (top: number, crewSize: number | null) => ({ loot: [top, 50, 50], crewSize }) as Run;
   const share = topChestShare([voyage(100, 5), voyage(30, 2), voyage(90, null)]);

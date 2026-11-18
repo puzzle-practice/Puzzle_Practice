@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { againstRecords, claimedRecords, exportRecords, knownRecords, standingFor, tableProblems, type KnownRecord } from './known-records';
+import { againstRecords, claimedRecords, exportRecords, isExcludedRun, knownRecords, standingFor, tableProblems, type KnownRecord } from './known-records';
 import type { Run } from './records';
 
 const voyage = (overrides: Partial<Run> = {}) => ({
@@ -108,11 +108,10 @@ describe('exportRecords', () => {
     expect(claimedRecords({ ...exported, records: exported.records.map((entry) => ({ ...entry, pirates: excluded.players })) })).toEqual([]);
   });
 
-  it('excludes the reviewed bugged Vampire Lairs run without excluding its crew on other dates', () => {
-    const bugged = voyage({ expedition: 'vampireLairs', crewSize: 2, startedAt: Date.UTC(2026, 1, 7, 2, 7, 49), players: ['ragnarlothbr', 'Fortunae'], loot: [68, 109, 253], score: 430 });
-    expect(exportRecords([bugged], []).records).toEqual([]);
-    expect(againstRecords([bugged]).size).toBe(0);
-    expect(exportRecords([{ ...bugged, startedAt: Date.UTC(2026, 1, 8) }], []).records).toHaveLength(2);
+  it('counts the 2026-02-07 Vampire Lairs run as an eligible 12-pirate voyage', () => {
+    const crew = ['Chauman', 'Dugtrio', 'Fortunae', 'Gummybears', 'Jezerbell', 'Mystikaxe', 'Piehax', 'Pricus', 'Qays', 'Ragnarlothbr', 'Rustyspoony', 'Swapped'];
+    const run = voyage({ expedition: 'vampireLairs', crewSize: 12, startedAt: Date.UTC(2026, 1, 7, 2, 7, 49), players: crew, loot: [68, 109, 253], score: 430 });
+    expect(isExcludedRun(run)).toBe(false);
   });
 });
 

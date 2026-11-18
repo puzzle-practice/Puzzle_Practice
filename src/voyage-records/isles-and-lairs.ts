@@ -10,24 +10,33 @@ export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: Expedi
   const isLair = expedition === "vampireLairs";
   const lootPattern = isLair ? lairLoot : islandLoot;
   const loot: RunDetails['loot'] = [0, 0, 0];
-  const frays: Fray[] = [];
+  // Participants stay null until the end when a fray's crew had to be inferred.
+  const frays: (Fray & { participants: string[] | null })[] = [];
   const eliminated = new Set<string>();
   let crew = null as string[] | null;
+  // A crew inferred from eliminations alone is only the pirates who happened to die.
+  let crewFromWinners = false;
   let result = null as RunResult | null;
   let terminalAt = null as number | null;
   let lootReported = false;
   let wonSinceRustling = false;
 
   function recordFray(won: boolean, names: string[] | null): void {
-    const participants = names ?? crew ?? [...eliminated];
-    if (participants.length) crew ??= alphabetize(participants);
-    const deaths = alphabetize(participants.filter(name => eliminated.has(name)));
-    const number = frays.length + 1;
+    if (names) {
+      // The first winner list names the whole crew, including any pirates who were only
+      // inferred from earlier frays that ended without one.
+      if (!crewFromWinners) crew = alphabetize([...(crew ?? []), ...names]);
+      crewFromWinners = true;
+    } else if (!crewFromWinners && eliminated.size) {
+      crew = alphabetize([...(crew ?? []), ...eliminated]);
+    }
+    const participants = names ?? (crewFromWinners ? crew : null);
     frays.push({
-      number,
+      number: frays.length + 1,
       result: won ? "Won" : "Lost",
-      survivors: won ? (participants.length ? participants.length - deaths.length : null) : 0,
-      deaths,
+      survivors: null,
+      deaths: [...eliminated],
+      participants,
     });
     eliminated.clear();
   }
@@ -88,6 +97,11 @@ export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: Expedi
     loot,
     fraysWon: frays.filter(fray => fray.result === "Won").length,
     result,
-    frays,
+    frays: frays.map(({ participants, ...fray }) => {
+      const present = participants ?? players;
+      const deaths = alphabetize(present.filter(name => fray.deaths.includes(name)));
+      const survivors = fray.result === "Won" ? (present.length ? present.length - deaths.length : null) : 0;
+      return { ...fray, survivors, deaths };
+    }),
   };
 }

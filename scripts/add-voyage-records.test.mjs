@@ -24,11 +24,11 @@ describe('readSubmission', () => {
 });
 
 describe('mergeRecords', () => {
-  it('rejects both claims from the reviewed bugged voyage while accepting another date', () => {
-    const bugged = { voyage: 'vampireLairs', ocean: 'emerald', crewSize: 2, date: '2026-02-07', time: '2026-02-07T02:07:49', pirates: ['Fortunae', 'ragnarlothbr'], loot: [68, 109, 253] };
-    const submitted = [{ ...bugged, kind: 'score', value: 430 }, { ...bugged, kind: 'chests', value: 68 }];
-    expect(mergeRecords([], submitted, 'Sent in').results.map((result) => result.outcome)).toEqual(['skipped', 'skipped']);
-    expect(mergeRecords([], submitted.map((record) => ({ ...record, date: '2026-02-08' })), 'Sent in').records).toHaveLength(2);
+  it('accepts claims from the 2026-02-07 Vampire Lairs run now that it counts 12 pirates', () => {
+    const pirates = ['Chauman', 'Dugtrio', 'Fortunae', 'Gummybears', 'Jezerbell', 'Mystikaxe', 'Piehax', 'Pricus', 'Qays', 'Ragnarlothbr', 'Rustyspoony', 'Swapped'];
+    const run = { voyage: 'vampireLairs', ocean: 'emerald', crewSize: 12, date: '2026-02-07', time: '2026-02-07T02:07:49', pirates, loot: [68, 109, 253] };
+    const submitted = [{ ...run, kind: 'score', value: 430 }, { ...run, kind: 'chests', value: 68 }];
+    expect(mergeRecords([], submitted, 'Sent in').records).toHaveLength(2);
   });
 
   it('rejects a higher record from an ignored crew without replacing the standing record', () => {
