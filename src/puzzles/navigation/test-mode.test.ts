@@ -72,7 +72,27 @@ describe('Dennav', () => {
     expect(game.constellations).toBe(1);
     expect(game.targets[0].wild).toBe(charged);
     // Charging continues in WW (Test), while the scoring chain resets after charting.
-    expect(game.points).toBe(6 + 3);
+    // Only the constellation scores: the run after it scores nothing.
+    expect(game.points).toBe(6);
+  });
+
+  it.each([['normal', 3], ['ww', 0], ['ww-test', 0]] as const)('%s run clears score %i on their own', (mode, points) => {
+    const game = new NavigationGame({ ...settings, mode, extraRing: false }, 5);
+    game.targets = [{ octant: 6, ring: 2, colour: 4, wild: false }];
+    for (const o of [1, 2, 3]) game.board.set(o, 2, 1);
+    const scenes = game.rotate(2, true);
+    const runs = scenes.flatMap(s => s.clear?.kind === 'run' ? [s.clear] : []);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].points).toBe(points);
+    expect(game.points).toBe(points);
+  });
+
+  it('still scores Dennav run clears for replays recorded before they stopped scoring', () => {
+    const game = new NavigationGame({ ...settings, extraRing: false }, 5, undefined, true, true);
+    game.targets = [{ octant: 6, ring: 2, colour: 4, wild: false }];
+    for (const o of [1, 2, 3]) game.board.set(o, 2, 1);
+    game.rotate(2, true);
+    expect(game.points).toBe(3);
   });
 
   it('never exceeds ten targets or duplicates an occupied inner octant', () => {

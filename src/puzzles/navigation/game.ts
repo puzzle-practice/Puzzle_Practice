@@ -29,6 +29,8 @@ export function readSettings(value: unknown): NavigationSettings | null {
     dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false, ...(s.boochEnds ? { boochEnds: true } : {}), ...(s.boochOpens ? { boochOpens: true } : {}) };
 }
 export const isWerewolf = (mode: NavigationSettings['mode']): boolean => mode === 'ww' || mode === 'ww-test';
+/** Only Normal scores run clears; in Dennav and Old Dennav a run of stars scores nothing, only constellations do. */
+export const runsScore = (mode: NavigationSettings['mode']): boolean => !isWerewolf(mode);
 export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal';
 export const settingsKey = (s: NavigationSettings): string => `${s.mode}:${s.difficulty}:${isWerewolf(s.mode) && s.extraRing ? 4 : 3}:${isWerewolf(s.mode) && s.wildTargets ? 1 : 0}:${s.timerMs}${s.clears ? ':c' : ''}${s.slowDrop ? ':s' : ''}`;
 /** The constellations a run is played to: the quota, except with no timer or in Freeplay, which loop. */
@@ -92,10 +94,18 @@ export class NavigationGame {
   finished = false;
   booched = false;
   /**
+   * Whether clearing a run of stars adds its points. In Dennav and Old Dennav only constellations
+   * score: a run clear scores nothing itself, though it still builds the chain that multiplies the
+   * next constellation. Private (not part of the replay state) so older replays keep their checks.
+   */
+  readonly #scoreRuns: boolean;
+  /**
    * `goal` is what this board must chart to end the run; a later board in a quota run gets what's left.
    * `opening` starts a Dennav board on its 1/2/1 constellation: every board but one dealt after a booch.
+   * `scoreRuns` defaults to the mode's rule; replays recorded before Dennav run clears stopped scoring pass true.
    */
-  constructor(readonly settings: NavigationSettings, readonly seed: number, readonly goal = runGoal(settings), opening = true) {
+  constructor(readonly settings: NavigationSettings, readonly seed: number, readonly goal = runGoal(settings), opening = true, scoreRuns = runsScore(settings.mode)) {
+    this.#scoreRuns = scoreRuns;
     const rings = isWerewolf(settings.mode) && settings.extraRing ? 4 : 3;
     this.board = settings.mode === 'ww-test' ? new NaviTestBoard(rings, settings.difficulty, seed, opening) : new NaviBoard(rings, settings.difficulty, seed, isWerewolf(settings.mode));
     this.wild = settings.mode === 'ww-test' ? new TestWildTargets(settings.wildTargets, rings) : new WildTargets(isWerewolf(settings.mode) && settings.wildTargets, rings);
@@ -170,7 +180,7 @@ export class NavigationGame {
       const clearScene = this.scene(500);
       const clears = this.board.clearRuns(runs, chain);
       this.wild.runs(runs, this.targets);
-      const points = clears.reduce((sum, c) => sum + c.points, 0);
+      const points = this.#scoreRuns ? clears.reduce((sum, c) => sum + c.points, 0) : 0;
       clearScene.clear = { kind: 'run', cells: clears.flatMap(c => c.cells), points, chain };
       clearScene.targets = this.targets.map(t => ({ ...t }));
       scenes.push(clearScene);
