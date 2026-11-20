@@ -736,7 +736,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     shown = positionOf(game);
     scenes = []; afterScenes = null; waiting = false; stepping = false; replaying = false; queued = []; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1;
     captionText = '';
-    status = `Build a ${donkeyWord()} on a fresh board. The first move that sets off a clear ends the board, and you’ll see what it charted and what to change. Ctrl starts a new board.`;
+    status = `Build a ${donkeyWord()} on a fresh board. The first move that sets off a double or longer chain ends the board (a single clear doesn’t), and you’ll see what it charted and what to change. Ctrl starts a new board.`;
   }
   function donkeyMove(action: Action): void {
     if (!game || donkeyBreak) return;
