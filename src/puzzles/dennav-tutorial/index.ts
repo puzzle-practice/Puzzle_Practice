@@ -826,7 +826,9 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     const broke = setsOff(o);
     if (broke) queued = [];
     stepping = false;
-    playScenes(list, captionsFor(o), () => {
+    // Only the break is described: a stray single while building plays out without a caption.
+    if (!broke) captionText = '';
+    playScenes(list, broke ? captionsFor(o) : new Map(), () => {
       shown = positionOf(g);
       if (broke) { endDonkey(before, action); return; }
       const nextMove = queued.shift();
