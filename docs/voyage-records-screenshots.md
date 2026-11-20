@@ -1,6 +1,6 @@
 # Screenshots to save for the Shipwide Records page
 
-Every linked record now has its screenshot saved in `public/voyage-records/screenshots/` (in `cursed-isles/` or `vampire-lairs/`), so the page no longer depends on imgur or gyazo. A new screenshot shows up on the page as soon as its file is there and the record's `screenshot` path in `src/voyage-records/sheet-records.json` points to it.
+Every linked record now has its screenshot saved in `public/voyage-records/screenshots/` (in `cursed-isles/` or `vampire-lairs/`), so the page no longer depends on imgur or gyazo. A new screenshot shows up on the page as soon as its file is there and the record's `screenshot` path in `src/voyage-records/records.json` points to it.
 
 ## Records with no screenshot on the sheet
 
@@ -33,7 +33,7 @@ gummy-2026-11-09/
 Then drag the folder onto `add-voyage-records.bat` (or run `npm run add-records -- path/to/folder`). It adds the records as before, and also:
 
 - copies each picture into `public/voyage-records/screenshots/<voyage>/sent/`, named for the ocean, crew size and the file's contents;
-- lists them for their record in the `screenshots` part of `src/voyage-records/sheet-records.json`, so they show up on Global records (videos play in the same viewer);
+- sets them on their record in `src/voyage-records/records.json` (`screenshot`, then `more`), so they show up on Global records (videos play in the same viewer);
 - takes a beaten record's old pictures off it, since they show the old record;
 - adds pictures to a record that's already on the table with none, when the file ties it, so pictures that arrive late can still go up;
 - puts everything in the same pull request, and prints any picture it didn't use and why.

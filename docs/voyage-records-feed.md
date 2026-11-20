@@ -4,7 +4,7 @@ Standing voyage records as JSON for bots and other sites. Vampire Lair records w
 
 **URL:** https://puzzle-practice.github.io/Puzzle_Practice/voyage-records.json
 
-The build writes it from `src/voyage-records/known-records.json` and `sheet-records.json` (code in `src/voyage-records/feed.ts`), so it changes whenever new records are merged and the site redeploys. `npm run dev` serves it too, at http://localhost:5173/voyage-records.json.
+The build writes it from `src/voyage-records/records.json` (code in `src/voyage-records/feed.ts`), so it changes whenever new records are merged and the site redeploys. `npm run dev` serves it too, at http://localhost:5173/voyage-records.json.
 
 ## Shape
 

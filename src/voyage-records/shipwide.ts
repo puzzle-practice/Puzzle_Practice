@@ -1,11 +1,11 @@
-// Shipwide records for the Records page: the crew-size records in known-records.json, plus every other
-// record category the two record sheets keep (fastest, most frays, and so on) from sheet-records.json.
+// Shipwide records for the Records page, all from records.json: the den records (best score and most tier 3
+// chests for each crew size), plus every other category (fastest, most frays, and so on).
 // Screenshots are copied into public/voyage-records/screenshots so the page keeps working if a host drops them.
-import sheet from './sheet-records.json';
+import { denKind, globalRecords, recordSources, recordsFetched, type GlobalRecord, type RecordSource } from './global-records';
 import { knownRecords, type KnownRecord } from './known-records';
 import type { ExpeditionId } from './records';
 
-/** A record that isn't a best score or most tier 3 chests for a crew size, as the sheets list it. */
+/** A record that isn't a best score or most tier 3 chests for a crew size, with its value as the page shows it. */
 export interface SheetRecord {
   voyage: ExpeditionId;
   ocean: string;
@@ -33,34 +33,34 @@ export interface SheetRecord {
   source?: string;
 }
 
-export interface SheetSource {
-  voyage: ExpeditionId;
-  name: string;
-  url: string;
-}
+export type SheetSource = RecordSource;
 
-interface SheetFile {
-  fetched?: string;
-  sources: SheetSource[];
-  records: SheetRecord[];
-  /** Screenshots the crew-size records in known-records.json point to, by record key. */
-  screenshots?: Record<string, { screenshot?: string; screenshotUrl?: string; more?: string[] }>;
-}
+type Shots = { screenshot?: string; screenshotUrl?: string; more?: string[] };
 
-const data = sheet as SheetFile;
+/** The records of every other category, in the order records.json lists them. */
+export const sheetRecords: SheetRecord[] = globalRecords
+  .filter((record) => !denKind(record))
+  .map(({ time: _time, loot: _loot, ...record }: GlobalRecord) => ({ ...record, value: String(record.value) }));
+export const sheetSources = recordSources;
+export const sheetFetched = recordsFetched;
 
-export const sheetSources = data.sources;
-export const sheetFetched = data.fetched ?? null;
-export const sheetRecords = data.records;
+/** The screenshots of each den record, by record key. */
+const denShots = new Map<string, Shots>(globalRecords.flatMap((record): [string, Shots][] => {
+  const kind = denKind(record);
+  if (!kind || (!record.screenshot && !record.screenshotUrl && !record.more)) return [];
+  const { screenshot, screenshotUrl, more } = record;
+  const shots = { ...(screenshot ? { screenshot } : {}), ...(screenshotUrl ? { screenshotUrl } : {}), ...(more ? { more } : {}) };
+  return [[recordKey({ voyage: record.voyage, ocean: record.ocean, crewSize: record.crewSize!, kind }), shots]];
+}));
 
-/** The key a crew-size record's screenshot is filed under in sheet-records.json. */
+/** A den record's key: voyage/ocean/crewSize/kind. The records feed uses it as the record's id. */
 export function recordKey(record: Pick<KnownRecord, 'voyage' | 'ocean' | 'crewSize' | 'kind'>): string {
   return `${record.voyage}/${record.ocean}/${record.crewSize}/${record.kind}`;
 }
 
 /** The screenshots filed for a crew-size record, if any. */
-export function screenshotsFor(record: Pick<KnownRecord, 'voyage' | 'ocean' | 'crewSize' | 'kind'>): { screenshot?: string; screenshotUrl?: string; more?: string[] } | undefined {
-  return data.screenshots?.[recordKey(record)];
+export function screenshotsFor(record: Pick<KnownRecord, 'voyage' | 'ocean' | 'crewSize' | 'kind'>): Shots | undefined {
+  return denShots.get(recordKey(record));
 }
 
 export interface CrewSizeRow {
@@ -75,7 +75,7 @@ export function crewSizeRows(voyage: ExpeditionId, ocean: string, records: Known
   for (const record of records) {
     if (record.voyage !== voyage || record.ocean !== ocean) continue;
     const row = rows.get(record.crewSize) ?? { crewSize: record.crewSize };
-    row[record.kind] = { ...record, ...data.screenshots?.[recordKey(record)] };
+    row[record.kind] = { ...record, ...screenshotsFor(record) };
     rows.set(record.crewSize, row);
   }
   return [...rows.values()].sort((a, b) => a.crewSize - b.crewSize);
@@ -99,22 +99,4 @@ export function oceansFor(voyage: ExpeditionId): string[] {
   for (const record of knownRecords) if (record.voyage === voyage) oceans.add(record.ocean);
   for (const record of sheetRecords) if (record.voyage === voyage) oceans.add(record.ocean);
   return [...oceans].sort();
-}
-
-/** Every problem with sheet-records.json, so a bad edit fails the tests. */
-export function sheetProblems(records: unknown[]): string[] {
-  const voyages: ExpeditionId[] = ['woodhallow', 'cursedIsles', 'vampireLairs'];
-  return records.flatMap((value, index) => {
-    const record = value as Partial<SheetRecord>;
-    const at = `Sheet record ${index + 1}`;
-    const problems: string[] = [];
-    if (!voyages.includes(record.voyage as ExpeditionId)) problems.push(`${at}: unknown voyage`);
-    if (typeof record.ocean !== 'string' || !record.ocean || record.ocean !== record.ocean.toLowerCase()) problems.push(`${at}: ocean must be a lower-case name`);
-    if (typeof record.category !== 'string' || !record.category) problems.push(`${at}: category is missing`);
-    if (typeof record.value !== 'string') problems.push(`${at}: value must be text`);
-    if (record.crewSize !== undefined && (!Number.isInteger(record.crewSize) || record.crewSize < 1)) problems.push(`${at}: crewSize must be a whole number`);
-    if (record.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(record.date)) problems.push(`${at}: date must be YYYY-MM-DD`);
-    if (record.screenshot !== undefined && !/^voyage-records\/screenshots\/[\w./-]+$/.test(record.screenshot)) problems.push(`${at}: screenshot must be under voyage-records/screenshots/`);
-    return problems;
-  });
 }
