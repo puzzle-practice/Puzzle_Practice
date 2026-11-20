@@ -1164,7 +1164,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     .button('Next', next, { disabled: () => !waiting });
   learn.append(rowBreak());
   learn.button('Show board', () => showExample(example, exampleLabel), { disabled: busy, title: 'Back to the board before the move' })
-    .button('Session board', nextMoment, { disabled: busy, title: 'The next board from your replays' })
+    .button('Next example board', nextMoment, { disabled: busy, title: 'The next of this lesson’s example boards' })
     .button('New example', newExample, { disabled: busy, title: 'The same strategy in new colours and target layouts' });
   learn.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); })
     .toggle('Ring the chain stars', () => ringChain, (on) => { ringChain = on; store.set('ringChain', on); if (!busy()) showExample(example, exampleLabel); }, { title: 'Before the move, ring the stars its clears will use' });
@@ -1175,7 +1175,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     .button('Play move', playSteps, { disabled: () => busy() || !stepEx || (stepAt !== 0 && stepAt !== 3) });
   steps.append(rowBreak());
   steps.button('Show board', () => showStep(stepAt), { disabled: () => busy() || !stepEx, title: 'Back to this step’s board' })
-    .button('Session board', () => { momentIndex = (momentIndex + 1) % lesson().moments.length; newSteps(true); }, { disabled: () => busy() || !hasSteps(), title: 'The next board from your replays' })
+    .button('Next example board', () => { momentIndex = (momentIndex + 1) % lesson().moments.length; newSteps(true); }, { disabled: () => busy() || !hasSteps(), title: 'The next of this lesson’s example boards' })
     .button('New example', () => newSteps(), { disabled: () => busy() || !hasSteps(), title: 'The same strategy in new colours and target layouts' });
   steps.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
@@ -1276,7 +1276,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
 
   const spot = panel.group('Spot the mistake', { hidden: () => mode !== 'spot' });
   spot.button('New board', () => newMistake(), { variant: 'primary', disabled: busy })
-    .button('Your vegas board', () => newMistake(true), { disabled: busy, hidden: () => lesson().id !== 'vegas', title: 'Session 3: the board that charted a donkey' });
+    .button('Vegas one link short', () => newMistake(true), { disabled: busy, hidden: () => lesson().id !== 'vegas', title: 'The vegas example with one star changed, so it charts a donkey: find that star' });
   spot.append(rowBreak());
   spot.button('Watch it go wrong', () => watchMistake(false), { disabled: () => busy() || !mistake })
     .button('Watch it fixed', () => watchMistake(true), { disabled: () => busy() || !mistake || !found });

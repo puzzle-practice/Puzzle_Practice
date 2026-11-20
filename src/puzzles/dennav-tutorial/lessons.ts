@@ -47,13 +47,13 @@ export const LESSONS: Lesson[] = [
     accepts: (o) => o.charted === 1 && !before(o).length && o.links.some((l) => l.afterChart && horizontalIn(l, INNER)) && o.nextInnerWild,
     success: 'Charted as a single, and the ring 1 cascade straight after left the next inner ring wild.',
     moments: [
-      moment('Session 1 at 7:17', 'N4:.........2.10....324131222100313:32*,34*,36*,202,272,121,33*:42', rotate(1, true)),
-      moment('Session 1 at 5:24', 'N4:.........13.....00442..101101011:30*,31*,32*,200,23*,113,33*:21', rotate(1, true)),
-      moment('Session 1 at 7:39', 'N4:.........4.......400120342312004:33*,31*,32*,241,273,124:30', rotate(1, false)),
-      moment('Session 1 at 7:56', 'N4:.............0..40.3223102423310:35*,31*,32*,263,27*,140:10', rotate(1, true)),
-      moment('Session 1 at 8:12', 'N4:.........2.....00102423413232134:35*,37*,33*,220,20*,100:31', rotate(1, false)),
-      moment('Session 1 at 8:23', 'N4:............0...4...123.32143341:32*,36*,33*,24*,204,150:34', rotate(1, false)),
-      moment('Session 1 at 8:41', 'N4:..........1.....22031.4032113244:34*,31*,30*,270,202,111:21', rotate(1, true)),
+      moment('Example 1', 'N4:.........2.10....324131222100313:32*,34*,36*,202,272,121,33*:42', rotate(1, true)),
+      moment('Example 2', 'N4:.........13.....00442..101101011:30*,31*,32*,200,23*,113,33*:21', rotate(1, true)),
+      moment('Example 3', 'N4:.........4.......400120342312004:33*,31*,32*,241,273,124:30', rotate(1, false)),
+      moment('Example 4', 'N4:.............0..40.3223102423310:35*,31*,32*,263,27*,140:10', rotate(1, true)),
+      moment('Example 5', 'N4:.........2.....00102423413232134:35*,37*,33*,220,20*,100:31', rotate(1, false)),
+      moment('Example 6', 'N4:............0...4...123.32143341:32*,36*,33*,24*,204,150:34', rotate(1, false)),
+      moment('Example 7', 'N4:..........1.....22031.4032113244:34*,31*,30*,270,202,111:21', rotate(1, true)),
     ],
   },
   {
@@ -73,9 +73,9 @@ export const LESSONS: Lesson[] = [
     accepts: (o) => o.charted === 2 && before(o).length === 1 && horizontalIn(before(o)[0], TOP) && !first(o)!.scene.targets.some((t) => t.ring === TOP && t.wild),
     success: 'Ring 3 cleared through the target and the right colour dropped in: a double.',
     moments: [
-      moment('Session 1 at 6:40', 'N4:.301.....33220144011342021144112:31*,30*,36*,270,210,121:44', rotate(0, true)),
-      moment('Session 1 at 6:53', 'N4:.20......224....4041134140144122:30*,35*,32*,231,204,110:26', rotate(0, true)),
-      moment('Session 1 at 5:00', 'N4:...420..11.441440132100333032211:30*,31*,32*,273,241,142,33*:35', rotate(1, false)),
+      moment('Example 1', 'N4:.301.....33220144011342021144112:31*,30*,36*,270,210,121:44', rotate(0, true)),
+      moment('Example 2', 'N4:.20......224....4041134140144122:30*,35*,32*,231,204,110:26', rotate(0, true)),
+      moment('Example 3', 'N4:...420..11.441440132100333032211:30*,31*,32*,273,241,142,33*:35', rotate(1, false)),
     ],
   },
   {
@@ -95,7 +95,7 @@ export const LESSONS: Lesson[] = [
     accepts: (o) => o.charted === 3 && before(o).length === 2 && horizontalIn(before(o)[1], TOP) && before(o)[1].wilded.some((t) => t.ring === TOP),
     success: 'The second clear was in ring 3 beside the target, so it went wild and charted as a triple.',
     moments: [
-      moment('Built example', 'N4:.0.1.....001143.2323424341340310:30*,33*,36*,213,264,152:26', rotate(0, true)),
+      moment('Example 1', 'N4:.0.1.....001143.2323424341340310:30*,33*,36*,213,264,152:26', rotate(0, true)),
     ],
   },
   {
@@ -115,8 +115,8 @@ export const LESSONS: Lesson[] = [
     accepts: (o) => o.charted === 3 && before(o).length === 2 && verticalThroughInner(before(o)[0]) && horizontalIn(before(o)[1], INNER) && before(o)[1].wilded.length > 0,
     success: 'Vertical through rings 1–3, the ring 4 star dropped into ring 1 for a horizontal clear, and the targets beside it went wild: a triple.',
     moments: [
-      moment('Session 1 at 0:34', 'N4:104...34022012141033041222404133:300,223,271,122:37', rotate(3, false)),
-      moment('Session 1 at 2:58', 'N4:2.......20403.144430321141230422:370,322,311,243,223,120:10', rotate(1, false)),
+      moment('Example 1', 'N4:104...34022012141033041222404133:300,223,271,122:37', rotate(3, false)),
+      moment('Example 2', 'N4:2.......20403.144430321141230422:370,322,311,243,223,120:10', rotate(1, false)),
     ],
   },
   {
@@ -136,7 +136,7 @@ export const LESSONS: Lesson[] = [
     accepts: (o) => o.charted === 3 && before(o).length === 2 && horizontalIn(before(o)[0], TOP) && verticalThroughInner(before(o)[1]) && before(o)[1].wilded.length > 0,
     success: 'The ring 3 clear dropped a star into a vertical through rings 1–3, and the targets around it went wild: a triple.',
     moments: [
-      moment('Session 1 at 4:08', 'N4:143.....113202..0404200324030411:32*,34*,35*,234,242,120,33*:05', rotate(1, false)),
+      moment('Example 1', 'N4:143.....113202..0404200324030411:32*,34*,35*,234,242,120,33*:05', rotate(1, false)),
     ],
   },
   {
@@ -163,7 +163,7 @@ export const LESSONS: Lesson[] = [
       // Ring 2's 0 and 2 sit one apart over ring 1's 2 and 3. Turning ring 2 clockwise stacks 0 over 0 over
       // the ring 3 0: the vertical drops a 1 into ring 1, then the 1s, 4s and 3s clear round the ring in
       // turn and it charts at link 5. The 2 only clears after charting, leaving the next ring 1 wild.
-      moment('Built example', 'N4:.1.1.410103420314301203210233441:373,340,363,251,233,131:00', rotate(2, true)),
+      moment('Example 1', 'N4:.1.1.410103420314301203210233441:373,340,363,251,233,131:00', rotate(2, true)),
     ],
   },
   {
@@ -171,8 +171,8 @@ export const LESSONS: Lesson[] = [
     title: 'Vegas',
     intro: [
       'A vegas is the donkey idea taken one link further: the constellation has to wait until the sixth link to chart.',
-      'That means no target may complete early. In your session 3 board, the ring 2 star that turns into the orange target was orange, so that target was filled correctly before the chain began. The constellation charted at link 5 as a donkey, and the yellow ring 1 clear came after it.',
-      'Make that star any other colour and the target is filled wrong. It only turns wild when the yellow clear goes off next to it, so the constellation charts at link 6: a vegas.',
+      'That means no target may complete early. In the example board, suppose the ring 2 star that turns into the orange target were orange: that target would be filled correctly before the chain began, so the constellation would chart at link 5 as a donkey, with the yellow ring 1 clear coming after it.',
+      'Make that star any other colour, as the example does, and the target is filled wrong. It only turns wild when the yellow clear goes off next to it, so the constellation charts at link 6: a vegas.',
     ],
     goal: 'Like the donkey, but make sure no target completes before the sixth link: every target is filled wrong or waits to go wild.',
     lookFor: [
@@ -183,10 +183,10 @@ export const LESSONS: Lesson[] = [
     accepts: (o) => (o.charted ?? 0) >= 6,
     success: 'Six links before charting: a vegas.',
     moments: [
-      moment('Session 3 at 1:11, fixed', 'N4:..34...1100203243042114244033221:353,272,201,134:26', rotate(2, false)),
+      moment('Example 1', 'N4:..34...1100203243042114244033221:353,272,201,134:26', rotate(2, false)),
     ],
   },
 ];
 
-/** Your session 3 board as played: the orange target was filled correctly, so it charted a link early. */
-export const VEGAS_AS_PLAYED = moment('Session 3 at 1:11, as played', 'N4:..34...1100203243042114144033221:353,272,201,134:26', rotate(2, false));
+/** The vegas example with the orange target filled correctly, so it charts a link early, as a donkey. */
+export const VEGAS_AS_PLAYED = moment('Vegas example, one link short', 'N4:..34...1100203243042114144033221:353,272,201,134:26', rotate(2, false));
