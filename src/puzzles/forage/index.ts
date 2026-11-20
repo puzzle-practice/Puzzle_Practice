@@ -118,6 +118,13 @@ const RATING_SCALES: RatingScale[] = [
   { id: 'gauntletPoints', label: 'Gauntlet and Chaos, points', cutoffs: [3, 6, 9, 12, 15, 20, 25, 30, 35, 40], gauntlet: true },
 ];
 
+/** The Den modes play five minutes unless another time limit is chosen. */
+const DEN_SECONDS = 300;
+/** The Den modes' time limits: 2 minutes, 5 minutes or no timer. */
+const DEN_TIMERS: Option<number>[] = [{ value: 120, label: '2 minutes' }, { value: 300, label: '5 minutes' }, { value: 0, label: 'No timer' }];
+/** The other timed modes' time limits. */
+const TIMERS: Option<number>[] = [{ value: 0, label: 'No timer' }, { value: 30, label: '30 seconds' }, { value: 120, label: '2 minutes' }, { value: 300, label: '5 minutes' }];
+
 /** Den's Maximum moons setting goes up to five. */
 const MAX_MOONS = 5;
 
@@ -270,8 +277,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * 7 restores the one-second chest delay, keeping the overlapping click requirement.
    * 8: moons no longer keep incoming crates off their cells.
    * 9: ant bites no longer charge moons in Den (Exp).
+   * 10: a timed session ends as its time runs out, even while a board flies in or out; a move
+   * already under way still plays out first.
    */
-  const RULES = 9;
+  const RULES = 10;
   let rules = RULES;
   const moonLimit = (): number => rules < 6 ? 2 : settings.maxMoons ?? 1;
   let sessionSeed: ForageReplaySeed | null = null;
@@ -300,13 +309,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       (settings.ants ? 'ants' : '');
     // Preserve existing scores for the original Gauntlet and Normal round lengths.
     const original = normalMode() ? 0 : 120;
-    if (den()) return `${base}:${den() === 'exp' ? 'den-exp' : 'den'}${moonLimit() === 1 ? '' : `:moons:${moonLimit()}`}`;
+    // Den's five-minute timer keeps its existing scores; 2 minutes and no timer score apart.
+    if (den()) return `${base}:${den() === 'exp' ? 'den-exp' : 'den'}${moonLimit() === 1 ? '' : `:moons:${moonLimit()}`}${roundSeconds() === DEN_SECONDS ? '' : `:timer:${roundSeconds()}`}`;
     return base + (roundSeconds() === original ? '' : `:timer:${roundSeconds()}`) +
       (settings.mode === 'ci' && settings.werewolfArt ? ':werewolf-art' : '') +
       (settings.mode === 'ci' && settings.moons ? `:moons${moonLimit() === 1 ? ':1' : ''}` : '');
   };
 
-  const roundSeconds = () => settings.mode === 'create' ? 0 : den() ? 300 : settings.roundSeconds ?? (settings.mode === 'ci' ? 120 : 0);
+  const roundSeconds = () => settings.mode === 'create' ? 0 : den() ? settings.denSeconds ?? DEN_SECONDS : settings.roundSeconds ?? (settings.mode === 'ci' ? 120 : 0);
   const roundDuration = () => roundSeconds() * 1000;
 
   /** Where this game's history is kept: per settings for CI and Normal, per puzzle (unscrambled) for Puzzle. */
@@ -497,6 +507,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         : { score: final, clockwise, anticlockwise, ...duty.fields(report), ...(finishedReplay ? { replayAt: finishedReplay.at, replayId: finishedReplay.runId ?? '' } : {}) });
     }
     if (store.scoresEnabled && !replay && !unrated()) bestScore = Math.max(bestScore ?? 0, final);
+    // Time ran out while the last board was already flying off: let it finish.
+    if (flight?.out) return;
     // A full meter is "Great work!" in the game, and the pieces fly off a second later. Its text is the 42px level-up size (16 of 32 points).
     if (normalMode() && boardDone()) {
       timed.push({ effect: { kind: 'text', text: 'Great work!', size: 16, delay: 0 }, start: clock() });
@@ -817,7 +829,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   };
 
   panel.clock(() => {
-    if (!isPuzzle() && roundSeconds() > 0) return { label: 'Time left', ms: roundDuration() - timePassed, countdown: true, warn: boardActive && roundDuration() - timePassed < 10000 };
+    if (!isPuzzle() && roundSeconds() > 0) return { label: 'Time left', ms: Math.max(0, roundDuration() - timePassed), countdown: true, warn: boardActive && roundDuration() - timePassed < 10000 };
     const puzzleBest = isPuzzle() && !settings.scramble && record;
     return { label: 'Time', ms: timePassed, best: puzzleBest ? record!.time : null };
   });
@@ -992,6 +1004,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         (s.den === undefined || s.den === 'den' || s.den === 'exp') &&
         ratios(s.normalRatios) && (s.chestRatios === undefined || ratios(s.chestRatios)) &&
         (s.roundSeconds === undefined || (Number.isFinite(s.roundSeconds) && (s.roundSeconds as number) >= 0)) &&
+        (s.denSeconds === undefined || DEN_TIMERS.some((t) => t.value === s.denSeconds)) &&
         typeof s.puzzleId === 'string' && (s.puzzleId === '0' || s.puzzleId in PUZZLES) &&
         typeof s.pickedRandomly === 'boolean' ? value : null;
     },
@@ -1036,7 +1049,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     settledAt, playing.length, pendingNextBoard, ended, boardActive, JSON.stringify(rng.snapshot())].join('|');
 
   const setup = panel.settings.group('Game');
-  setup.select('Timer', [0, 30, 120, 300].map((value) => ({ value, label: value ? `${value} seconds` : 'No timer' })), roundSeconds, (value) => { settings.roundSeconds = value; saveSettings(); }, { hidden: () => isPuzzle() || !!den() });
+  setup.select('Timer', () => (den() ? DEN_TIMERS : TIMERS), roundSeconds, (value) => {
+    if (den()) settings.denSeconds = value;
+    else settings.roundSeconds = value;
+    saveSettings();
+  }, { hidden: () => isPuzzle() || settings.mode === 'create', title: 'How long a session lasts; No timer plays until Stop' });
   bind(setup, 'Scramble', 'scramble', () => !isPuzzle());
 
   const crateGroup = panel.settings.group('Crates');
@@ -1088,6 +1105,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   panel.settings.group('Reset').button('Reset to defaults', () => {
     Object.assign(settings, structuredClone(DEFAULT_SETTINGS));
     delete settings.roundSeconds;
+    delete settings.denSeconds;
     saveSettings();
     puzzleId = '0';
     pickedRandomly = false;
@@ -1481,9 +1499,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (!boardActive) return;
     timePassed = Math.max(0, now - startTime);
     if (now >= startTime) warning.update(!isPuzzle() && roundSeconds() > 0 ? roundDuration() - timePassed : null);
-    if (playing.length || flight || now < settledAt) return;
-    // Time's up once the last move has played out; the board stays in view a moment before the results.
-    if (!isPuzzle() && roundSeconds() > 0 && timePassed >= roundDuration()) { finishScored(); hold.start(); }
+    const timeUp = !isPuzzle() && roundSeconds() > 0 && timePassed >= roundDuration();
+    // Time's up once the last move has played out, without waiting for a board flying in or out
+    // (older rules waited); the board stays in view a moment before the results.
+    if (playing.length || now < settledAt || (flight && !(timeUp && rules >= 10))) return;
+    if (timeUp) { finishScored(); hold.start(); }
     else if (pendingNextBoard) newBoard();
     else if (isPuzzle() && game.crateCount() === 0) { finishPuzzle(); outro(); }
     else if (normalMode() && boardDone()) finishScored();

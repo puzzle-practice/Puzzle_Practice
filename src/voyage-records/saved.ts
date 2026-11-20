@@ -3,6 +3,7 @@
 // Chrome and Edge can keep one in IndexedDB and reopen it, once the player allows it.
 import { openHandleDb } from '../core/data-backups';
 import { Store } from '../core/storage';
+import type { IgnoredRun } from './run-preferences';
 
 export interface LogHandle extends FileSystemFileHandle {
   queryPermission(options: { mode: 'read' }): Promise<PermissionState>;
@@ -22,6 +23,23 @@ export function loadIgnored(): string[] {
 
 export function saveIgnored(names: string[]): void {
   store.set('ignored', names);
+}
+
+export function loadIgnoredRuns(): IgnoredRun[] {
+  const saved = store.get<IgnoredRun[]>('ignored-runs', []);
+  return Array.isArray(saved) ? saved.filter((run) => run && typeof run.id === 'string' && typeof run.expedition === 'string') : [];
+}
+
+export function saveIgnoredRuns(runs: IgnoredRun[]): boolean {
+  return store.set('ignored-runs', runs);
+}
+
+export function loadDebugMode(): boolean {
+  return store.get<boolean>('debug-mode', false) === true;
+}
+
+export function saveDebugMode(enabled: boolean): void {
+  store.set('debug-mode', enabled);
 }
 
 export function canRememberLogs(): boolean {

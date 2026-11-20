@@ -1,7 +1,9 @@
 // The current shipwide records: the best any crew has managed, kept in known-records.json.
 // On the Voyage Records page, a player's voyage that ties one is yellow and one that beats it is red.
 import table from './known-records.json';
-import { recordsByCrewSize, type ExpeditionId, type Run } from './records';
+import { byName, recordsByCrewSize, type ExpeditionId, type Run } from './records';
+import { hasIgnoredPirate } from './ignored-pirates';
+import reviewedRuns from './excluded-runs.json';
 
 export interface KnownRecord {
   voyage: ExpeditionId;
@@ -50,6 +52,20 @@ export function tableProblems(records: unknown[]): string[] {
 
 export const knownRecords = table.records as KnownRecord[];
 
+// Reviewed runs that can stay in personal history but are ineligible for global records.
+const excludedRuns = reviewedRuns;
+
+export function isExcludedRun(run: Run): boolean {
+  if (hasIgnoredPirate(run.players)) return true;
+  const { startedAt } = run;
+  return startedAt !== null && excludedRuns.some((excluded) =>
+    run.expedition === excluded.expedition && run.ocean === excluded.ocean && run.crewSize === excluded.crewSize &&
+    run.loot.every((amount, index) => amount === excluded.loot[index]) &&
+    new Date(startedAt).toISOString().slice(0, 10) === excluded.date &&
+    run.players.length === excluded.players.length &&
+    excluded.players.every((pirate) => run.players.some((player) => player.toLowerCase() === pirate.toLowerCase())));
+}
+
 export function recordFor(run: Run, kind: KnownRecord['kind'], records: KnownRecord[] = knownRecords): KnownRecord | undefined {
   return records.find((record) =>
     record.kind === kind && record.voyage === run.expedition && record.ocean === run.ocean && record.crewSize === run.crewSize);
@@ -62,13 +78,10 @@ export function recordFor(run: Run, kind: KnownRecord['kind'], records: KnownRec
 export function againstRecords(runs: Iterable<Run>, records: KnownRecord[] = knownRecords): Map<Run, AgainstRecord> {
   const results = new Map<Run, AgainstRecord>();
   for (const run of runs) {
-    const standing = (kind: KnownRecord['kind']): Standing | null => {
-      const record = recordFor(run, kind, records);
-      if (!record) return null;
-      const value = kind === 'score' ? run.score : run.loot[0];
-      return value > record.value ? 'beat' : value === record.value ? 'tie' : null;
+    const result = {
+      score: standingFor(run, 'score', records),
+      chests: standingFor(run, 'chests', records),
     };
-    const result = { score: standing('score'), chests: standing('chests') };
     if (result.score || result.chests) results.set(run, result);
   }
   return results;
@@ -90,10 +103,10 @@ export interface RecordsExport {
   records: ExportedRecord[];
 }
 
-/** The player's best score and most tier 3 chests for each voyage, ocean and crew size. */
+/** The player's best eligible score and most tier 3 chests for each voyage, ocean and crew size. */
 export function exportRecords(runs: Run[], logs: string[], now = new Date(), records: KnownRecord[] = knownRecords): RecordsExport {
   const exported: ExportedRecord[] = [];
-  for (const group of recordsByCrewSize(runs)) {
+  for (const group of recordsByCrewSize(runs.filter((run) => !isExcludedRun(run)))) {
     if (group.ocean === null) continue;
     for (const kind of ['score', 'chests'] as const) {
       const run = kind === 'score' ? group.maxScore : group.maxChests;
@@ -120,6 +133,7 @@ export function exportRecords(runs: Run[], logs: string[], now = new Date(), rec
 
 /** How one voyage stands against the record for its crew size: tie, beat, or neither. */
 export function standingFor(run: Run, kind: KnownRecord['kind'], records: KnownRecord[] = knownRecords): Standing | null {
+  if (isExcludedRun(run)) return null;
   const record = recordFor(run, kind, records);
   if (!record) return null;
   const value = kind === 'score' ? run.score : run.loot[0];
@@ -137,7 +151,7 @@ export const MAX_SENT_CREW: Record<ExpeditionId, number> = { woodhallow: 12, cur
  * crews bigger than MAX_SENT_CREW aren't asked for, so neither is sent.
  */
 export function claimedRecords(exported: RecordsExport): ExportedRecord[] {
-  return exported.records.filter((record) => record.standing === 'beat' && record.crewSize <= MAX_SENT_CREW[record.voyage]);
+  return exported.records.filter((record) => !hasIgnoredPirate(record.pirates) && record.standing === 'beat' && record.crewSize <= MAX_SENT_CREW[record.voyage]);
 }
 
 /**
@@ -153,14 +167,12 @@ export function recordsMessage(exported: RecordsExport, records: KnownRecord[] =
     const what = record.kind === 'score' ? 'best score' : `most ${TOP_CHESTS[record.voyage]}`;
     const ocean = `${record.ocean[0].toUpperCase()}${record.ocean.slice(1)}`;
     const verb = `beats ${standing?.value ?? '?'}`;
-    return `${index + 1}. ${VOYAGE_NAMES[record.voyage]} (${ocean}), ${record.crewSize} pirates, ${what}: ${record.value} (${verb}) on ${record.time ?? record.date ?? 'an unknown date'}. Loot ${record.loot.join('/')}. Crew: ${record.pirates?.join(', ') || 'not in the log'}`;
+    return `${index + 1}. ${VOYAGE_NAMES[record.voyage]} (${ocean}), ${record.crewSize} pirates, ${what}: ${record.value} (${verb}) on ${record.time ?? record.date ?? 'an unknown date'}. Loot ${record.loot.join('/')}. Crew: ${byName(record.pirates ?? []).join(', ') || 'not in the log'}`;
   });
   const data = claimed.map(({ voyage, ocean, crewSize, kind, value, date, time, pirates, loot }) => ({ voyage, ocean, crewSize, kind, value, date, time, pirates, loot }));
   return [
     `Hi Jice, I've beaten ${claimed.length === 1 ? 'a voyage record' : `${claimed.length} voyage records`} on Puzzle Practice:`,
     ...lines,
-    '',
-    `I'll send a picture, image or video of ${claimed.length === 1 ? 'it' : 'each one'}, numbered as above.`,
     '',
     'Data for the records table:',
     JSON.stringify(data),

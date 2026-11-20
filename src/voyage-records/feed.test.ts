@@ -1,0 +1,87 @@
+import { describe, expect, it } from 'vitest';
+import { FEED_VERSION, recordsFeed } from './feed';
+import { knownRecords } from './known-records';
+import { sheetRecords } from './shipwide';
+
+describe('records feed', () => {
+  const feed = recordsFeed({ now: new Date('2026-11-13T12:00:00Z') });
+
+  it('holds the published records from both tables', () => {
+    expect(feed.version).toBe(FEED_VERSION);
+    expect(feed.generated).toBe('2026-11-13T12:00:00.000Z');
+    for (const [published, source] of [[feed.crewSizeRecords, knownRecords], [feed.otherRecords, sheetRecords]] as const) {
+      const oversizedLairCrews = source.filter((record) => record.voyage === 'vampireLairs' && (record.crewSize ?? 0) > 12);
+      expect(published).toHaveLength(source.length - oversizedLairCrews.length);
+    }
+    expect(feed.voyages.map((voyage) => voyage.id)).toEqual(['woodhallow', 'cursedIsles', 'vampireLairs']);
+  });
+
+  it('publishes Vampire Lair crew sizes 1–12 and categories without a crew size', () => {
+    const lair = { voyage: 'vampireLairs' as const, ocean: 'emerald' };
+    const { crewSizeRecords, otherRecords } = recordsFeed({
+      known: [
+        ...[0, 1, 12, 13, 159].map((crewSize) => ({ ...lair, crewSize, kind: 'score' as const, value: 30 })),
+        { voyage: 'woodhallow', ocean: 'emerald', crewSize: 13, kind: 'score', value: 30 },
+      ],
+      other: [
+        ...[12, 13].map((crewSize) => ({ ...lair, crewSize, category: 'Fastest', value: '20:00' })),
+        { ...lair, category: 'Most vampire proof', value: '12' },
+        { voyage: 'cursedIsles', ocean: 'emerald', crewSize: 13, category: 'Fastest', value: '20:00' },
+      ],
+    });
+
+    expect(crewSizeRecords.map((record) => record.id)).toEqual([
+      'woodhallow/emerald/13/score',
+      'vampireLairs/emerald/1/score',
+      'vampireLairs/emerald/12/score',
+    ]);
+    expect(otherRecords.map((record) => record.id)).toEqual([
+      'vampireLairs/emerald/fastest/12',
+      'vampireLairs/emerald/most-vampire-proof/any',
+      'cursedIsles/emerald/fastest/13',
+    ]);
+  });
+
+  it('gives every record its own id', () => {
+    const ids = [...feed.crewSizeRecords, ...feed.otherRecords].map((record) => record.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('writes crew-size records in a steady, readable shape', () => {
+    const feed = recordsFeed({
+      other: [],
+      known: [
+        { voyage: 'vampireLairs', ocean: 'emerald', crewSize: 2, kind: 'score', value: 30 },
+        { voyage: 'woodhallow', ocean: 'emerald', crewSize: 3, kind: 'chests', value: 67, date: '2026-10-29', pirates: ['Jice'], source: 'chatlog' },
+      ],
+    });
+    expect(feed.crewSizeRecords.map((record) => record.voyage)).toEqual(['woodhallow', 'vampireLairs']);
+    expect(feed.crewSizeRecords[0]).toMatchObject({
+      id: 'woodhallow/emerald/3/chests', label: 'Most dire chests', value: 67, date: '2026-10-29', pirates: ['Jice'], source: 'chatlog',
+    });
+    expect(feed.crewSizeRecords[1]).toMatchObject({ label: 'Best score', date: null, pirates: [], source: null });
+  });
+
+  it('numbers repeated categories so ids stay unique', () => {
+    const tie = { voyage: 'cursedIsles' as const, ocean: 'emerald', category: 'Most frays in one entry', crewSize: 1, value: '37 frays' };
+    const feed = recordsFeed({ known: [], other: [tie, { ...tie, pirates: ['Rock'], screenshot: 'voyage-records/screenshots/a.png', more: ['voyage-records/screenshots/b.png'] }] });
+    expect(feed.otherRecords.map((record) => record.id)).toEqual([
+      'cursedIsles/emerald/most-frays-in-one-entry/1',
+      'cursedIsles/emerald/most-frays-in-one-entry/1/2',
+    ]);
+    expect(feed.otherRecords[1].screenshots).toEqual(['voyage-records/screenshots/a.png', 'voyage-records/screenshots/b.png']);
+  });
+
+  it("lists the Woodhallow duty report records by crew size, with each forager's share", () => {
+    const record = feed.otherRecords.find((entry) => entry.id === 'woodhallow/emerald/most-dire-chests-in-one-dr/7');
+    expect(record).toMatchObject({ category: 'Most dire chests in one DR', crewSize: 7 });
+    expect(record!.pirateScores!.reduce((sum, share) => sum + share, 0)).toBe(Number(record!.value));
+    expect(feed.otherRecords.some((entry) => entry.id === 'woodhallow/emerald/best-forage-score-in-one-dr/7')).toBe(true);
+  });
+
+  it('keeps screenshot paths relative to the site root, where the feed sits', () => {
+    for (const record of [...feed.crewSizeRecords, ...feed.otherRecords]) {
+      for (const shot of record.screenshots) expect(shot).toMatch(/^voyage-records\/screenshots\//);
+    }
+  });
+});

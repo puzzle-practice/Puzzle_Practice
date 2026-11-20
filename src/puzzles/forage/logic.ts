@@ -56,6 +56,8 @@ export interface Settings {
   normalRatios: [number, number, number];
   /** Session timer in seconds; zero plays until stopped. Optional for older replays. */
   roundSeconds?: number;
+  /** The Den modes' timer in seconds: 120, 300 or zero for no timer. Den replays saved without it played five minutes. */
+  denSeconds?: number;
   /** Override the level's mix in Gauntlet and Chaos. */
   chestRatios?: [number, number, number];
   /**

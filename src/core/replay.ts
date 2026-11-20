@@ -273,6 +273,8 @@ export interface ReplaySettingsCodec {
   currentVersion: number;
   simulatorVersion?: number;
   migrate(version: number, settings: unknown): unknown | null;
+  /** The settings a game taken over from a replay goes on with, when they differ from the replay's. */
+  takeOver?(settings: unknown): unknown;
 }
 
 const DEFAULT_SETTINGS_CODEC: ReplaySettingsCodec = {
@@ -626,8 +628,9 @@ export class ReplayRecorder {
     const p = this.playback;
     if (!p || this.loading || this.seeking || this.advancing || p.finishPending || this.disposed) return false;
     const tape = p.tape;
-    const settings = this.migratedSettings(tape);
-    if (settings === null) return false;
+    const migrated = this.migratedSettings(tape);
+    if (migrated === null) return false;
+    const settings = this.settingsCodec.takeOver?.(migrated) ?? migrated;
     // Everything the replay has applied so far: the last frame and step it ran.
     const lastStep = p.step > 0 ? (tape.steps?.[p.step - 1] ?? 0) : 0;
     const ranTo = Math.max(lastStep, p.frame > 0 ? tape.frames[p.frame - 1].t : 0);

@@ -29,6 +29,8 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ignoredPirates = new Set(JSON.parse(readFileSync(join(ROOT, 'src', 'voyage-records', 'ignored-pirates.json'), 'utf8')).map((name) => name.toLowerCase()));
+const excludedRuns = JSON.parse(readFileSync(join(ROOT, 'src', 'voyage-records', 'excluded-runs.json'), 'utf8'));
 export const TABLE = join(ROOT, 'src', 'voyage-records', 'known-records.json');
 /** Where the Global records page looks up each crew-size record's screenshots (its "screenshots" part). */
 export const SHEET = join(ROOT, 'src', 'voyage-records', 'sheet-records.json');
@@ -67,6 +69,10 @@ export function readSubmission(text) {
   return records;
 }
 
+function hasIgnoredCrew(record) {
+  return Array.isArray(record?.pirates) && record.pirates.some((pirate) => ignoredPirates.has(String(pirate).trim().toLowerCase()));
+}
+
 /** Why a submitted record can't go in the table, or null when it's fine. */
 export function recordProblem(record) {
   if (!record || typeof record !== 'object') return 'not a record';
@@ -77,6 +83,11 @@ export function recordProblem(record) {
   if (record.kind !== 'score' && record.kind !== 'chests') return `unknown kind "${record.kind}"`;
   if (!Number.isInteger(record.value) || record.value < 0) return 'value is not a whole number';
   if (record.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(record.date)) return 'date is not YYYY-MM-DD';
+  if (hasIgnoredCrew(record)) return 'record is not eligible';
+  if (excludedRuns.some((run) => record.voyage === run.expedition && record.ocean === run.ocean && record.crewSize === run.crewSize &&
+    (record.date ?? record.time?.slice(0, 10)) === run.date && Array.isArray(record.loot) && record.loot.length === run.loot.length &&
+    record.loot.every((amount, index) => amount === run.loot[index]) && Array.isArray(record.pirates) && record.pirates.length === run.players.length &&
+    run.players.every((pirate) => record.pirates.some((name) => String(name).toLowerCase() === pirate.toLowerCase())))) return 'this reviewed voyage is excluded from global records';
   return null;
 }
 
@@ -107,7 +118,7 @@ export function mergeRecords(table, submitted, source) {
   for (const [number, record] of submitted.map((sent, index) => [index + 1, sent])) {
     const problem = recordProblem(record);
     if (problem) {
-      results.push({ number, outcome: 'skipped', text: `Skipped a record: ${problem}` });
+      results.push({ number, outcome: 'skipped', text: hasIgnoredCrew(record) ? '' : `Skipped a record: ${problem}` });
       continue;
     }
     const index = records.findIndex((known) => key(known) === key(record));
@@ -437,7 +448,7 @@ async function main(args) {
     // Each record already lists its own crew, so the source only says when and in which file it came.
     const source = `Sent in ${new Date().toISOString().slice(0, 10)} (${folder ? `${basename(folder)}/` : ''}${basename(path)})`;
     const merged = mergeRecords(table, submitted, source);
-    for (const result of merged.results) console.log(`  ${result.text}`);
+    for (const result of merged.results) if (result.text) console.log(`  ${result.text}`);
     if (dryRun) {
       const plan = folder ? picturesFor(merged.results, sortPictures(readdirSync(folder)), screenshots) : [];
       for (const item of plan) console.log(`  Record ${item.number} would get ${item.names.join(', ')}`);

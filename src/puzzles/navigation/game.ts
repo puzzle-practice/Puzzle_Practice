@@ -7,7 +7,7 @@ import { EMPTY, NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, LEVEL_TA
  * `slowDrop` holds each incoming star at the top until Drop is pressed, for practice without the fall.
  */
 export interface NavigationSettings { mode: 'normal' | 'ww' | 'ww-test'; difficulty: number; extraRing: boolean; wildTargets: boolean; timerMs: number; clears: boolean; dismissDelayMs: number; slowDrop: boolean;
-  /** Freeplay mode paints the board, with no timer, quota or history, and each star waits for Drop. */
+  /** Freeplay mode paints the board, with the chosen timer but no quota or history, and each star waits for Drop. A booch deals a fresh board. */
   create: boolean;
   /** Replays saved before a Dennav booch dealt a new board: the booch ends the run, as it did then. */
   boochEnds?: boolean;
@@ -29,10 +29,12 @@ export function readSettings(value: unknown): NavigationSettings | null {
     dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false, ...(s.boochEnds ? { boochEnds: true } : {}), ...(s.boochOpens ? { boochOpens: true } : {}) };
 }
 export const isWerewolf = (mode: NavigationSettings['mode']): boolean => mode === 'ww' || mode === 'ww-test';
+/** Only Normal scores run clears; in Dennav and Old Dennav a run of stars scores nothing, only constellations do. */
+export const runsScore = (mode: NavigationSettings['mode']): boolean => !isWerewolf(mode);
 export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal';
 export const settingsKey = (s: NavigationSettings): string => `${s.mode}:${s.difficulty}:${isWerewolf(s.mode) && s.extraRing ? 4 : 3}:${isWerewolf(s.mode) && s.wildTargets ? 1 : 0}:${s.timerMs}${s.clears ? ':c' : ''}${s.slowDrop ? ':s' : ''}`;
-/** The constellations a run is played to: the quota, except with no timer, which loops. */
-export const runGoal = (s: NavigationSettings): number => s.timerMs || s.clears ? LEVEL_TARGETS[s.difficulty] : Infinity;
+/** The constellations a run is played to: the quota, except with no timer or in Freeplay, which loop. */
+export const runGoal = (s: NavigationSettings): number => !s.create && (s.timerMs || s.clears) ? LEVEL_TARGETS[s.difficulty] : Infinity;
 export interface NavigationSeed { boardSeed: number; timerElapsedMs: number }
 export function readNavigationSeed(value: unknown): NavigationSeed | null {
   const seed = typeof value === 'number' ? { boardSeed: value, timerElapsedMs: 0 } : value as NavigationSeed | null;
@@ -60,6 +62,18 @@ export interface Scene {
   cells: number[]; targets: Target[]; duration: number;
   falls?: Fall[]; clear?: Clear; rotation?: { ring: number; clockwise: boolean };
 }
+/**
+ * Whether a scene draws a target lit (filled to match). A star a run clear is removing counts as
+ * gone, as on the client, which takes it off the board before the clear animates: a target the
+ * same clear turns wild must not light up under the star that is fading out of it.
+ */
+export function targetLit(scene: Scene, t: Target): boolean {
+  const index = t.ring*8 + t.octant;
+  const colour = scene.cells[index];
+  if (colour === EMPTY || !(t.wild || colour === t.colour)) return false;
+  if (scene.clear?.kind === 'run' && scene.clear.cells.some(c => c.ring*8 + c.octant === index)) return false;
+  return !scene.falls?.some(f => f.from*8 + f.octant === index) && scene.rotation?.ring !== t.ring;
+}
 export class NavigationGame {
   readonly board: NaviBoard;
   readonly wild: WildTargets;
@@ -80,10 +94,18 @@ export class NavigationGame {
   finished = false;
   booched = false;
   /**
+   * Whether clearing a run of stars adds its points. In Dennav and Old Dennav only constellations
+   * score: a run clear scores nothing itself, though it still builds the chain that multiplies the
+   * next constellation. Private (not part of the replay state) so older replays keep their checks.
+   */
+  readonly #scoreRuns: boolean;
+  /**
    * `goal` is what this board must chart to end the run; a later board in a quota run gets what's left.
    * `opening` starts a Dennav board on its 1/2/1 constellation: every board but one dealt after a booch.
+   * `scoreRuns` defaults to the mode's rule; replays recorded before Dennav run clears stopped scoring pass true.
    */
-  constructor(readonly settings: NavigationSettings, readonly seed: number, readonly goal = runGoal(settings), opening = true) {
+  constructor(readonly settings: NavigationSettings, readonly seed: number, readonly goal = runGoal(settings), opening = true, scoreRuns = runsScore(settings.mode)) {
+    this.#scoreRuns = scoreRuns;
     const rings = isWerewolf(settings.mode) && settings.extraRing ? 4 : 3;
     this.board = settings.mode === 'ww-test' ? new NaviTestBoard(rings, settings.difficulty, seed, opening) : new NaviBoard(rings, settings.difficulty, seed, isWerewolf(settings.mode));
     this.wild = settings.mode === 'ww-test' ? new TestWildTargets(settings.wildTargets, rings) : new WildTargets(isWerewolf(settings.mode) && settings.wildTargets, rings);
@@ -158,7 +180,7 @@ export class NavigationGame {
       const clearScene = this.scene(500);
       const clears = this.board.clearRuns(runs, chain);
       this.wild.runs(runs, this.targets);
-      const points = clears.reduce((sum, c) => sum + c.points, 0);
+      const points = this.#scoreRuns ? clears.reduce((sum, c) => sum + c.points, 0) : 0;
       clearScene.clear = { kind: 'run', cells: clears.flatMap(c => c.cells), points, chain };
       clearScene.targets = this.targets.map(t => ({ ...t }));
       scenes.push(clearScene);

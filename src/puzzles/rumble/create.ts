@@ -3,7 +3,7 @@
 import { Random as RandomImpl, type Random } from '../../core/random';
 import { Board, H, W, nextInt, type Point, type Shaft } from './board';
 import { BLUDGEONS, FISTS_TYPE, Glove, HOOK_TYPE, colourMapping } from './gloves';
-import { BLOCKED, EMPTY, FURBALL, ORANGE, ball, colourOf, isBall, isCharged } from './pieces';
+import { BLOCKED, EMPTY, FURBALL, ORANGE, ball, charged, colourOf, dark, isBall, isCharged, isDark, isLight, light } from './pieces';
 
 /** The deepest a starting board can reach: the bottom row knocks a board out. */
 export const MAX_ROWS = H - 1;
@@ -223,4 +223,87 @@ export function viewerBoard(type: number, kind: number, slot: number, seed = 1):
     board.punch({ from: 0, id: 1, count: 0, side: 1, width: k.width, height: k.length, blacks: bruises, next: 0 }, glove);
   }
   return board;
+}
+
+// ---- Board codes: Copy and Paste ----
+
+/** One character per ball: plain, charged, dark bruise and light bruise, by colour (furball last). */
+const CODE_CHARS = ['ryocbf', 'RYOCBF', '123456', '!@#$%^'] as const;
+const STATES = [(p: number) => p, charged, dark, light] as const;
+
+function codeChar(piece: number): string {
+  if (!isBall(piece)) return '.';
+  const state = isCharged(piece) ? 1 : isDark(piece) ? 2 : isLight(piece) ? 3 : 0;
+  return CODE_CHARS[state][colourOf(piece)] ?? '.';
+}
+
+function codePiece(c: string): number | null {
+  if (c === '.') return EMPTY;
+  for (let s = 0; s < CODE_CHARS.length; s++) {
+    const i = CODE_CHARS[s].indexOf(c);
+    if (i >= 0) return STATES[s](ball(i));
+  }
+  return null;
+}
+
+/**
+ * A board as text: `R:` then which rows are long (0 or 1) and its rows below the damage rows, top
+ * first, split by `/`. Each ball is a letter by colour (r y o c b, f a furball), upper case when
+ * charged; 1-6 and !@#$%^ are dark and light bruises in the same order; `.` is empty, and a
+ * row's empty cells at its end are left off.
+ */
+export function boardCode(board: Board): string {
+  const rows: string[] = [];
+  for (let y = board.damage; y < H; y++) {
+    let row = '';
+    for (let x = 0; x < board.width(y); x++) row += codeChar(board.get({ x, y }));
+    rows.push(row.replace(/\.+$/, ''));
+  }
+  while (rows.length && !rows[rows.length - 1]) rows.pop();
+  return `R:${(board.topLarge + board.damage) % 2}:${rows.join('/')}`;
+}
+
+export interface BoardCode {
+  /** Whether the code's first row is a long one. */
+  firstLong: boolean;
+  rows: number[][];
+}
+
+export function readBoardCode(text: string): BoardCode | null {
+  const m = /^R:([01]):([^\s]*)$/.exec(text.trim());
+  if (!m) return null;
+  const firstLong = m[1] === '0';
+  const lines = m[2] ? m[2].split('/') : [];
+  if (lines.length > H) return null;
+  const rows: number[][] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const width = (i % 2 === 0) === firstLong ? W : W - 1;
+    if (lines[i].length > width) return null;
+    const row: number[] = [];
+    for (const c of lines[i]) {
+      const piece = codePiece(c);
+      if (piece === null) return null;
+      row.push(piece);
+    }
+    rows.push(row);
+  }
+  return { firstLong, rows };
+}
+
+/**
+ * Lays a board code over a board in play, below its damage rows. Rows that don't fit are left
+ * out, and a code whose long rows don't line up with the board's shifts its rows by flipping which
+ * rows are long. Returns whether every ball fitted.
+ */
+export function applyBoardCode(board: Board, code: BoardCode, werewolf: boolean): boolean {
+  board.topLarge = ((board.damage % 2) + (code.firstLong ? 0 : 1)) % 2;
+  let fitted = true;
+  for (let y = board.damage; y < H; y++) {
+    const row = code.rows[y - board.damage] ?? [];
+    for (let x = 0; x < board.width(y); x++) board.set({ x, y }, werewolfPiece(row[x] ?? EMPTY, werewolf));
+    if (row.length > board.width(y)) fitted = false;
+  }
+  if (code.rows.length > H - board.damage && code.rows.slice(H - board.damage).some((r) => r.some(isBall))) fitted = false;
+  resetSparks(board);
+  return fitted;
 }

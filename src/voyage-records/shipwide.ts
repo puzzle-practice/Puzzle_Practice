@@ -58,6 +58,11 @@ export function recordKey(record: Pick<KnownRecord, 'voyage' | 'ocean' | 'crewSi
   return `${record.voyage}/${record.ocean}/${record.crewSize}/${record.kind}`;
 }
 
+/** The screenshots filed for a crew-size record, if any. */
+export function screenshotsFor(record: Pick<KnownRecord, 'voyage' | 'ocean' | 'crewSize' | 'kind'>): { screenshot?: string; screenshotUrl?: string; more?: string[] } | undefined {
+  return data.screenshots?.[recordKey(record)];
+}
+
 export interface CrewSizeRow {
   crewSize: number;
   score?: KnownRecord & { screenshot?: string; screenshotUrl?: string; more?: string[] };

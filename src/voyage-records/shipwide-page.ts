@@ -3,7 +3,7 @@
 // Crew-size records sit in one table with a column per record, each with who holds it.
 // Everything else goes in one table of other records, with tied holders on one line.
 import { CHEST_ICONS, FAMILIARS, VOYAGE_ITEMS, chestIcon, itemImage, tile } from './page';
-import { expeditions, type ExpeditionId } from './records';
+import { byName, expeditions, type ExpeditionId } from './records';
 import { knownRecords } from './known-records';
 import { crewSizeRows, oceansFor, otherCategories, sheetFetched, sheetRecords, sheetSources, type SheetRecord } from './shipwide';
 import { recordsSwitch } from './switch';
@@ -46,6 +46,8 @@ const SHORT_LABELS: Record<string, string> = {
   'Most cursed chests in one forage': 'Most in one forage',
   'Most cursed chests in one forage, cursed chests only': 'Most in one forage, cursed chests only',
   'Most frays in one entry': 'Frays in one entry',
+  'Most dire chests in one DR': 'Dire chests in one DR',
+  'Best forage score in one DR': 'Forage score in one DR',
 };
 const POINTS_PER_FORAGE = 'Most points in one forage, one pirate';
 
@@ -194,7 +196,7 @@ function proof(cells: Cell[]): HTMLElement {
   const links: HTMLElement[] = [];
   const seen = new Set<string>();
   for (const cell of cells) {
-    const label = `${cell.label}: ${cell.value}${cell.pirates?.length ? ` (${cell.pirates.join(', ')})` : ''}`;
+    const label = `${cell.label}: ${cell.value}${cell.pirates?.length ? ` (${byName(cell.pirates).join(', ')})` : ''}`;
     if (cell.videoUrl) {
       if (!seen.has(cell.videoUrl)) links.push(outLink('Video', cell.videoUrl, 'rp-video'));
       seen.add(cell.videoUrl);
@@ -220,8 +222,12 @@ function proof(cells: Cell[]): HTMLElement {
   return box;
 }
 
-/** Names on one line, each with their share where the sheet gives one; a list of more than 12 opens on a click. */
-function names(pirates: string[] = [], scores: number[] = [], everyone: string[] = []): HTMLElement {
+/**
+ * Names on one line, each with their share where the sheet gives one; a list of more than 12 opens on a click.
+ * Shares keep the sheet's order; names with no share are listed alphabetically.
+ */
+function names(given: string[] = [], scores: number[] = [], everyone: string[] = []): HTMLElement {
+  const pirates = scores.length ? given : byName(given);
   const name = (pirate: string, index: number) =>
     el('span', 'rp-name', pirate, scores[index] === undefined ? null : el('span', 'rp-share', ` ${scores[index]}`));
   const list = el('span', 'rp-names', ...pirates.flatMap((pirate, index) => (index ? [', ', name(pirate, index)] : [name(pirate, index)])));
@@ -229,7 +235,7 @@ function names(pirates: string[] = [], scores: number[] = [], everyone: string[]
   const line = pirates.length > NAMES_SHOWN ? el('details', 'rp-extra', el('summary', '', `${pirates.length} pirates`), list) : list;
   const others = everyone.filter((pirate) => !pirates.includes(pirate));
   if (!others.length) return line;
-  return el('div', 'rp-names-wrap', line, el('details', 'rp-extra', el('summary', '', `Joint record holders (${everyone.length})`), everyone.join(', ')));
+  return el('div', 'rp-names-wrap', line, el('details', 'rp-extra', el('summary', '', `Joint record holders (${everyone.length})`), byName(everyone).join(', ')));
 }
 
 function toCell(label: string, record: SheetRecord): Cell {
@@ -366,7 +372,7 @@ function forageGrid(records: SheetRecord[]): HTMLElement {
       'rp-forage',
       el('span', 'rp-forage-number', `Forage ${number}`),
       el('strong', 'rp-forage-value', record.value),
-      el('span', 'rp-forage-name', record.pirates?.join(', ') ?? '', proof([toCell(`Forage ${number}`, record)])),
+      el('span', 'rp-forage-name', byName(record.pirates ?? []).join(', '), proof([toCell(`Forage ${number}`, record)])),
     ));
   return el(
     'section',

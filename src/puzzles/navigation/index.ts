@@ -13,12 +13,13 @@ import { TEXT } from '../../core/duty/report';
 
 /** A constellation charted in a chain of each length, from none. */
 const CHAIN_NAMES = ['—', 'Single', 'Double', 'Triple', 'Bingo', 'Donkey'];
-const chainName = (chain: number): string => chain > 5 ? `Vegas ${chain - 5}` : CHAIN_NAMES[chain];
+/** A 6-chain is a Vegas; only the ones past it are numbered (Vegas 2 is a 7-chain). */
+const chainName = (chain: number): string => chain > 6 ? `Vegas ${chain - 5}` : chain === 6 ? 'Vegas' : CHAIN_NAMES[chain];
 const MOONS = ['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-donkey', 'moon-vegas', 'moon-seven'];
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { InputEvent } from '../../core/input';
-import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, type NavigationSettings, type RunTotals, type Scene } from './game';
+import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, runsScore, targetLit, type NavigationSettings, type RunTotals, type Scene } from './game';
 import { LEVEL_TARGETS } from './logic';
 import { copyText, pasteText } from '../../core/clipboard';
 import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, PAINT_KEYS, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
@@ -45,6 +46,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     store.set('wwTimerDefault', true);
   }
   let liveSettings = { ...settings };
+  /** Replays saved before a booch dealt a new board end on their booch, as they did then. */
+  let boochEnds = false;
   let savedSettings: NavigationSettings | null = null;
   let game: NavigationGame | null = null;
   /** In WW and quota runs, Dismiss deals a new board in the same run: its score, stats, timer and constellation count carry on. */
@@ -60,11 +63,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let running = false, finished = false, selected = 0;
   /**
    * The rules a game is played by (the replay format's simulatorVersion). 2: the first click on a
-   * new board only focuses it and never selects or turns a ring. Replays play by the rules they
-   * were recorded with.
+   * new board only focuses it and never selects or turns a ring. 3: run clears score nothing in
+   * Dennav and Old Dennav. Replays play by the rules they were recorded with.
    */
-  const RULES = 2;
+  const RULES = 3;
   let rules = RULES;
+  /** Whether this game's run clears add points: always in Normal, and in either Dennav only for replays from before rules 3. */
+  const scoreRuns = () => runsScore(liveSettings.mode) || rules < 3;
   /** Set on each new board: the next click on the board is the one that focuses it. */
   let focusClick = false;
   let startTime = 0, endTime = 0;
@@ -106,13 +111,16 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     pause.resume();
     rules = tapeRules;
     if (seed === undefined) seed = seedMode.next(); seedMode.remember(seed);
-    // Freeplay has no timer or quota, and each star waits at the top for Drop.
-    liveSettings = settings.create ? { ...settings, timerMs: 0, clears: false, slowDrop: true } : { ...settings };
+    // An old replay's booch ends its run. The rule is kept apart from the game's settings, which replays check.
+    const { boochEnds: oldBoochRule, ...played } = settings;
+    boochEnds = !!oldBoochRule;
+    // Freeplay keeps the chosen timer but has no quota, and each star waits at the top for Drop.
+    liveSettings = played.create ? { ...played, clears: false, slowDrop: true } : { ...played };
     duty.clear();
     layer = 'stars'; palette = paintWith = null; painting = false; setup = ''; pasteNote = '';
     runSeed = seed; board = 0; banked = NO_TOTALS; charts = []; longestChain = longestCascade = 0;
     dealAt = 0; pendingStart = null;
-    game = new NavigationGame(liveSettings, seed);
+    game = new NavigationGame(liveSettings, seed, undefined, true, scoreRuns());
     selectInnerRing(); focusClick = rules >= 2;
     running = true; finished = false; hold.clear();
     startTime = endTime = sceneStart = ticks();
@@ -120,7 +128,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     incomingRadius = 220; lastTick = ticks();
     scenes = []; pendingCommands = []; fastDrop = false; message = '';
     warning.reset();
-    replays.begin(liveSettings, timerElapsedMs ? { boardSeed: seed, timerElapsedMs } : seed);
+    replays.begin(boochEnds ? { ...liveSettings, boochEnds } : liveSettings, timerElapsedMs ? { boardSeed: seed, timerElapsedMs } : seed);
     sounds.play('fanfare');
   }
   /** A fresh board in the same run (WW or quota-run Dismiss): what the run has scored stays. */
@@ -134,7 +142,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     banked = totals();
     board++;
     // A quota run's count carries on; a timed WW board has its own quota.
-    game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0), opening);
+    game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0), opening, scoreRuns());
     selectInnerRing(); focusClick = rules >= 2;
     scenes = []; fastDrop = false; incomingRadius = 220;
     message = note; messageAt = ticks(); messagePx = gameFont(3); messageFill = TEXT_WHITE;
@@ -162,20 +170,24 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     });
     message = reason; messageAt = ticks(); messagePx = gameFont(1); messageFill = TEXT_WHITE;
   }
-  /** A finished board ends the run, except a Dennav or Old Dennav booch, which deals a fresh board in the same run while time is left. */
+  /** A finished board ends the run, except a booch in Dennav, Old Dennav or Freeplay, which deals a fresh board in the same run while time is left. */
   function boardDone(): void {
     if (!running || !game) return;
-    if (game.booched && isWerewolf(liveSettings.mode) && !liveSettings.create && !liveSettings.boochEnds && !timeUp()) { sounds.play('booched'); deal('Booched! New board', !!liveSettings.boochOpens); }
+    if (game.booched && (isWerewolf(liveSettings.mode) || liveSettings.create) && !boochEnds && !timeUp()) { sounds.play('booched'); deal('Booched! New board', !!liveSettings.boochOpens); }
     else end(game.booched ? 'Booched!' : 'Level complete');
   }
   function startScene(scene: Scene): void {
     if (!scene.clear) return;
     const clear = scene.clear;
-    message = `${chainName(clear.chain)}! ${clear.kind === 'target' ? 'Constellation! ' : ''}+${clear.points}`;
-    messageAt = sceneStart;
-    // Chains are 30px yellow; other clears are white and grow with their points (GameFonts.get(points, 300)).
-    messagePx = clear.chain > 1 ? gameFont(1) : gameFontFor(clear.points, 300);
-    messageFill = clear.chain > 1 ? TEXT_YELLOW : TEXT_WHITE;
+    // A run clear that scores nothing (Dennav) shows no points: just the chain from a double on.
+    const scoreless = clear.kind === 'run' && !scoreRuns();
+    if (!scoreless || clear.chain > 1) {
+      message = `${chainName(clear.chain)}!${scoreless ? '' : ` ${clear.kind === 'target' ? 'Constellation! ' : ''}+${clear.points}`}`;
+      messageAt = sceneStart;
+      // Chains are 30px yellow; other clears are white and grow with their points (GameFonts.get(points, 300)).
+      messagePx = clear.chain > 1 ? gameFont(1) : gameFontFor(clear.points, 300);
+      messageFill = clear.chain > 1 ? TEXT_YELLOW : TEXT_WHITE;
+    }
     let sound = 'star_destroy';
     if (clear.kind === 'target') {
       const rings = clear.cells.map(c => c.ring);
@@ -237,7 +249,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       loadBoard(game, read);
     } else if (name === 'generate') {
       board++;
-      game = new NavigationGame(liveSettings, boardSeed(runSeed, board));
+      game = new NavigationGame(liveSettings, boardSeed(runSeed, board), undefined, true, scoreRuns());
     } else return;
     selectInnerRing();
     setup = boardCode(game); incomingRadius = 220;
@@ -266,8 +278,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (scene) {
       // Draw targets first so settled and moving stars stay in front of them.
       for (const t of scene.targets) {
-        const colour = scene.cells[t.ring*8+t.octant];
-        const matches = colour !== -1 && (t.wild || colour === t.colour) && !falling.has(t.ring*8+t.octant) && scene.rotation?.ring !== t.ring;
+        const matches = targetLit(scene, t);
         if (t.wild) {
           // A wild target is ringed in every colour, lit once any star fills it.
           const [x,y] = position(t.octant,radius(t.ring));
@@ -283,7 +294,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         const r = fall ? radius(fall.from) + (radius(fall.ring)-radius(fall.from))*fallProgress : radius(ring);
         const angle = scene.rotation?.ring === ring ? o + (scene.rotation.clockwise ? -1 : 1)*progress : o;
         // Sprite orientation stays at the starting octant during a turn; only its position moves.
-        if (angle === o) star(colour, o, r, !!target && (target.wild || target.colour === colour), false, cleared.has(ring*8+o) ? 1-progress : 1);
+        // A star a run clear is removing fades out unlit, as the target it leaves is empty.
+        const lit = !!target && (target.wild || target.colour === colour) && !(scene.clear?.kind === 'run' && cleared.has(ring*8+o));
+        if (angle === o) star(colour, o, r, lit, false, cleared.has(ring*8+o) ? 1-progress : 1);
         else {
           const [x,y] = position(angle,r);
           ctx.drawImage(images.get(`star_${COLOURS[colour]}`), ((o+2)%8)*56,0,56,56,x-28,y-28,56,56);
@@ -480,7 +493,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   options.toggle('Slow drop', () => settings.slowDrop, on => { settings.slowDrop = on; saveSettings(); }, { disabled: busy, title: 'Each star waits at the top until you press Drop.' });
   options.toggle('Wild targets', () => settings.wildTargets, on => { settings.wildTargets = on; saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
   options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
-  options.hint(() => settings.mode === 'ww-test' ? 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
+  options.hint(() => settings.mode === 'ww-test' ? 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
   options.button('Reset to defaults', () => { settings = { ...DEFAULT_SETTINGS }; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy });
   panel.controls('navigation', [
     { id: 'ringOut', label: 'Select outer ring', defaultKey: 'arrowup' },
@@ -513,14 +526,20 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Version 1 had no looping: an untimed run then ended at the quota, as a quota run does now.
   // Before version 4 a booch ended every run, Dennav and Old Dennav included.
   // In version 4 the Dennav board a booch dealt opened on 1/2/1 again.
-  const codec: ReplaySettingsCodec = { currentVersion: 5, simulatorVersion: RULES, migrate: (version, value) => {
-    const read = version <= 5 ? readSettings(value) : null;
+  // Before version 6 Freeplay had no timer (its replays saved none) and a booch ended it.
+  const codec: ReplaySettingsCodec = { currentVersion: 6, simulatorVersion: RULES, migrate: (version, value) => {
+    const read = version <= 6 ? readSettings(value) : null;
     if (read?.mode === 'ww-test' && version < 3) return null;
-    if (!read || version === 5) return read;
-    if (version === 4) return { ...read, boochOpens: true };
+    if (!read || version === 6) return read;
+    const freeplay = read.create ? { boochEnds: true } : {};
+    if (version === 5) return { ...read, ...freeplay };
+    if (version === 4) return { ...read, boochOpens: true, ...freeplay };
     // Version 1 dealt Dismissed boards at once.
     return version === 1 ? { ...read, clears: !read.timerMs, dismissDelayMs: 0, boochEnds: true } : { ...read, boochEnds: true };
-  } };
+  },
+  // A booch never ends a game taken over from an old replay. Its boards so far had no booch, or it
+  // would have ended there, so the saved game plays the same without the old rule.
+  takeOver: value => { const { boochEnds: _, ...rest } = value as NavigationSettings; return rest; } };
   replays = new ReplayRecorder('navigation', store, panel, ticks, tape => {
     savedSettings ??= { ...settings };
     settings = readSettings(tape.settings)!;
@@ -538,10 +557,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (running) end('Stopped'); });
   // Taken over, the replay's settings are the game's: the player's own aren't put back afterwards.
-  // Freeplay and games with no timer have no end of their own: their replays are kept however they stop.
+  // Freeplay and games with no timer have no end they must reach: their replays are kept however they stop.
   replays.openEnded = () => running && (liveSettings.create || !liveSettings.timerMs);
-  // An old replay's booch rule stays with the run taken over, not with the next one started.
-  replays.onTakeOver = () => { savedSettings = null; delete settings.boochEnds; delete settings.boochOpens; };
+  // An old replay's 1/2/1 booch rule stays with the run taken over, not with the next one started.
+  replays.onTakeOver = () => { savedSettings = null; boochEnds = false; delete settings.boochEnds; delete settings.boochOpens; };
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(game, running, finished, selected, runSeed, board, banked, startTime, timerElapsedBeforeBoard,
     incomingRadius, fastDrop, dealAt, scenes, sceneStart);

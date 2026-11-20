@@ -153,6 +153,9 @@ export function shaftSent(groups: number, popped: number, dropped: number, minut
   return { sent, output };
 }
 
+/** Werewolf rumbling: a fired furball needs this many furballs together to pop. */
+export const FURBALL_BLAST = 5;
+
 export const nextInt = (rng: Random, n: number) => Math.floor(rng.random() * n);
 
 export interface BoardOptions {
@@ -341,26 +344,37 @@ export class Board {
    * A shot ball has landed at `at`. Without three of its colour it just sits there,
    * losing any charge. A charged ball in a group becomes a spark instead of popping. A plain ball
    * in a group pops it, and if the group holds a spark, every spark primed after that one pops
-   * its own group in turn. Returns the clear, or null if nothing popped.
+   * its own group in turn. In werewolf rumbling a fired furball needs five furballs to pop, and
+   * blasts every ball touching them as a group of its own. Returns the clear, or null if nothing
+   * popped.
    */
   place(at: Point): Clear | null {
     let piece = this.get(at);
+    // In werewolf rumbling a furball can't hold a charge.
+    if (isCharged(piece) && !this.canCharge(piece)) this.set(at, piece = plain(piece));
     const wasCharged = isCharged(piece);
+    const blast = this.werewolf && colourOf(piece) === FURBALL;
     this.dark.clear();
     const shotGroup = new Map<number, Point>();
     this.flood(at, colourOf(piece), true, shotGroup, new Map());
-    if (shotGroup.size < 3) {
+    if (shotGroup.size < (blast ? FURBALL_BLAST : 3)) {
       if (wasCharged) this.set(at, plain(piece));
       return null;
     }
     if (wasCharged) {
-      let primes = true;
-      if (colourOf(piece) === FURBALL) primes = [...shotGroup.values()].filter((p) => isCharged(this.get(p))).length >= 2;
-      if (primes) this.sparks.push({ ...at });
+      this.sparks.push({ ...at });
       return null;
     }
     const popped = shotGroup;
     const groups: Point[][] = [[...shotGroup.values()]];
+    if (blast) {
+      // The furball blast: every ball touching the furballs pops too, as a group of its own.
+      const ring = this.touching(shotGroup);
+      if (ring.size) {
+        groups.push([...ring.values()]);
+        for (const [k, p] of ring) popped.set(k, p);
+      }
+    }
     let i = 0;
     for (; i < this.sparks.length; i++) {
       if (popped.has(key(this.sparks[i]))) break;
@@ -387,7 +401,7 @@ export class Board {
     const lightened: Point[] = [];
     const grapeKeys = new Set(grapes.map(key));
     for (const [k, p] of this.dark) {
-      if (grapeKeys.has(k)) continue;
+      if (grapeKeys.has(k) || popped.has(k)) continue;
       const b = this.get(p);
       if (isDark(b)) this.set(p, light(b));
       else if (isLight(b)) this.set(p, plain(b));
@@ -396,6 +410,24 @@ export class Board {
     const pieces = new Map<number, number>();
     for (const p of [...popped.values(), ...grapes]) pieces.set(key(p), this.get(p));
     return { popped: [...popped.values()], groups, grapes, pieces, lightened };
+  }
+
+  /** Whether a ball can be charged: not a furball in werewolf rumbling. */
+  canCharge(piece: number): boolean {
+    return !(this.werewolf && colourOf(piece) === FURBALL);
+  }
+
+  /** Balls of any kind next to a group and not in it. */
+  touching(group: Map<number, Point>): Map<number, Point> {
+    const ring = new Map<number, Point>();
+    for (const p of group.values()) {
+      for (let d = 0; d < 6; d++) {
+        const n = this.neighbour(p, d);
+        if (!this.valid(n) || group.has(key(n)) || !isBall(this.get(n))) continue;
+        ring.set(key(n), n);
+      }
+    }
+    return ring;
   }
 
   /** Empties the cleared balls from the board. */

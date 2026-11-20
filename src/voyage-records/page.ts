@@ -9,18 +9,25 @@ import vampireReliquaryIcon from './media/vampire_reliquary.png?url';
 import wayfinderIcon from './media/wolf_skull_wayfinder.png?url';
 import { recordsSwitch } from './switch';
 import { againstRecords, claimedRecords, exportRecords, recordsMessage, standingFor, type AgainstRecord, type Standing } from './known-records';
+import { ignoredRun, runId, withoutIgnoredRuns, type IgnoredRun } from './run-preferences';
+import { debugExport, DEBUG_LOG_INCLUDES } from './debug-log';
 import {
   askToReadLog,
   canReadLog,
   canRememberLogs,
   loadIgnored,
+  loadIgnoredRuns,
+  loadDebugMode,
   pickLogHandles,
   saveIgnored,
+  saveIgnoredRuns,
+  saveDebugMode,
   saveLogHandles,
   savedLogHandles,
   type LogHandle,
 } from './saved';
 import {
+  byName,
   cleanIgnoreList,
   expeditions,
   expectedFamiliars,
@@ -89,6 +96,9 @@ const state = {
   sort: 'newest' as 'newest' | 'score',
   voyagePage: 0,
   ignored: loadIgnored(),
+  ignoredRuns: loadIgnoredRuns(),
+  debug: loadDebugMode(),
+  notice: null as { message: string; undoId?: string } | null,
   ignoreOpen: false,
   /** Saved logs the browser needs a click to reopen. */
   pendingLogs: [] as LogHandle[],
@@ -291,7 +301,129 @@ function toolbarContents(): (HTMLElement | null)[] {
     fileList(),
     state.pendingLogs.length ? button(reopenLabel(), 'panel-button vr-choose', () => void reopenLogs()) : null,
     ignorePanel(),
+    ...runTools(),
   ];
+}
+
+function runTools(): HTMLElement[] {
+  const debug = button(`Debug mode: ${state.debug ? 'on' : 'off'}`, `vr-pill${state.debug ? ' is-active' : ''}`, () => {
+    state.debug = !state.debug;
+    saveDebugMode(state.debug);
+    renderPage();
+  });
+  debug.setAttribute('aria-pressed', String(state.debug));
+  debug.title = 'Show chatlog export tools for individual voyages';
+  return [
+    debug,
+    ...(state.ignoredRuns.length ? [button(`Ignored runs (${state.ignoredRuns.length})`, 'vr-pill', showIgnoredRuns)] : []),
+  ];
+}
+
+function showDialog(title: string, className: string, ...body: HTMLElement[]): HTMLDialogElement {
+  const dialog = el('dialog', `vr-send ${className}`, el('h2', '', title), ...body);
+  dialog.setAttribute('aria-label', title);
+  dialog.dataset.voyageDialog = '';
+  dialog.append(el('div', 'vr-send-buttons', button('Close', 'panel-button', () => dialog.close())));
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
+  dialog.addEventListener('close', () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  return dialog;
+}
+
+function restoreRun(id: string): void {
+  state.ignoredRuns = state.ignoredRuns.filter((run) => run.id !== id);
+  const saved = saveIgnoredRuns(state.ignoredRuns);
+  state.notice = { message: saved ? 'Run restored to your history and records.' : 'Run restored for this visit. Browser storage is unavailable.' };
+  state.voyagePage = 0;
+  renderPage();
+}
+
+function ignoreRun(run: Run): void {
+  const entry = ignoredRun(run);
+  if (!state.ignoredRuns.some((other) => other.id === entry.id)) state.ignoredRuns.push(entry);
+  const saved = saveIgnoredRuns(state.ignoredRuns);
+  state.notice = { message: saved ? 'Run ignored. Hidden from your history and records; still included in totals.' : 'Run ignored for this visit; still included in totals. Browser storage is unavailable.', undoId: entry.id };
+  state.openCrew = null;
+  state.voyagePage = 0;
+  document.querySelectorAll<HTMLDialogElement>('dialog[data-voyage-dialog]').forEach((dialog) => dialog.close());
+  renderPage();
+}
+
+function notice(): HTMLElement | null {
+  if (!state.notice) return null;
+  const { message, undoId } = state.notice;
+  const node = el('div', 'vr-run-notice', el('span', '', message),
+    undoId ? button('Undo', 'vr-pill', () => restoreRun(undoId)) : null,
+    button('Dismiss', 'vr-expand', () => { state.notice = null; renderPage(); }));
+  node.setAttribute('role', 'status');
+  return node;
+}
+
+function ignoredLabel(run: IgnoredRun): string {
+  const date = run.startedAt === null ? 'Undated' : dateTimeFormat.format(run.startedAt);
+  return `${expeditions[run.expedition]?.name ?? run.expedition} · ${oceanName(run.ocean ?? '')} · ${date} · ${run.crewSize ?? '?'} pirates`;
+}
+
+function showIgnoredRuns(): void {
+  const list = el('div', 'vr-ignored-runs');
+  const renderList = () => list.replaceChildren(...state.ignoredRuns.map((run) => {
+    const original = state.logs.flatMap((log) => log.runs).find((item) => runId(item) === run.id);
+    return el('div', 'vr-ignored-run', el('span', '', ignoredLabel(run)), el('div', 'vr-run-actions',
+      state.debug && original ? button('Export voyage log', 'vr-expand', () => showDebugLog(original)) : null,
+      button('Restore run', 'vr-pill', () => { restoreRun(run.id); renderList(); }),
+    ));
+  }), ...(state.ignoredRuns.length ? [] : [el('p', '', 'No ignored runs.')]));
+  renderList();
+  showDialog('Ignored runs', '', el('p', '', 'These voyages still count toward totals, but are hidden from your history, records and record exports. Restore a run to include it again.'), list);
+}
+
+function downloadText(text: string, name: string, type = 'text/plain'): void {
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([text], { type }));
+  link.download = name;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
+function showDebugLog(run: Run): void {
+  const source = run.source;
+  if (!source) {
+    showDialog('Voyage debug log', '', el('p', '', 'Reload the original chatlog to export the lines for this voyage.'));
+    return;
+  }
+  const log = state.logs.find((item) => item.runs.includes(run));
+  const filtered = debugExport(run);
+  const text = el('textarea', 'vr-send-message vr-debug-text');
+  text.value = filtered;
+  text.readOnly = true;
+  text.rows = 16;
+  text.setAttribute('aria-label', 'Voyage diagnostics and filtered events');
+  const stamp = run.startedAt === null ? 'undated' : new Date(run.startedAt).toISOString().slice(0, 19).replaceAll(':', '-');
+  const copy = button('Copy log lines', 'panel-button', () => {
+    const fallback = () => { text.focus(); text.select(); if (!document.execCommand('copy')) throw new Error('Copy failed'); };
+    const copied = navigator.clipboard ? navigator.clipboard.writeText(filtered).catch(fallback) : Promise.resolve().then(fallback);
+    void copied.then(() => { copy.textContent = 'Copied'; }).catch(() => { copy.textContent = 'Select and copy the text below'; text.select(); });
+  });
+  showDialog('Voyage debug log', 'vr-debug-dialog',
+    el('p', '', `${expeditions[run.expedition].name} · ${formatDate(run, true)} · ${oceanName(run.ocean ?? '')}`),
+    el('p', 'vr-debug-source', `${log?.name ?? 'Chatlog'} · filtered from lines ${source.firstLine}–${source.lastLine}`),
+    el('p', '', 'The summary shows the current calculations, run length and diagnostic checks. The event log includes pirate and enemy eliminations. Pirate and NPC names, dates and times remain. Review this preview before sharing.'),
+    el('details', 'vr-debug-includes', el('summary', '', 'Included event types'), el('ul', '', ...DEBUG_LOG_INCLUDES.map((type) => el('li', '', type)))),
+    el('div', 'vr-send-buttons', button('Download voyage log', 'panel-button is-primary', () => downloadText(filtered, `voyage-debug_${run.ocean ?? 'unknown'}_${run.expedition}-${stamp}.txt`)), copy),
+    text,
+  );
+}
+
+function runActions(run: Run): HTMLElement {
+  return el('div', 'vr-run-actions',
+    state.debug ? button('Export voyage log', 'vr-expand', () => showDebugLog(run)) : null,
+    button('Ignore run', 'vr-expand', () => ignoreRun(run)),
+  );
+}
+
+function showRun(run: Run): void {
+  showDialog('Voyage details', '', runCard(expeditions[run.expedition].name, run));
 }
 
 function reopenLabel(): string {
@@ -473,7 +605,7 @@ function fraysRow(run: Run): HTMLElement | null {
   return el('div', 'vr-frays', ...run.frays.map((fray) => {
     const tone = fray.result === 'Won' ? ' is-good' : fray.result === 'Lost' ? ' is-bad' : '';
     const standing = fray.survivors === null ? '' : `, ${plural(fray.survivors, 'pirate')} standing`;
-    const deaths = fray.deaths.length ? `. Fell: ${fray.deaths.join(', ')}` : '';
+    const deaths = fray.deaths.length ? `. Fell: ${byName(fray.deaths).join(', ')}` : '';
     const pip = el('span', `vr-fray${tone}`, String(fray.number));
     pip.title = `Fray ${fray.number}: ${fray.result ?? 'unknown'}${standing}${deaths}`;
     return pip;
@@ -491,6 +623,7 @@ function runCard(title: string, run: Run): HTMLElement {
       ? el('ul', 'vr-crew', ...run.players.map((name) => el('li', '', name)))
       : null,
     fraysRow(run),
+    runActions(run),
   );
 }
 
@@ -507,7 +640,7 @@ function recordCards(record: CrewRecord): HTMLElement {
 }
 
 function namesCell(run: Run, label: string): HTMLElement {
-  const cell = el('td', 'vr-names', run.players.join(', ') || 'Names not in the log');
+  const cell = el('td', 'vr-names', byName(run.players).join(', ') || 'Names not in the log');
   cell.dataset.label = label;
   return cell;
 }
@@ -629,7 +762,7 @@ function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, Aga
     return pill;
   };
   const pages = Math.ceil(sorted.length / VOYAGES_PER_PAGE);
-  const page = Math.min(state.voyagePage, pages - 1);
+  const page = Math.max(0, Math.min(state.voyagePage, pages - 1));
   const first = page * VOYAGES_PER_PAGE;
   const shown = sorted.slice(first, first + VOYAGES_PER_PAGE);
   const turnPage = (label: string, target: number) => {
@@ -659,6 +792,7 @@ function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, Aga
     el('td', 'vr-num vr-wide-only', fraysWon(run)),
     el('td', 'vr-num', resultBadge(run)),
     namesCell(run, 'Pirates'),
+    el('td', 'vr-run-actions-cell', el('div', 'vr-run-actions', button('Details', 'vr-expand', () => showRun(run)), ...runActions(run).children)),
   ));
   return el(
     'section',
@@ -688,6 +822,7 @@ function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, Aga
             el('th', 'vr-num vr-wide-only', 'Frays won'),
             el('th', 'vr-num', 'Result'),
             el('th', 'vr-names-col', 'Pirates'),
+            el('th', 'vr-run-actions-heading', 'Voyage actions'),
           ),
         ),
         el('tbody', '', ...rows),
@@ -717,7 +852,8 @@ function mediaWords(): HTMLElement {
 const JICE_DISCORD = 'https://discord.com/users/272275489840693249';
 
 function sendRecords(runs: Run[]): void {
-  const exported = exportRecords(withoutIgnored(runs, state.ignored), state.logs.map((log) => log.name));
+  const eligible = withoutIgnored(withoutIgnoredRuns(runs, state.ignoredRuns), state.ignored);
+  const exported = exportRecords(eligible, state.logs.map((log) => log.name));
   const claimed = claimedRecords(exported);
   const close = button('Close', 'panel-button', () => dialog.close());
   const download = button('Download all my records', 'panel-button', () => downloadRecords(exported));
@@ -748,6 +884,11 @@ function sendRecords(runs: Run[]): void {
         el('strong', '', 'Please send a ', mediaWords(), ' of each record too'),
         ', numbered to match the list, so it can go up on the Global records page next to yours. Copy and open Discord copies the message and opens Jice\'s profile: click Message, then paste.'),
       text,
+      el('div', 'vr-send-runs', ...eligible.filter((run) => claimed.some((record) =>
+        record.voyage === run.expedition && record.ocean === run.ocean && record.crewSize === run.crewSize &&
+        record.time === (run.startedAt === null ? null : new Date(run.startedAt).toISOString().slice(0, 19)) &&
+        record.loot.every((amount, index) => amount === run.loot[index])
+      )).map((run) => el('div', 'vr-review-run', el('span', '', `${expeditions[run.expedition].name} · ${formatDate(run, true)} · ${run.crewSize} pirates`), runActions(run)))),
       el('div', 'vr-send-buttons', discord, copy, download, close),
     ];
   } else {
@@ -758,6 +899,8 @@ function sendRecords(runs: Run[]): void {
     ];
   }
   const dialog = el('dialog', 'vr-send', ...body);
+  dialog.dataset.voyageDialog = '';
+  dialog.setAttribute('aria-label', claimed.length ? 'Send new records' : 'Export records');
   dialog.addEventListener('click', (event) => { if (event.target === dialog) dialog.close(); });
   dialog.addEventListener('close', () => dialog.remove());
   document.body.append(dialog);
@@ -769,7 +912,7 @@ function sendRecords(runs: Run[]): void {
 
 /** Highlighted, with a count, when this voyage's bests beat a global record. Ties are already on the table. */
 function sendButton(scoped: Run[], runs: Run[]): HTMLElement {
-  const exported = exportRecords(withoutIgnored(scoped, state.ignored), []);
+  const exported = exportRecords(withoutIgnored(withoutIgnoredRuns(scoped, state.ignoredRuns), state.ignored), []);
   const claimed = claimedRecords(exported).length;
   return button(claimed ? `Send ${plural(claimed, 'new record')}` : 'Export records', `vr-pill${claimed ? ' vr-send-pill' : ''}`, () => sendRecords(runs));
 }
@@ -781,6 +924,7 @@ function resultsSection(): HTMLElement {
     return el(
       'div',
       'vr-results',
+      notice(),
       state.logs.length && !state.reading
         ? el('p', 'vr-empty', 'No voyages found yet. Records come from Woodhallow, Cursed Isles and Vampire Lairs voyages in your logs.')
         : null,
@@ -794,13 +938,15 @@ function resultsSection(): HTMLElement {
     ? state.ocean
     : mostCommon(voyageRuns.map(oceanKey)) ?? '';
   const scoped = voyageRuns.filter((run) => oceanKey(run) === ocean);
-  // The ignore list only keeps a voyage out of the records: totals and history still count it.
-  const counted = withoutIgnored(scoped, state.ignored);
+  // Individually ignored runs count toward totals, but are hidden from history and records.
+  const visible = withoutIgnoredRuns(scoped, state.ignoredRuns);
+  const counted = withoutIgnored(visible, state.ignored);
   const records = recordsByCrewSize(counted);
-  const noCrew = scoped.filter((run) => run.crewSize === null).length;
+  const noCrew = visible.filter((run) => run.crewSize === null).length;
   const repeated = parsed.length - runs.length;
 
   const notes = [
+    ...(visible.length < scoped.length ? [`${plural(scoped.length - visible.length, 'ignored voyage')} included in totals, hidden from history and records.`] : []),
     ...(repeated ? [`${plural(repeated, 'voyage')} seen in more than one log ${repeated === 1 ? 'was' : 'were'} counted once.`] : []),
     ...(noCrew ? [`${plural(noCrew, 'voyage')} without a known crew size ${noCrew === 1 ? 'is' : 'are'} left out of the table.`] : []),
   ];
@@ -808,6 +954,7 @@ function resultsSection(): HTMLElement {
   return el(
     'div',
     'vr-results',
+    notice(),
     el('div', 'vr-pickers', voyagePicker(runs, id), oceanPicker(oceans, ocean)),
     ...(scoped.length
       ? [
@@ -819,7 +966,7 @@ function resultsSection(): HTMLElement {
             records.length ? recordsTable(records, id) : null,
             notes.length ? el('p', 'vr-notes', notes.join(' ')) : null,
           ),
-          allVoyages(scoped, personalBests(counted), againstRecords(scoped)),
+          allVoyages(visible, personalBests(counted), againstRecords(counted)),
         ]
       : [el('p', 'vr-empty', `No ${expeditions[id].name} voyages in these logs. If you've sailed one, add the log from the folder the game saves to now, as older logs may stop before it.`)]),
   );
@@ -833,7 +980,7 @@ export function showVoyageRecords(app: HTMLElement): void {
   renderPage = () => {
     if (!content.isConnected) return;
     const loaded = state.logs.length > 0 || state.reading > 0;
-    toolbar.replaceChildren(...(loaded ? toolbarContents() : []).filter((node) => node !== null));
+    toolbar.replaceChildren(...(loaded ? toolbarContents() : runTools()).filter((node) => node !== null));
     content.replaceChildren(loaded ? resultsSection() : loadSection());
   };
   void restoreLogs();

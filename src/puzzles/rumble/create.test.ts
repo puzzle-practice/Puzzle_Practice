@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
 import { H } from './board';
 import { colourMapping } from './gloves';
-import { BLUE, FURBALL, ORANGE, ball, charged, colourOf, isBall, isCharged, isDark } from './pieces';
+import { BLUE, CYAN, FURBALL, ORANGE, RED, ball, charged, colourOf, dark, isBall, isCharged, isDark, light } from './pieces';
 import {
   MAX_LENGTH, MAX_WIDTH, SimGlove, ballCount, convertBoard, dealBoard, emptyBoard, floating, resetSparks, rollPunch, shaftOf,
   werewolfPiece, furballColours, furballSlots, viewerBoard, viewerBruises, dealInto, snapshotBoard, restoreBoard,
+  applyBoardCode, boardCode, readBoardCode,
 } from './create';
 import { Match, type MatchSettings } from './match';
 import { DEFAULT_STYLE } from './npc';
@@ -231,5 +232,43 @@ describe('Create mode in a rumble', () => {
     }
     expect(f.stats.shots).toBe(10);
     expect(f.stats.drops).toBe(0);
+  });
+});
+
+describe('Freeplay board codes', () => {
+  it('copies and pastes a board with charged balls, bruises and furballs', () => {
+    const rng = new Random(5);
+    const board = dealBoard(rng, 6, 80, true);
+    board.set({ x: 0, y: 0 }, charged(ball(RED)));
+    board.set({ x: 1, y: 0 }, dark(ball(BLUE)));
+    board.set({ x: 2, y: 0 }, light(ball(FURBALL)));
+    resetSparks(board);
+    const code = boardCode(board);
+    expect(code).toMatch(/^R:0:R5\^/);
+    const copy = emptyBoard(new Random(1));
+    expect(applyBoardCode(copy, readBoardCode(code)!, true)).toBe(true);
+    expect(copy.cells).toEqual(board.cells);
+    expect(copy.sparks).toEqual([{ x: 0, y: 0 }]);
+  });
+
+  it('keeps which rows are long, and swaps furballs for orange outside werewolf rumbling', () => {
+    const board = emptyBoard(new Random(1));
+    board.topLarge = 1;
+    board.set({ x: 0, y: 0 }, ball(FURBALL));
+    board.set({ x: 9, y: 1 }, ball(CYAN));
+    const code = boardCode(board);
+    expect(code).toBe('R:1:f/.........c');
+    const copy = emptyBoard(new Random(2));
+    applyBoardCode(copy, readBoardCode(code)!, false);
+    expect(copy.topLarge).toBe(1);
+    expect(copy.get({ x: 0, y: 0 })).toBe(ball(ORANGE));
+    expect(copy.get({ x: 9, y: 1 })).toBe(ball(CYAN));
+  });
+
+  it('refuses text that is not a rumble board', () => {
+    expect(readBoardCode('S:abc')).toBeNull();
+    expect(readBoardCode('R:0:rrrrrrrrrrr')).toBeNull();
+    expect(readBoardCode('R:0:rz')).toBeNull();
+    expect(readBoardCode('R:0:')).toEqual({ firstLong: true, rows: [] });
   });
 });

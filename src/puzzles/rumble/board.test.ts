@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
 import { Board, DIR_PREC, H, W, type Shaft } from './board';
 import { colourMapping, Glove } from './gloves';
-import { BLUE, CYAN, EMPTY, RED, YELLOW, ball, charged, colourOf, dark, isBall, isCharged, isDark, isLight } from './pieces';
+import { BLUE, CYAN, EMPTY, FURBALL, RED, YELLOW, ball, charged, colourOf, dark, isBall, isCharged, isDark, isLight } from './pieces';
 
 function board(rows = 0, damageLevel = 0): Board {
   return new Board(new Random(1), new Random(2), [new Random(3), new Random(4)], { startRows: rows, damageLevel });
@@ -197,5 +197,189 @@ describe('bludgeons', () => {
     expect(new Glove(10).piece(4, 3, true)).toBe(EMPTY);
     expect(W).toBe(10);
     expect(CYAN).toBe(3);
+  });
+});
+
+describe('werewolf furballs', () => {
+  const wolf = () => new Board(new Random(1), new Random(2), [new Random(3), new Random(4)], { startRows: 0, werewolf: true });
+  const fur = ball(FURBALL);
+
+  it('three or four furballs together don’t pop', () => {
+    const b = wolf();
+    for (let x = 0; x < 3; x++) b.set({ x, y: 0 }, fur);
+    expect(b.place({ x: 2, y: 0 })).toBeNull();
+    b.set({ x: 3, y: 0 }, fur);
+    expect(b.place({ x: 3, y: 0 })).toBeNull();
+  });
+
+  it('five pop and blast every ball touching them, as a second group', () => {
+    const b = wolf();
+    fill(b, ['....rbc...', '..yy.....']);
+    for (let x = 0; x < 4; x++) b.set({ x, y: 0 }, fur);
+    b.set({ x: 4, y: 0 }, fur);
+    b.set({ x: 5, y: 0 }, ball(BLUE));
+    const clear = b.place({ x: 4, y: 0 })!;
+    expect(clear).not.toBeNull();
+    expect(clear.groups).toHaveLength(2);
+    expect(clear.groups[0]).toHaveLength(5);
+    // The blue beside it and the two yellows below; the cyan two cells away isn't touching.
+    expect(clear.groups[1].map((p) => `${p.x},${p.y}`).sort()).toEqual(['2,1', '3,1', '5,0']);
+    expect(b.groupCount(clear)).toBe(2);
+    expect(b.sparks).toHaveLength(0);
+  });
+
+  it('loses a charge without a group, and turns a broken spark into a bruise', () => {
+    const b = board();
+    fill(b, ['rr..']);
+    b.set({ x: 3, y: 0 }, charged(ball(BLUE)));
+    expect(b.place({ x: 3, y: 0 })).toBeNull();
+    expect(isCharged(b.get({ x: 3, y: 0 }))).toBe(false);
+    b.set({ x: 2, y: 0 }, charged(ball(RED)));
+    b.place({ x: 2, y: 0 });
+    expect(b.sparks).toHaveLength(1);
+    b.set({ x: 0, y: 0 }, EMPTY);
+    b.verifySparks();
+    expect(isDark(b.get({ x: 2, y: 0 }))).toBe(true);
+    expect(b.sparks).toHaveLength(0);
+  });
+
+  it('lightens a bruise next to a pop, then clears it', () => {
+    const b = board();
+    fill(b, ['rr#yyyyyyy', 'c']);
+    b.set({ x: 1, y: 1 }, ball(RED));
+    b.place({ x: 1, y: 1 });
+    expect(isLight(b.get({ x: 2, y: 0 }))).toBe(true);
+  });
+
+  it('turns clears into punches and sprinkle with the game’s formulas', () => {
+    const b = board();
+    const length = (g: number) => b.sent(g, 40, 0).height;
+    expect([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17].map(length))
+      .toEqual([1, 2, 3, 3, 4, 5, 6, 6, 7, 9, 11, 12, 14, 16, 18, 19]);
+    // 4 groups, 12 popped and 6 dropped is a 3x8 punch... width (12 + 3*4)/3 = 8.
+    expect(b.sent(4, 12, 6)).toMatchObject({ height: 3, width: 8, count: 6 });
+    expect(b.sent(1, 3, 12)).toMatchObject({ height: 0, count: 5 });
+    // A minute in, everything a punch is made of counts 20% more.
+    expect(b.sent(5, 10, 0, 1)).toMatchObject({ height: 4, width: 3 });
+    // Only the popped part of sprinkle grows with time.
+    expect(b.sent(1, 10, 9, 1)).toMatchObject({ count: 3 + 6 });
+  });
+
+  it('keeps a bruise counter: sprinkle raises it, punches lower it', () => {
+    const b = board();
+    b.sent(1, 3, 12);
+    expect(b.bruiseCounter).toBe(5);
+    b.sent(4, 12, 6);
+    expect(b.bruiseCounter).toBe(5 + 12 - 24);
+  });
+
+  it('lands sprinkle under the balls, and 18 collapses to one row of 9', () => {
+    const glove = new Glove(0, 0);
+    for (const [count, expected] of [[5, 5], [9, 9], [17, 17], [18, 9], [30, 9]]) {
+      const b = board(2);
+      const before = b.count();
+      b.sprinkle(shaft({ count }), glove);
+      expect(b.count() - before).toBe(expected);
+    }
+  });
+
+  it('pushes balls down with a punch and destroys the topmost when there is no room', () => {
+    const glove = new Glove(127, 0);
+    const b = board(3);
+    const before = b.count();
+    const result = b.punch(shaft({ width: 3, height: 4 }), glove);
+    expect(result.columns).toHaveLength(3);
+    expect(b.count()).toBe(before + 12);
+    // A full board loses balls to make room: each column has one empty cell above the bottom
+    // row, so 5 of its 6 go, and nothing reaches the bottom row.
+    const full = board(H - 2);
+    const n = full.count();
+    const punched = full.punch(shaft({ width: 9, height: 6, side: 0 }), glove);
+    expect(full.isDead()).toBe(false);
+    expect(full.count()).toBe(n + 9);
+    expect(punched.columns.every((c) => c.destroyed.length === 5)).toBe(true);
+  });
+
+  it('drops a row on the eighth shot', () => {
+    const b = board(1);
+    for (let i = 0; i < 7; i++) expect(b.fired()).toBe(false);
+    expect(b.fired()).toBe(true);
+    expect(b.count()).toBe(19);
+  });
+
+  it('deals each fist its own balls', () => {
+    const b = board();
+    const next = b.peek(0);
+    expect(b.take(0)).toBe(next);
+    expect(isBall(b.peek(1))).toBe(true);
+    expect(colourOf(b.peek(1))).toBeLessThan(5);
+  });
+});
+
+describe('bludgeons', () => {
+  it('permutes the colours by the colour byte', () => {
+    expect(colourMapping(0)).toEqual([0, 1, 2, 3, 4]);
+    for (let c = 0; c < 120; c++) expect([...colourMapping(c)].sort()).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('uses the bottom two rows for sprinkle and repeats the last four rows of a long punch', () => {
+    const fists = new Glove(127);
+    // Fists: bottom row 0,0,0,3,1,3,2,2,2; the one above 0,0,0,1,1,1,2,2,2.
+    expect(fists.cell(3, 0, false)).toBe(1);
+    expect(fists.cell(3, 1, false)).toBe(3);
+    expect(fists.height).toBe(4);
+    expect(fists.cell(0, 4, true)).toBe(fists.cell(0, 0, true));
+    const hammer = new Glove(12, 0);
+    expect(isDark(hammer.piece(1, 1, true))).toBe(true);
+    expect(new Glove(10).piece(4, 3, true)).toBe(EMPTY);
+    expect(W).toBe(10);
+    expect(CYAN).toBe(3);
+  });
+});
+
+describe('werewolf furballs', () => {
+  const wolf = () => new Board(new Random(1), new Random(2), [new Random(3), new Random(4)], { startRows: 0, werewolf: true });
+  const fur = ball(FURBALL);
+
+  it('three or four furballs together don’t pop', () => {
+    const b = wolf();
+    for (let x = 0; x < 3; x++) b.set({ x, y: 0 }, fur);
+    expect(b.place({ x: 2, y: 0 })).toBeNull();
+    b.set({ x: 3, y: 0 }, fur);
+    expect(b.place({ x: 3, y: 0 })).toBeNull();
+  });
+
+  it('five pop and blast every ball touching them, as a second group', () => {
+    const b = wolf();
+    fill(b, ['....rbc...', '..yy.....']);
+    for (let x = 0; x < 4; x++) b.set({ x, y: 0 }, fur);
+    b.set({ x: 4, y: 0 }, fur);
+    b.set({ x: 5, y: 0 }, ball(BLUE));
+    const clear = b.place({ x: 4, y: 0 })!;
+    expect(clear).not.toBeNull();
+    expect(clear.groups).toHaveLength(2);
+    expect(clear.groups[0]).toHaveLength(5);
+    // The blue beside it and the two yellows below; the cyan two cells away isn't touching.
+    expect(clear.groups[1].map((p) => `${p.x},${p.y}`).sort()).toEqual(['0,1', '1,1', '2,1', '3,1', '5,0'].filter((k) => clear.groups[1].some((p) => `${p.x},${p.y}` === k)).sort());
+    expect(clear.groups[1].some((p) => p.x === 5 && p.y === 0)).toBe(true);
+    expect(clear.groups[1].some((p) => p.x === 6 && p.y === 0)).toBe(false);
+    expect(b.groupCount(clear)).toBe(2);
+  });
+
+  it('three of another colour still pop as usual', () => {
+    const b = wolf();
+    fill(b, ['rrr']);
+    expect(b.place({ x: 2, y: 0 })!.groups).toHaveLength(1);
+  });
+
+  it('a furball can’t be charged', () => {
+    const b = wolf();
+    expect(b.canCharge(fur)).toBe(false);
+    expect(b.canCharge(ball(RED))).toBe(true);
+    for (let x = 0; x < 4; x++) b.set({ x, y: 0 }, fur);
+    b.set({ x: 4, y: 0 }, charged(fur));
+    const clear = b.place({ x: 4, y: 0 })!;
+    expect(clear.popped.length).toBe(5);
+    expect(b.sparks).toHaveLength(0);
   });
 });

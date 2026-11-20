@@ -54,8 +54,12 @@ the rest is unchanged since `20261014053332`, and the Old Dennav mechanics first
   play out with dense constellations and so differ from what was played.
   All their targets must match simultaneously. They clear before ordinary runs.
 - Equal-colour runs of at least three clear radially or around a ring, including across
-  octants 7/0. Overlaps and scoring match the game, including zero points for
-  unsupported or already-cleared run sizes. Cascading run scores receive chain multipliers.
+  octants 7/0. Overlaps match the game. In Dennav and Old Dennav a run clear scores
+  nothing: only constellations score, as in the live game. A run clear still adds to the
+  chain, so a constellation completed after one is multiplied as below. Normal keeps the
+  game's run scores (3/5/9 points for 3–5 newly cleared stars, zero for other sizes,
+  times the chain). Replays recorded before this change (simulator rules 2 and earlier)
+  still score Dennav run clears, so they play back with the score they were saved with.
 - Constellation points use the game's ring-relative weights and squared per-ring counts,
   multiplied by the chain count when the constellation completes after run clears in the
   same move. A completed constellation produces the next targets before evolution resumes.
