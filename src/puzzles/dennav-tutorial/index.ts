@@ -19,7 +19,7 @@ import { besideTop, checkPlan, dealPlanningBoard, paintPlan, planningOptions, ty
 import { builtComboIssue, buildOptionsFor, checkBuildPosition, checkBuildTurned, solutionsFor, unturnedCell, type BuildIssue, type Strictness } from './build-position';
 import { boardExport } from './board-export';
 import { dealFinish, finishGame, finishHint, judgeFinish, type FinishDeal } from './finish-combo';
-import { DONKEY_CHAIN, analyseBreak, breakScenes, setsOff, trackStars, type DonkeyAnalysis } from './donkey-practice';
+import { DONKEY_CHAIN, analyseBreak, donkeyGame, breakScenes, setsOff, trackStars, type DonkeyAnalysis } from './donkey-practice';
 
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 const imageUrls = import.meta.glob<string>('../navigation/media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -805,7 +805,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   const donkeyGoal = () => lesson().id === 'vegas' ? DONKEY_CHAIN + 1 : DONKEY_CHAIN;
   const donkeyWord = () => lesson().id === 'vegas' ? 'vegas' : 'donkey';
   function newDonkey(): void {
-    game = new NavigationGame(SETTINGS, rng.integer(1, 0x7fffffff));
+    game = donkeyGame(rng.integer(1, 0x7fffffff));
     start = null; upcoming = []; goal = null; donkeyBreak = null; sceneMarks = null;
     shown = positionOf(game);
     scenes = []; afterScenes = null; waiting = false; stepping = false; replaying = false; queued = []; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1;

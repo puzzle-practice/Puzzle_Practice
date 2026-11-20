@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
 import { gameAt, generate, innerCounts, makeMistake, positionOf, readPosition, type Action } from './engine';
 import { LESSONS, VEGAS_AS_PLAYED } from './lessons';
-import { DONKEY_CHAIN, analyseBreak, breakScenes, findFix, setsOff, trackStars } from './donkey-practice';
+import { DONKEY_CHAIN, analyseBreak, breakScenes, donkeyGame, findFix, setsOff, trackStars } from './donkey-practice';
 
 const donkey = LESSONS.find((l) => l.id === 'donkey')!;
 const session = donkey.moments[0];
@@ -57,6 +57,16 @@ describe('donkey from a blank board', () => {
     const single = readPosition('N4:................0.......01234012:362,213,224,104:00');
     expect(setsOff(breakScenes(single, { kind: 'drop' }).result)).toBe(false);
     expect(setsOff(breakScenes(session.position, session.action).result)).toBe(true);
+  });
+
+  it('a fresh board deals 3/2/1 constellations from the start, and after charting', () => {
+    const perRing = (targets: { ring: number }[]) => [0, 1, 2, 3].map((ring) => targets.filter((t) => t.ring === ring).length).join();
+    for (const seed of [1, 2, 3, 99, 12345]) {
+      const g = donkeyGame(seed);
+      expect(perRing(g.targets), `seed ${seed}`).toBe('0,1,2,3');
+      // The constellations the board deals after charting.
+      for (let i = 0; i < 3; i++) expect(perRing(g.board.nextConstellation()), `seed ${seed}, constellation ${i + 2}`).toBe('0,1,2,3');
+    }
   });
 
   it('a quiet move does not end the board', () => {

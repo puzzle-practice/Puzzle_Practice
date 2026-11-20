@@ -2,9 +2,15 @@
 // clear. That move is the break. It is judged against the donkey (the constellation charting at
 // link 5 or later), with what went wrong, the stars to blame, and a fix when one small change works.
 import { COLOUR_NAMES, OCTANT_NAMES } from '../navigation/create';
-import type { Scene } from '../navigation/game';
+import { NavigationGame, type Scene } from '../navigation/game';
 import { EMPTY, type Target } from '../navigation/logic';
-import { INNER, RINGS, act, chainName, clonePosition, gameAt, innerCounts, linkStars, outcome, play, positionOf, settled, type Action, type Outcome, type Position } from './engine';
+import { INNER, RINGS, act, chainName, clonePosition, gameAt, innerCounts, linkStars, outcome, play, positionOf, settled, SETTINGS, type Action, type Outcome, type Position } from './engine';
+
+/**
+ * A fresh board for Donkey from scratch. A donkey is built mid-game, so it skips the opening 1/2/1
+ * constellation: every constellation, the first included, is 3/2/1.
+ */
+export const donkeyGame = (seed: number): NavigationGame => new NavigationGame(SETTINGS, seed, undefined, false);
 
 /** The link a donkey charts at; a vegas is one more. */
 export const DONKEY_CHAIN = 5;
