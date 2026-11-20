@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
-import { gameAt, generate, makeMistake, positionOf, readPosition, type Action } from './engine';
+import { gameAt, generate, innerCounts, makeMistake, positionOf, readPosition, type Action } from './engine';
 import { LESSONS, VEGAS_AS_PLAYED } from './lessons';
 import { DONKEY_CHAIN, analyseBreak, breakScenes, findFix, setsOff, trackStars } from './donkey-practice';
 
 const donkey = LESSONS.find((l) => l.id === 'donkey')!;
 const session = donkey.moments[0];
+/** Jared's session 2 donkey (ring 1 not laid out from one bag), kept for the star-tracking and trigger checks. */
+const session2 = { position: readPosition('N4:4.1.1...124002334240230400141122:374,232,242,104:20'), action: { kind: 'rotate', ring: 3, clockwise: true } as Action };
 
 describe('donkey from a blank board', () => {
   it('passes a break that charts a donkey', () => {
@@ -30,7 +32,7 @@ describe('donkey from a blank board', () => {
     const rng = new Random(7);
     let checked = 0;
     for (let i = 0; i < 8 && checked < 4; i++) {
-      const bad = makeMistake(generate(session, donkey.accepts, rng), donkey.accepts, rng);
+      const bad = makeMistake(generate(session, donkey.accepts, rng, donkey.keep), donkey.accepts, rng, donkey.keep);
       if (!bad) continue;
       const a = analyseBreak(bad.position, bad.action);
       expect(a.success).toBe(false);
@@ -63,7 +65,7 @@ describe('donkey from a blank board', () => {
   });
 
   it('tracks a star through a turn and its falls', () => {
-    const { scenes } = breakScenes(session.position, session.action);
+    const { scenes } = breakScenes(session2.position, session2.action);
     const cell = 3 * 8 + 3; // ring 1 north-west, turned clockwise to north
     const tracked = trackStars(scenes, [cell]);
     expect(tracked.get(scenes[0])).toEqual([cell]);
@@ -73,7 +75,16 @@ describe('donkey from a blank board', () => {
   it('prefers a different trigger on the same board', () => {
     // The session board, set off with the wrong turn, still had the donkey one turn away.
     const wrong: Action = { kind: 'rotate', ring: 3, clockwise: false };
-    const fix = findFix(session.position, wrong);
+    const fix = findFix(session2.position, wrong);
     if (fix) expect(fix.kind === 'trigger' || fix.result.charted! >= DONKEY_CHAIN).toBe(true);
+  });
+
+  it('never suggests a fix that leaves three of one colour in ring 1', () => {
+    const rng = new Random(11);
+    for (let i = 0; i < 8; i++) {
+      const bad = makeMistake(generate(session, donkey.accepts, rng, donkey.keep), donkey.accepts, rng, donkey.keep);
+      const fix = bad && findFix(bad.position, bad.action);
+      if (fix) expect(Math.max(...innerCounts(fix.position.cells).values())).toBeLessThanOrEqual(2);
+    }
   });
 });

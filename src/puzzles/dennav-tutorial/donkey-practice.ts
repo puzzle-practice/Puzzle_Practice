@@ -4,7 +4,7 @@
 import { COLOUR_NAMES, OCTANT_NAMES } from '../navigation/create';
 import type { Scene } from '../navigation/game';
 import { EMPTY, type Target } from '../navigation/logic';
-import { INNER, RINGS, act, chainName, clonePosition, gameAt, linkStars, outcome, play, positionOf, settled, type Action, type Outcome, type Position } from './engine';
+import { INNER, RINGS, act, chainName, clonePosition, gameAt, innerCounts, linkStars, outcome, play, positionOf, settled, type Action, type Outcome, type Position } from './engine';
 
 /** The link a donkey charts at; a vegas is one more. */
 export const DONKEY_CHAIN = 5;
@@ -87,6 +87,8 @@ export function findFix(before: Position, action: Action, goal = DONKEY_CHAIN): 
 
   const tryBoard = (cells: number[], changed: number[], text: (r: Outcome) => string, kind: DonkeyFix['kind'], into: DonkeyFix[]) => {
     const position = { ...clonePosition(before), cells };
+    // The bag deals two of each colour, so a fix may not leave three of one colour in ring 1.
+    if ([...innerCounts(cells).values()].some((n) => n > 2)) return;
     if (!waiting(position)) return;
     if (action.kind === 'drop' && cells[position.entry.octant] !== EMPTY) return;
     const result = play(position, action);

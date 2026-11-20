@@ -1,6 +1,6 @@
 // The Dennav tutorial's lessons: what each kind of clear is, how to recognise it from what a move
 // sets off, and the boards it starts from (most of them from real sessions).
-import { INNER, TOP, freeEntry, horizontalIn, verticalThroughInner, readPosition, type Action, type Example, type Outcome } from './engine';
+import { INNER, TOP, freeEntry, horizontalIn, innerFromBag, verticalThroughInner, readPosition, type Action, type Example, type Outcome, type Position } from './engine';
 
 export interface Moment extends Example { label: string }
 
@@ -15,6 +15,8 @@ export interface Lesson {
   lookFor: string[];
   /** Whether a move set this strategy off. */
   accepts: (o: Outcome) => boolean;
+  /** What every board of this lesson must look like before the move (new examples and mistakes keep it). */
+  keep?: (p: Position) => boolean;
   /** Said when a practice move works. */
   success: string;
   /** Boards to start examples from. */
@@ -141,20 +143,26 @@ export const LESSONS: Lesson[] = [
     id: 'donkey',
     title: 'Donkey+ (bag pairs)',
     intro: [
-      'Stars come in a mixed bag with two of each colour, so ring 1 can be built as four pairs: two of each colour side by side, with one colour split.',
-      'Once a clear removes one ring 1 star, the star dropping in joins a pair and clears it, and the gap that leaves lets the next pair\'s third star drop in, and so on round the ring. Every link after the first turns the targets beside it wild, so most of the board goes wild.',
-      'Only the ring 3 star that starts the chain off really matters: get that right and the inner ring runs itself, charting as a donkey (5) or better.',
+      'Stars drop in bags of two of each of the five colours, so ring 1 is built as three pairs side by side, with the two leftover colours next to each other: A A B B C C D E.',
+      'The other D and E go in ring 2, in the same order but one apart, so one turn of ring 2 lines its D up over ring 1\'s D without putting its E over ring 1\'s E. D is the colour you break; E is the one you don\'t, and it must not clear by accident.',
+      'Once a clear removes ring 1\'s D, the star dropping in joins a pair and clears it, and the gap that leaves lets the next pair\'s third star drop in, and so on round the ring. Every link after the first turns the targets beside it wild, so most of the board goes wild.',
+      'Only the clear that knocks D out really matters: get that right and the inner ring runs itself, charting as a donkey (5) or better.',
     ],
-    goal: 'Build ring 1 as pairs, so each clear drops in the next pair’s third star, and set up the clear that knocks out the first ring 1 star.',
+    goal: 'Build ring 1 as three pairs with the two leftover colours side by side, keep ring 2\'s pair of them one apart in the same order, and set up the clear that knocks out ring 1\'s D.',
     lookFor: [
-      'Ring 1 built from pairs, each pair\'s third star waiting above the next gap.',
-      'The trigger: one clear (often a vertical) that knocks the first ring 1 star out.',
+      'Ring 1 as A A B B C C D E: three pairs, then the two leftover colours together.',
+      'Ring 2\'s D and E one apart in the same order, so one turn lines up D but not E.',
+      'Each pair\'s third star waiting above the gap the clear before it leaves.',
       'Targets near the ring 1 pairs, so the cascade turns them wild.',
     ],
     accepts: (o) => (o.charted ?? 0) >= 5 && before(o).filter((l) => horizontalIn(l, INNER)).length >= 3,
+    keep: innerFromBag,
     success: 'The ring 1 pairs chained round and the constellation charted as a donkey or better.',
     moments: [
-      moment('Session 2 at 1:04 (clean board)', 'N4:4.1.1...124002334240230400141122:374,232,242,104:20', rotate(3, true)),
+      // Ring 1 is 1 1 0 0 2 4 3 3 (D = 2, E = 4); ring 2's 2 and 4 sit one apart over ring 1's 4 and 3s.
+      // Turning ring 2 clockwise stacks 2 over 2 over the ring 3 2: the vertical drops a 0 into ring 1,
+      // then the 0s, 1s and 3s clear round the ring in turn, the 4 never clears, and it charts at link 5.
+      moment('Built example', 'N4:....0...301321231331021411002433:260,374,360:40', rotate(2, true)),
     ],
   },
   {

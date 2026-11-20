@@ -117,6 +117,31 @@ export function freeEntry(p: Position, rng?: Random): Position {
   return p;
 }
 
+const INNER_CELLS = [0, 1, 2, 3, 4, 5, 6, 7].map((o) => INNER * 8 + o);
+
+/** How many stars of each colour ring 1 holds. */
+export function innerCounts(cells: number[]): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const cell of INNER_CELLS) if (cells[cell] !== EMPTY) counts.set(cells[cell], (counts.get(cells[cell]) ?? 0) + 1);
+  return counts;
+}
+
+/**
+ * Whether ring 1 is laid out as the first bag (two of each of the five colours) builds it for a
+ * donkey: three pairs side by side, then the two leftover colours next to each other (A A B B C C D E).
+ */
+export function innerFromBag(p: Position): boolean {
+  const ring = INNER_CELLS.map((cell) => p.cells[cell]);
+  if (ring.includes(EMPTY)) return false;
+  const counts = [...innerCounts(p.cells).values()].sort();
+  if (counts.join() !== '1,1,2,2,2') return false;
+  // Every colour's stars sit together, so going round the ring the colour changes exactly five times,
+  // and the two leftover colours are neighbours.
+  if (ring.filter((c, o) => c !== ring[(o + 1) % 8]).length !== 5) return false;
+  const counts1 = innerCounts(p.cells);
+  return ring.some((c, o) => counts1.get(c) === 1 && counts1.get(ring[(o + 1) % 8]) === 1);
+}
+
 // --- Making new examples ---------------------------------------------------------------------
 
 /** Turns every ring by `steps` octants and optionally mirrors the board, keeping the move the same move. */
@@ -174,11 +199,11 @@ export interface Example { position: Position; action: Action }
  * then reshuffled one change at a time, keeping only changes after which the move still sets off
  * the same strategy.
  */
-export function generate(seed: Example, accepts: (o: Outcome) => boolean, rng: Random, changes = 60): Example {
+export function generate(seed: Example, accepts: (o: Outcome) => boolean, rng: Random, keep?: (p: Position) => boolean, changes = 60): Example {
   const colours = shuffle(rng, [0, 1, 2, 3, 4]);
   const base = transform(seed.position, seed.action, rng.integer(0, 7), rng.integer(0, 1) === 1, colours);
   let position = base.position;
-  const ok = (p: Position) => settled(p) && accepts(play(p, base.action));
+  const ok = (p: Position) => (!keep || keep(p)) && settled(p) && accepts(play(p, base.action));
   if (!ok(position)) return { position: seed.position, action: seed.action };
   for (let i = 0, accepted = 0; i < changes * 6 && accepted < changes; i++) {
     const next = mutate(rng, position);
@@ -237,7 +262,7 @@ export interface Mistake extends Example {
 }
 
 /** Recolours one star so the strategy breaks or charts lower, keeping the board one the game could show. */
-export function makeMistake(example: Example, accepts: (o: Outcome) => boolean, rng: Random): Mistake | null {
+export function makeMistake(example: Example, accepts: (o: Outcome) => boolean, rng: Random, keep?: (p: Position) => boolean): Mistake | null {
   const good = play(example.position, example.action);
   const options: Mistake[] = [];
   example.position.cells.forEach((colour, cell) => {
@@ -246,7 +271,7 @@ export function makeMistake(example: Example, accepts: (o: Outcome) => boolean, 
       if (other === colour) continue;
       const position = clonePosition(example.position);
       position.cells[cell] = other;
-      if (!settled(position)) continue;
+      if ((keep && !keep(position)) || !settled(position)) continue;
       const result = play(position, example.action);
       if (accepts(result)) continue;
       // A mistake should spoil the move, not make it better.

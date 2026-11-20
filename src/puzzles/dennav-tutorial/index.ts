@@ -159,7 +159,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   function newExample(): void {
     const moments = lesson().moments;
     const seed = moments[rng.integer(0, moments.length - 1)];
-    showExample(generate(seed, lesson().accepts, rng), 'New example');
+    showExample(generate(seed, lesson().accepts, rng, lesson().keep), 'New example');
   }
 
 
@@ -176,7 +176,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     const l = lesson();
     for (let tries = 0; tries < 40; tries++) {
       const ex: Example = fromSession ? l.moments[momentIndex = (momentIndex + (tries ? 1 : 0)) % l.moments.length]
-        : generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng);
+        : generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng, l.keep);
       const pl = verticalPlan(ex);
       // New examples put the horizontal where it turns the most targets wild, as step 1 teaches.
       if (!pl || (!fromSession && tries < 39 && (pl.lineups.length || wildedBy(ex.position.targets, planHorizontal(ex, pl)).length < bestHorizontals(ex.position.targets).wild))) continue;
@@ -633,7 +633,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     if (!STAGES.some((st) => st.value === stage)) stage = 0;
     for (let tries = 0; tries < 20; tries++) {
       const seed = l.moments[rng.integer(0, l.moments.length - 1)];
-      const ex = generate(seed, l.accepts, rng);
+      const ex = generate(seed, l.accepts, rng, l.keep);
       let dealt: { position: Position; solution: Action[] } | null;
       dealtUpcoming = [];
       if (stage < 0) {
@@ -812,8 +812,8 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   function newMistake(asPlayed = false): void {
     const l = lesson();
     for (let tries = 0; tries < 20; tries++) {
-      const ex = asPlayed ? VEGAS_AS_PLAYED : generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng);
-      const m = asPlayed ? { ...VEGAS_AS_PLAYED, cell: 2 * 8 + 7, fix: 0, result: play(ex.position, ex.action) } : makeMistake(ex, l.accepts, rng);
+      const ex = asPlayed ? VEGAS_AS_PLAYED : generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng, l.keep);
+      const m = asPlayed ? { ...VEGAS_AS_PLAYED, cell: 2 * 8 + 7, fix: 0, result: play(ex.position, ex.action) } : makeMistake(ex, l.accepts, rng, l.keep);
       if (!m) continue;
       mistake = m; found = false; game = null; shown = m.position; example = m;
       scenes = []; marks = [];
@@ -866,7 +866,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   function newBadBuild(): void {
     const l = lesson();
     for (let tries = 0; tries < 20; tries++) {
-      const ex = generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng);
+      const ex = generate(l.moments[rng.integer(0, l.moments.length - 1)], l.accepts, rng, l.keep);
       const build = buildUpAtMost(ex.position, rng, rng.integer(6, 10));
       const spoiled = build && spoilBuild(build, ex.action, l.accepts, rng);
       if (!spoiled) continue;
