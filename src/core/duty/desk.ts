@@ -41,22 +41,40 @@ export function sessionAverages(games: readonly GameRecord[], options: AverageOp
     rows.push(['Average rating', performanceWord(mean)]);
   }
   // Each kind cleared, averaged over the sessions that kept a report, in the latest report's order.
+  // A kind any session cleared counts, not only the latest's (a session without it counts 0), so a
+  // Navigation 5-chain charted in earlier sessions still shows when the latest charted none.
   const latest = reports.at(-1);
   for (const group of latest?.cleared ?? []) {
     if (latest?.puzzle === 'treasure-haul') continue;
     if (group.style === 'row') continue;
-    const kinds = group.items.map((item) => item.label);
+    const matches = reports.map((report) => report.cleared.find((g) => g.label === group.label)).filter((g) => !!g);
+    const kinds = mergedKinds(matches.map((g) => g.items.map((item) => item.label)).reverse());
     const sums = kinds.map(() => 0);
     let n = 0;
-    for (const report of reports) {
-      const match = report.cleared.find((g) => g.label === group.label);
-      if (!match) continue;
+    for (const match of matches) {
       n++;
       kinds.forEach((kind, i) => { sums[i] += match.items.find((item) => item.label === kind)?.count ?? 0; });
     }
     if (n) rows.push([`Average ${group.label.toLowerCase()}`, `[${sums.map((sum) => round(sum / n, 1)).join(', ')}]`]);
   }
   return rows;
+}
+
+/**
+ * Every kind in any of the lists, each list's kinds kept in its order: the first list's order wins,
+ * and a kind only a later list has goes in just after the kind it follows there.
+ */
+function mergedKinds(lists: readonly (readonly string[])[]): string[] {
+  const kinds: string[] = [];
+  for (const list of lists) {
+    let at = 0;
+    for (const kind of list) {
+      const found = kinds.indexOf(kind);
+      if (found >= 0) at = found + 1;
+      else kinds.splice(at++, 0, kind);
+    }
+  }
+  return kinds;
 }
 
 export interface DutyDesk {
