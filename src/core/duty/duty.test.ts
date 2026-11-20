@@ -213,6 +213,11 @@ describe('session averages', () => {
       cleared: [{ label: 'Constellations Charted', inScore: true, items }],
     })) }));
     expect(sessionAverages(games)).toContainEqual(['Average constellations charted', '[0, 0, 0, 0, 0.3, 0.7]']);
+    const vegas = (label: string, count: number) => ({ at: 0, score: 1, duty: encodeReport(makeReport({
+      puzzle: 'navigation', station: 'Navigation', performance: LEARNING, score: { label: 'Points', value: '1' },
+      cleared: [{ label: 'Constellations Charted', inScore: true, items: [{ icon: 'moon', label, count }] }],
+    })) });
+    expect(sessionAverages([vegas('charted in a vegas 1', 2), vegas('charted in a vegas', 0)])).toContainEqual(['Average constellations charted', '[1]']);
   });
   it('supports fewer-is-better practice scores and empty histories', () => {
     expect(sessionAverages([{ at: 0, score: 8 }, { at: 1, score: 4 }], { scoreLabel: 'Moves', lowerIsBetter: true }))

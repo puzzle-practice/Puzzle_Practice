@@ -48,17 +48,21 @@ export function sessionAverages(games: readonly GameRecord[], options: AverageOp
     if (latest?.puzzle === 'treasure-haul') continue;
     if (group.style === 'row') continue;
     const matches = reports.map((report) => report.cleared.find((g) => g.label === group.label)).filter((g) => !!g);
-    const kinds = mergedKinds(matches.map((g) => g.items.map((item) => item.label)).reverse());
+    const kinds = mergedKinds(matches.map((g) => g.items.map((item) => kindOf(item.label))).reverse());
     const sums = kinds.map(() => 0);
     let n = 0;
     for (const match of matches) {
       n++;
-      kinds.forEach((kind, i) => { sums[i] += match.items.find((item) => item.label === kind)?.count ?? 0; });
+      kinds.forEach((kind, i) => { sums[i] += match.items.find((item) => kindOf(item.label) === kind)?.count ?? 0; });
     }
     if (n) rows.push([`Average ${group.label.toLowerCase()}`, `[${sums.map((sum) => round(sum / n, 1)).join(', ')}]`]);
   }
   return rows;
 }
+
+/** Kinds a puzzle has since renamed, so older sessions average with newer ones: Navigation's first Vegas lost its number. */
+const RENAMED_KINDS: Record<string, string> = { 'charted in a vegas 1': 'charted in a vegas' };
+const kindOf = (label: string) => RENAMED_KINDS[label] ?? label;
 
 /**
  * Every kind in any of the lists, each list's kinds kept in its order: the first list's order wins,

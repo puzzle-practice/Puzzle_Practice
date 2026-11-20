@@ -2504,7 +2504,7 @@ describe('Navigation sessions and replay', () => {
     expect(result.report.cleared[0].items.map(item => item.icon)).toEqual(['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-donkey', 'moon-vegas', 'moon-seven', 'text', 'text']);
     expect(result.report.cleared[0].items.map(item => item.label)).toEqual([
       'charted in a single', 'charted in a double', 'charted in a triple', 'charted in a bingo', 'charted in a donkey',
-      'charted in a vegas 1', 'charted in a vegas 2', 'charted in a vegas 3', 'charted in a vegas 4',
+      'charted in a vegas', 'charted in a vegas 2', 'charted in a vegas 3', 'charted in a vegas 4',
     ]);
   });
 
