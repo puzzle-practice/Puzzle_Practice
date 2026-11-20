@@ -11,7 +11,7 @@ import { NavigationGame, type Scene } from '../navigation/game';
 import { COLOUR_NAMES, OCTANT_NAMES, PAINT_KEYS, WILD } from '../navigation/create';
 import { EMPTY, type Run } from '../navigation/logic';
 import {
-  RINGS, INNER, MIDDLE, TOP, act, play, runStars, verticalPlan, bestHorizontals, wildedBy, planHorizontal, innerRun, guessBuild, linedUp, SETTINGS, buildUpAtMost, dropEntries, spoilBuild, chainName, fixes, gameAt, generate, makeMistake, outcome, positionOf, scramble,
+  RINGS, INNER, MIDDLE, TOP, act, play, runStars, linkStars, verticalPlan, bestHorizontals, wildedBy, planHorizontal, innerRun, guessBuild, linedUp, SETTINGS, buildUpAtMost, dropEntries, spoilBuild, chainName, fixes, gameAt, generate, makeMistake, outcome, positionOf, scramble,
   type Action, type BadBuild, type BuildGuess, type VerticalPlan, type Example, type Link, type Mistake, type Outcome, type Position,
 } from './engine';
 import { LESSONS, VEGAS_AS_PLAYED, type Lesson } from './lessons';
@@ -81,6 +81,11 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   let stage = store.get<number>('stage', 0);
   let slow = store.get<boolean>('slow', true);
   let ringChain = store.get<boolean>('ringChain', true);
+  /** How the chain stars are ringed: all gold, each link its own colour, or only the next link to clear. */
+  type Highlight = 'gold' | 'links' | 'next';
+  const HIGHLIGHTS: { value: Highlight; label: string }[] = [{ value: 'links', label: 'Colour by link' }, { value: 'gold', label: 'All gold' }, { value: 'next', label: 'Next link only' }];
+  let highlight: Highlight = store.get<Highlight>('chainHighlight', 'links');
+  if (!HIGHLIGHTS.some((h) => h.value === highlight)) highlight = 'links';
   let debugMode = store.get<boolean>('debugMode', true), exportNotice = '';
   const lesson = (): Lesson => LESSONS[lessonIndex];
 
@@ -104,6 +109,8 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   let captionText = '', status = '';
   /** Cells drawn ringed: the wrong star once found, a wrong click, the trigger's ring. */
   let marks: { cell: number; colour: string }[] = [];
+  /** Marks for each scene of a move as it plays (the chain highlight, or a replayed break's blamed stars), following the stars. */
+  let sceneMarks: Map<Scene, { cell: number; colour: string }[]> | null = null;
   let arrowRing: { ring: number; clockwise: boolean } | null = null;
   let mistake: Mistake | null = null, found = false;
   /** Find the wrong move: the spoiled build, how far through it the board is, and the working board it was meant to reach. */
@@ -132,12 +139,68 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     return new Map(o.links.map((link, i) => [link.scene, caption(link, i)]));
   }
 
+  // --- Chain highlight ---
+  const GOLD = '#ffd84a';
+  /** Link 1 red, 2 orange, 3 yellow, 4 green, 5 cyan, 6 and on violet. */
+  const LINK_COLOURS = ['#ff5050', '#ff9a3c', '#ffe14a', '#5ee07a', '#4ad8ff', '#b07cff'];
+  const linkColour = (k: number) => LINK_COLOURS[Math.min(k, LINK_COLOURS.length - 1)];
+  /** The clears that make the chain, in order, each with its stars as cells of the board before the move. */
+  function chainLinks(p: Position, action: Action): { cells: number[]; run: number }[] {
+    return linkStars(p, action).map((l, run) => ({ cells: l.cells, run, counts: l.counts })).filter((l) => l.counts);
+  }
+  /** The chain stars ringed on the board before the move, in the chosen highlight. */
+  function chainMarks(p: Position, action: Action): { cell: number; colour: string }[] {
+    if (highlight === 'gold') return runStars(p, action).map((cell) => ({ cell, colour: GOLD }));
+    const out: { cell: number; colour: string }[] = [], seen = new Set<number>();
+    chainLinks(p, action).forEach((l, k) => {
+      if (highlight === 'next' && k > 0) return;
+      for (const cell of l.cells) if (!seen.has(cell)) { seen.add(cell); out.push({ cell, colour: linkColour(k) }); }
+    });
+    return out;
+  }
+  /**
+   * The chain stars ringed while the move plays, following them as they turn and fall: every link in its
+   * colour, or only the link still to clear next (while Step waits on a clear, the one after it). All gold
+   * rings nothing during the move, as before.
+   */
+  function chainSceneMarks(list: Scene[], p: Position, action: Action): Map<Scene, { cell: number; colour: string }[]> | null {
+    if (highlight === 'gold') return null;
+    const runScenes = list.map((s, i) => (s.clear?.kind === 'run' ? i : -1)).filter((i) => i >= 0);
+    const links = chainLinks(p, action).map((l) => ({ ...l, at: runScenes[l.run] ?? Infinity }));
+    const tracked = links.map((l) => trackStars(list, l.cells));
+    return new Map(list.map((scene, i) => {
+      const out: { cell: number; colour: string }[] = [], seen = new Set<number>();
+      const nextLink = links.findIndex((l) => l.at > i);
+      links.forEach((_, k) => {
+        if (highlight === 'next' && k !== nextLink) return;
+        for (const cell of tracked[k].get(scene) ?? []) if (!seen.has(cell)) { seen.add(cell); out.push({ cell, colour: linkColour(k) }); }
+      });
+      return [scene, out];
+    }));
+  }
+
+  /** A key to the link colours: a coloured dot per link, numbered. */
+  function linkLegend(): HTMLElement {
+    const legend = document.createElement('div');
+    legend.style.cssText = 'display:flex;gap:10px;align-items:center;font-size:12px;margin:2px 0 4px';
+    legend.append('Links:');
+    LINK_COLOURS.forEach((colour, k) => {
+      const item = document.createElement('span');
+      item.style.cssText = 'display:inline-flex;align-items:center;gap:3px';
+      const dot = document.createElement('span');
+      dot.style.cssText = `display:inline-block;width:11px;height:11px;border-radius:50%;border:2px solid ${colour};box-sizing:border-box`;
+      item.append(dot, k === LINK_COLOURS.length - 1 ? `${k + 1}+` : String(k + 1));
+      legend.append(item);
+    });
+    return legend;
+  }
+
   // --- Learn ---
   function showExample(next: Example, label: string): void {
     example = next; exampleLabel = label; shown = next.position; game = null;
-    scenes = []; marks = []; status = ''; mistake = null; bad = null;
+    scenes = []; marks = []; status = ''; mistake = null; bad = null; sceneMarks = null;
     arrowRing = next.action.kind === 'rotate' ? { ring: next.action.ring, clockwise: next.action.clockwise } : null;
-    if (ringChain) marks = runStars(next.position, next.action).map((cell) => ({ cell, colour: '#ffd84a' }));
+    if (ringChain) marks = chainMarks(next.position, next.action);
     captionText = `${label}: ${moveText(next.action, next.position.entry)} sets it off.`;
   }
   function watch(step: boolean): void {
@@ -146,7 +209,9 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     const list = act(g, example.action);
     const o = outcome(list, positionOf(g));
     stepping = step; arrowRing = null; marks = [];
+    sceneMarks = ringChain ? chainSceneMarks(list, example.position, example.action) : null;
     playScenes(list, captionsFor(o), () => {
+      sceneMarks = null;
       shown = positionOf(g);
       captionText = o.charted ? `Charted as a ${chainName(o.charted).toLowerCase()}.${o.nextInnerWild ? ' The next constellation starts with ring 1 wild.' : ''}` : 'Nothing charted.';
     });
@@ -195,7 +260,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     arrowRing = null; marks = [];
     if (stepAt === 0) {
       shown = ex.position;
-      marks = runStars(ex.position, ex.action).map((cell) => ({ cell, colour: yellow }));
+      marks = chainMarks(ex.position, ex.action);
       arrowRing = ex.action.kind === 'rotate' ? { ring: ex.action.ring, clockwise: ex.action.clockwise } : null;
       status = `${STEP_TITLES[0]}. This is the finished board: ${moveText(ex.action)} lines the ${colour(pl.vertical[0])} vertical up through rings 1–3 and it clears. The ring 4 star above it drops all the way into ring 1 and joins the ${colour(pl.pair[0])} pair there, and that second clear turns the targets beside it wild, so the constellation charts as a triple. Press Play move to watch, then Next step to see how it's built.`;
     } else if (stepAt === 1) {
@@ -251,7 +316,9 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     const list = act(g, stepEx.action);
     const o = outcome(list, positionOf(g));
     stepping = false; arrowRing = null; marks = []; shown = stepEx.position;
+    sceneMarks = stepAt === 0 ? chainSceneMarks(list, stepEx.position, stepEx.action) : null;
     playScenes(list, captionsFor(o), () => {
+      sceneMarks = null;
       shown = positionOf(g);
       captionText = o.charted ? `Charted as a ${chainName(o.charted).toLowerCase()}.` : 'Nothing charted.';
     });
@@ -725,8 +792,6 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   // --- Donkey from a blank board ---
   /** The move that set the board off, and what it did against a donkey (or a vegas, on that lesson). */
   let donkeyBreak: { before: Position; action: Action; analysis: DonkeyAnalysis } | null = null;
-  /** Marks for each scene of a replayed break: the blamed stars follow the move. */
-  let sceneMarks: Map<Scene, { cell: number; colour: string }[]> | null = null;
   const BLAME = '#ff4040', TARGET_BLAME = '#ffb040', FIXED = '#40ff70';
   const donkeyGoal = () => lesson().id === 'vegas' ? DONKEY_CHAIN + 1 : DONKEY_CHAIN;
   const donkeyWord = () => lesson().id === 'vegas' ? 'vegas' : 'donkey';
@@ -1168,6 +1233,13 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     .button('New example', newExample, { disabled: busy, title: 'The same strategy in new colours and target layouts' });
   learn.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); })
     .toggle('Ring the chain stars', () => ringChain, (on) => { ringChain = on; store.set('ringChain', on); if (!busy()) showExample(example, exampleLabel); }, { title: 'Before the move, ring the stars its clears will use' });
+  learn.append(rowBreak());
+  learn.select('Chain highlight', HIGHLIGHTS, () => highlight, (value) => {
+    highlight = value; store.set('chainHighlight', value);
+    if (busy()) return;
+    if (mode === 'learn') showExample(example, exampleLabel);
+  }, { disabled: () => !ringChain, title: 'All gold rings every chain star; Colour by link gives each clear its own colour; Next link only rings just the clear that comes next' });
+  learn.append(linkLegend(), { hidden: () => !ringChain || highlight === 'gold' });
 
   const steps = panel.group('Step by step', { hidden: () => mode !== 'steps' });
   steps.button('◀ Back', () => showStep(stepAt - 1), { disabled: () => busy() || !stepEx || stepAt === 0 })
