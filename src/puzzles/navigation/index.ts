@@ -21,7 +21,7 @@ import type { InputEvent } from '../../core/input';
 import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, type NavigationSettings, type RunTotals, type Scene } from './game';
 import { LEVEL_TARGETS } from './logic';
 import { copyText, pasteText } from '../../core/clipboard';
-import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
+import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, PAINT_KEYS, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
@@ -30,10 +30,6 @@ const CX = 225, CY = 300;
 const MODES = ['normal', 'ww-test', 'ww'] as const;
 const RULE_OPTIONS = MODES.map(value => ({ value, label: modeLabel(value) }));
 const MODE_OPTIONS = [...RULE_OPTIONS, { value: 'create' as const, label: 'Freeplay' }];
-/** Freeplay mode paints with each colour's initial held over a cell, X to clear and A for a wild target. */
-const PAINT_KEYS = [...COLOUR_NAMES.map((name, colour) => ({ id: `paint${name}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: name[0].toLowerCase(), colour })),
-  { id: 'paintClear', label: 'Clear (Freeplay)', defaultKey: 'x', colour: CLEAR }, { id: 'paintWild', label: 'Wild target (Freeplay)', defaultKey: 'a', colour: WILD }];
-
 export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplayTime: rawReplayTime }) => {
   const pause = new SessionPause(rawTicks, rawReplayTime);
   const { ticks, setReplayTime } = pause;

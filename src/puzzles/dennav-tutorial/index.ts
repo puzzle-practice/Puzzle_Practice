@@ -4,28 +4,42 @@
 import { Images } from '../../core/assets';
 import { SoundBank } from '../../core/audio';
 import { Random } from '../../core/random';
-import { keyMatches } from '../../core/controls';
+import { keyFor, keyLabel, keyMatches } from '../../core/controls';
+import { copyText } from '../../core/clipboard';
 import type { PuzzleFactory } from '../../core/puzzle';
 import { NavigationGame, type Scene } from '../navigation/game';
-import { COLOUR_NAMES, OCTANT_NAMES } from '../navigation/create';
+import { COLOUR_NAMES, OCTANT_NAMES, PAINT_KEYS, WILD } from '../navigation/create';
 import { EMPTY, type Run } from '../navigation/logic';
 import {
   RINGS, INNER, MIDDLE, TOP, act, play, runStars, verticalPlan, bestHorizontals, wildedBy, planHorizontal, innerRun, guessBuild, linedUp, SETTINGS, buildUpAtMost, dropEntries, spoilBuild, chainName, fixes, gameAt, generate, makeMistake, outcome, positionOf, scramble,
   type Action, type BadBuild, type BuildGuess, type VerticalPlan, type Example, type Link, type Mistake, type Outcome, type Position,
 } from './engine';
 import { LESSONS, VEGAS_AS_PLAYED, type Lesson } from './lessons';
+import { besideTop, checkPlan, dealPlanningBoard, paintPlan, planningOptions, type PlanCheck, type PlanningOption } from './planning';
+import { builtComboIssue, buildOptionsFor, checkBuildPosition, checkBuildTurned, solutionsFor, unturnedCell, type BuildIssue, type Strictness } from './build-position';
+import { boardExport } from './board-export';
+import { dealFinish, finishGame, finishHint, judgeFinish, type FinishDeal } from './finish-combo';
 
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 const imageUrls = import.meta.glob<string>('../navigation/media/*.png', { eager: true, query: '?url', import: 'default' });
 const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
+const PLAN_WILD_OUTLINE = '#91bba6', PLAN_PROBLEM_OUTLINE = '#ce9c96', PLAN_WARNING_OUTLINE = '#d8c48e';
+const STRICTNESS: { value: Strictness; label: string }[] = [
+  { value: 'lenient', label: 'Lenient: any working triple' },
+  { value: 'standard', label: 'Standard: suboptimal warns' },
+  { value: 'strict', label: 'Strict: suboptimal fails' },
+];
+const PLAN_PAINT_KEYS = PAINT_KEYS.filter((binding) => binding.colour !== WILD);
 const CX = 225, CY = 300;
 const radius = (ring: number) => 55 + (RINGS - 1 - ring) * 47;
 const position = (octant: number, r: number): [number, number] => [CX + Math.cos(octant * Math.PI / 4) * r, CY - Math.sin(octant * Math.PI / 4) * r];
 const ringLabel = (ring: number) => `ring ${RINGS - ring}`;
 
-type Mode = 'learn' | 'steps' | 'practise' | 'scratch' | 'spot' | 'when';
+type Mode = 'learn' | 'steps' | 'plan' | 'build' | 'finish' | 'practise' | 'scratch' | 'spot' | 'when';
 const MODES: { value: Mode; label: string }[] = [
-  { value: 'learn', label: 'Learn' }, { value: 'steps', label: 'Build it step by step' }, { value: 'practise', label: 'Practice' },
+  { value: 'learn', label: '1. Example' }, { value: 'plan', label: '2. Plan Position' },
+  { value: 'build', label: '3. Build Ring 1' }, { value: 'finish', label: '4. Finish the Combo' },
+  { value: 'steps', label: 'Build it step by step' }, { value: 'practise', label: 'Practice' },
   { value: 'scratch', label: 'Build from scratch' },
   { value: 'spot', label: 'Spot the wrong star' }, { value: 'when', label: 'Find the wrong move' },
 ];
@@ -55,7 +69,7 @@ function moveText(action: Action, entry?: { colour: number; octant: number }): s
   return `turn ${ringLabel(action.ring)} ${action.clockwise ? 'clockwise' : 'anticlockwise'}`;
 }
 
-export default (async ({ screen, panel, store, ticks }) => {
+export default (async ({ screen, input, panel, store, ticks }) => {
   const images = await Images.load(imageUrls);
   const sounds = new SoundBank(soundUrls);
   const ctx = screen.ctx;
@@ -66,6 +80,7 @@ export default (async ({ screen, panel, store, ticks }) => {
   let stage = store.get<number>('stage', 0);
   let slow = store.get<boolean>('slow', true);
   let ringChain = store.get<boolean>('ringChain', true);
+  let debugMode = store.get<boolean>('debugMode', true), exportNotice = '';
   const lesson = (): Lesson => LESSONS[lessonIndex];
 
   // What's on the board.
@@ -95,11 +110,11 @@ export default (async ({ screen, panel, store, ticks }) => {
 
   /** Replaying the last move slowly (Build from scratch). */
   let replaying = false;
-  const isSlow = () => slow || replaying;
+  const isSlow = () => replaying || (slow && mode !== 'build' && mode !== 'finish');
   const speed = () => (isSlow() ? 2 : 1);
   const busy = () => scenes.length > 0;
   /** Modes where the player moves the rings. */
-  const playing = () => mode === 'practise' || mode === 'scratch';
+  const playing = () => mode === 'practise' || mode === 'scratch' || mode === 'build' || mode === 'finish';
 
   function playScenes(list: Scene[], captions: Map<Scene, string>, done: (() => void) | null = null): void {
     scenes = list.map((scene) => ({ scene, caption: captions.get(scene) }));
@@ -241,6 +256,314 @@ export default (async ({ screen, panel, store, ticks }) => {
     });
   }
 
+  // --- Plan a vertical triple ---
+  let brush = 0, planBoard = 0, plansSolved = 0, planNextAt = 0;
+  let planPaintWith: number | null = null, planPainting = false;
+  let planMouse: [number, number] = [-1, -1];
+  let paintedPlan: Position | null = null, revealedPlan: Position | null = null;
+  let lastAcceptedPlan: Position | null = null;
+  let revealedOptions: PlanningOption[] = [], revealedAt = 0;
+  let planCheck: PlanCheck | null = null;
+  let planNotice = '';
+  const planDetails = document.createElement('section');
+  planDetails.className = 'tutorial-plan-details'; planDetails.hidden = true;
+  const planFeedback = document.createElement('p');
+  planFeedback.setAttribute('role', 'status'); planFeedback.setAttribute('aria-live', 'polite');
+  const answerNavigation = document.createElement('div'); answerNavigation.className = 'tutorial-answer-navigation';
+  const previousAnswer = document.createElement('button'), nextAnswer = document.createElement('button');
+  previousAnswer.type = nextAnswer.type = 'button';
+  previousAnswer.className = nextAnswer.className = 'panel-button';
+  previousAnswer.textContent = 'Previous answer'; nextAnswer.textContent = 'Next answer';
+  previousAnswer.addEventListener('click', () => { if (mode === 'build') showBuildSolution(buildSolutionAt - 1); else showPlanOption(revealedAt - 1); screen.canvas.focus({ preventScroll: true }); });
+  nextAnswer.addEventListener('click', () => { if (mode === 'build') showBuildSolution(buildSolutionAt + 1); else showPlanOption(revealedAt + 1); screen.canvas.focus({ preventScroll: true }); });
+  const answerCount = document.createElement('span'); answerCount.setAttribute('aria-live', 'polite');
+  answerNavigation.append(previousAnswer, answerCount, nextAnswer);
+  planDetails.append(answerNavigation, planFeedback);
+  screen.canvas.after(planDetails);
+
+  function syncPlanDetails(): void {
+    planDetails.hidden = mode !== 'build' && mode !== 'finish' && (mode !== 'plan' || (!planCheck && !revealedPlan && !planNotice));
+    const solving = mode === 'build' && buildSolutionShown;
+    answerNavigation.hidden = solving ? false : mode !== 'plan' || !revealedPlan;
+    previousAnswer.textContent = solving ? 'Previous solution' : 'Previous answer';
+    nextAnswer.textContent = solving ? 'Next solution' : 'Next answer';
+    previousAnswer.disabled = nextAnswer.disabled = (solving ? buildSolutions.length : revealedOptions.length) < 2;
+    const count = solving ? `Solution ${buildSolutionAt + 1} of ${buildSolutions.length}` : `Answer ${revealedAt + 1} of ${revealedOptions.length}`;
+    if (answerCount.textContent !== count) answerCount.textContent = count;
+    const message = mode === 'finish' ? status : mode === 'build' ? solving ? buildSolutionText() : status : planNotice || (revealedPlan ? status : planCheck?.message ?? '');
+    if (planFeedback.textContent !== message) planFeedback.textContent = message;
+    planDetails.classList.toggle('is-invalid', mode === 'finish' ? finishFailed : mode === 'build' ? buildFailed : !revealedPlan && !!planCheck && !planCheck.accepted);
+  }
+  const planInstructions = 'Paint three ring 1 stars: a pair and the first vertical star.';
+  function newPlan(): void {
+    paintedPlan = dealPlanningBoard(rng, planBoard === 0);
+    planNotice = '';
+    planBoard++; planNextAt = 0; revealedPlan = null; planCheck = null;
+    revealedOptions = []; revealedAt = 0;
+    planPaintWith = null; planPainting = false;
+    game = null; scenes = []; afterScenes = null; waiting = false; marks = []; arrowRing = null;
+    shown = paintedPlan;
+    captionText = `Board ${planBoard} · ${plansSolved} accepted`;
+    status = planInstructions;
+  }
+  function markPlan(result: Pick<PlanCheck, 'accepted' | 'site'>): void {
+    marks = result.site?.wilded.map((t) => ({ cell: t.ring * 8 + t.octant, colour: PLAN_WILD_OUTLINE })) ?? [];
+    if (!result.accepted && paintedPlan?.cells.filter((c) => c !== EMPTY).length === 3) {
+      paintedPlan.cells.forEach((c, cell) => { if (c !== EMPTY) marks.push({ cell, colour: PLAN_PROBLEM_OUTLINE }); });
+    }
+  }
+  function paintPlanningCell(cell: number, colour = brush): void {
+    if (!paintedPlan || revealedPlan || planNextAt) return;
+    if (paintedPlan.cells[cell] === colour) return;
+    planNotice = '';
+    paintedPlan.cells[cell] = colour;
+    shown = paintedPlan;
+    planCheck = checkPlan(paintedPlan);
+    status = planCheck.message;
+    markPlan(planCheck);
+    if (planCheck.accepted) {
+      lastAcceptedPlan = { cells: [...paintedPlan.cells], targets: paintedPlan.targets.map((t) => ({ ...t })), entry: { ...paintedPlan.entry } };
+      plansSolved++;
+      planNextAt = ticks() + 2000;
+      captionText = `Accepted · ${planCheck.site!.wilded.length} targets turn wild`;
+    } else captionText = paintedPlan.cells.filter((c) => c !== EMPTY).length >= 3 ? planCheck.message.split('. ')[0] : `Board ${planBoard} · ${plansSolved} accepted`;
+  }
+  function paintPlanningAt(pos: [number, number], colour: number): void {
+    const cell = cellAt(pos);
+    if (cell) paintPlanningCell(cell.ring * 8 + cell.octant, colour);
+  }
+  function clearPlan(): void {
+    if (!paintedPlan || planNextAt) return;
+    paintedPlan.cells.fill(EMPTY); shown = paintedPlan;
+    planPaintWith = null; planPainting = false;
+    revealedPlan = null; planCheck = null; planNotice = ''; marks = []; status = planInstructions;
+    revealedOptions = []; revealedAt = 0;
+    captionText = `Board ${planBoard} · ${plansSolved} accepted`;
+  }
+  function revealPlan(): void {
+    if (!paintedPlan || planNextAt) return;
+    planNotice = '';
+    planPaintWith = null; planPainting = false;
+    if (revealedPlan) {
+      revealedPlan = null; shown = paintedPlan; marks = [];
+      status = planCheck?.message ?? planInstructions;
+      if (planCheck) markPlan(planCheck);
+      captionText = planCheck && paintedPlan.cells.filter((c) => c !== EMPTY).length >= 3
+        ? planCheck.message.split('. ')[0] : `Board ${planBoard} · ${plansSolved} accepted`;
+      return;
+    }
+    if (!revealedOptions.length) revealedOptions = planningOptions(paintedPlan.targets);
+    if (!revealedOptions.length) {
+      planNotice = 'No answer under the current rules.';
+      captionText = planNotice;
+      syncPlanDetails(); draw(ticks());
+      return;
+    }
+    showPlanOption(revealedAt);
+  }
+  function showPlanOption(index: number): void {
+    if (!paintedPlan || !revealedOptions.length || mode !== 'plan' || planNextAt) return;
+    revealedAt = (index + revealedOptions.length) % revealedOptions.length;
+    const { site, verticalColour, horizontalColour } = revealedOptions[revealedAt];
+    revealedPlan = { ...paintedPlan, cells: paintPlan(site, verticalColour, horizontalColour) }; shown = revealedPlan;
+    // This option was already validated when the board's answer list was made.
+    markPlan({ accepted: true, site });
+    captionText = `Answer ${revealedAt + 1} of ${revealedOptions.length} · ${COLOUR_NAMES[verticalColour]} vertical, ${COLOUR_NAMES[horizontalColour].toLowerCase()} pair`;
+    status = `${site.wilded.length} targets turn wild. Keep at least one wrong until the second clear.`;
+    // Answer browsing is a UI action: repaint immediately, even if the simulation is throttled.
+    syncPlanDetails();
+    draw(ticks());
+  }
+
+  // --- Build Ring 1: normal drops/turns, ending at the three-star plan. ---
+  let pauseBuildOnFail = store.get<boolean>('pauseBuildOnFail', true);
+  let buildBoard = 0, buildsSolved = 0, buildMoves = 0, buildSeed = 1;
+  let buildStart: Position | null = null, buildOptions: PlanningOption[] = [];
+  let strictness = store.get<Strictness>('buildStrictness', 'standard');
+  let buildStopped = false, buildFailed = false, buildResetPending = false, buildSubmitPending = false, buildNextAt = 0;
+  const buildInstructions = 'Build three ring 1 stars. Press Enter to submit.';
+  // Show solution: accepted plans drawn faintly over the player's board. Only a view; it never completes the board.
+  let buildSolutions: PlanningOption[] = [], buildSolutionAt = 0, buildSolutionShown = false;
+  function toggleBuildSolution(): void {
+    if (buildSolutionShown) { buildSolutionShown = false; syncPlanDetails(); draw(ticks()); return; }
+    buildSolutions = buildStart ? solutionsFor(shown, planningOptions(buildStart.targets)) : [];
+    if (!buildSolutions.length) { status = 'No answer under the current rules.'; syncPlanDetails(); draw(ticks()); return; }
+    buildSolutionShown = true;
+    showBuildSolution(0);
+  }
+  function showBuildSolution(index: number): void {
+    if (!buildSolutionShown || !buildSolutions.length) return;
+    buildSolutionAt = (index + buildSolutions.length) % buildSolutions.length;
+    syncPlanDetails(); draw(ticks());
+  }
+  function buildSolutionText(): string {
+    const { site, verticalColour, horizontalColour } = buildSolutions[buildSolutionAt];
+    const at = (cell: number) => OCTANT_NAMES[cell % 8].toLowerCase();
+    const pair = site.horizontal.filter((cell) => cell !== site.vertical[0]).map(at).join(' and ');
+    const beside = besideTop(shown.targets, site) ? ' Vertical beside the ring 3 target, so the build can finish early if the stars come early.' : '';
+    return `${COLOUR_NAMES[horizontalColour]} pair at ${pair}, ${COLOUR_NAMES[verticalColour].toLowerCase()} vertical at ${at(site.vertical[0])}. `
+      + `${site.wilded.length} targets turn wild (outlined). Keep at least one wrong until the second clear.${beside}`;
+  }
+  /** The shown solution's three ring 1 stars, for the faint goal drawing. */
+  function buildSolutionGoal(): Position | null {
+    if (mode !== 'build' || !buildSolutionShown || !buildSolutions.length) return null;
+    const { site, verticalColour, horizontalColour } = buildSolutions[buildSolutionAt];
+    return { ...shown, cells: paintPlan(site, verticalColour, horizontalColour) };
+  }
+  const buildSolutionMarks = () => mode === 'build' && buildSolutionShown && buildSolutions.length
+    ? buildSolutions[buildSolutionAt].site.wilded.map((t) => ({ cell: t.ring * 8 + t.octant, colour: PLAN_WILD_OUTLINE })) : [];
+  function newBuildPosition(fromPlan = false): void {
+    const source = fromPlan ? lastAcceptedPlan ?? paintedPlan : null;
+    const p = source ?? dealPlanningBoard(rng, buildBoard === 0);
+    buildStart = { ...p, cells: p.cells.map(() => EMPTY), targets: p.targets.map((t) => ({ ...t })) };
+    buildOptions = buildOptionsFor(buildStart.targets, strictness);
+    buildSeed = rng.integer(1, 0x7fffffff); buildBoard++;
+    resetBuildPosition();
+  }
+  function resetBuildPosition(): void {
+    if (!buildStart) return;
+    input.drain(); // Pending keys belonged to the previous attempt.
+    game = new NavigationGame(SETTINGS, buildSeed);
+    game.targets = buildStart.targets.map((t) => ({ ...t }));
+    shown = positionOf(game);
+    scenes = []; afterScenes = null; waiting = false; marks = []; arrowRing = null;
+    queued = []; lastMove = null; replaying = false; replayWanted = false; settleAt = 0;
+    selected = INNER; buildMoves = 0; buildStopped = false; buildFailed = false; buildSolutionShown = false;
+    buildResetPending = false; buildSubmitPending = false; buildNextAt = 0;
+    captionText = `Board ${buildBoard} · ${buildsSolved} built`;
+    status = buildInstructions;
+  }
+  function failBuildPosition(issue: BuildIssue, p: Position): void {
+    shown = p; scenes = []; afterScenes = null; waiting = false;
+    buildStopped = true; buildFailed = true; buildNextAt = 0;
+    buildSubmitPending = false; queued = [];
+    marks = issue.cells.map((cell) => ({ cell, colour: PLAN_PROBLEM_OUTLINE }));
+    captionText = issue.message; status = pauseBuildOnFail ? `${issue.message} Space: retry · Enter: next.` : issue.message;
+    sounds.play('buzz', 0.6);
+    buildResetPending = !pauseBuildOnFail;
+    syncPlanDetails(); draw(ticks());
+  }
+  function submitBuildPosition(): void {
+    if (!game || buildStopped || buildSubmitPending) return;
+    buildSubmitPending = true;
+    if (!busy() && !queued.length) judgeBuildPosition();
+    else status = 'Finishing moves before judging…';
+  }
+  function judgeBuildPosition(): void {
+    if (!game || buildStopped || busy() || queued.length) return;
+    buildSubmitPending = false;
+    const p = positionOf(game);
+    if (game.booched) { failBuildPosition({ message: 'That drop booched.', cells: [game.entry.octant] }, p); return; }
+    if (game.constellations) { failBuildPosition({ message: 'The constellation cleared. Start a new board.', cells: [] }, p); return; }
+    // Ring 2 may not be turned into place yet: judge its most logical position, silently.
+    // The player's board stays as they left it, so map marked ring 2 cells back onto it.
+    const { check: checked, turns, position: judged } = checkBuildTurned(p, buildOptions, true, strictness);
+    const onBoard = (issue: BuildIssue): BuildIssue => ({ ...issue, cells: issue.cells.map((cell) => unturnedCell(cell, turns)) });
+    if (checked.kind === 'failed') { failBuildPosition(onBoard(checked.issue), p); return; }
+    if (checked.kind === 'building') {
+      // A combo the player built that the planning rules reject says why, not just "finish".
+      failBuildPosition(onBoard(builtComboIssue(judged, 1, buildOptions, strictness) ?? { message: 'Finish the three-star ring 1 plan.', cells: [] }), p); return;
+    }
+    shown = p; buildStopped = true; buildFailed = false; buildsSolved++;
+    buildNextAt = ticks() + 1;
+    marks = checked.plan.site.horizontal.map((cell) => ({ cell, colour: PLAN_WILD_OUTLINE }));
+    const warnings = checked.warnings ?? [];
+    // Suboptimal points: accepted, but said, with their cells marked in a softer colour.
+    for (const w of warnings) for (const cell of w.cells) marks.push({ cell: unturnedCell(cell, turns), colour: PLAN_WARNING_OUTLINE });
+    captionText = warnings.length ? 'Position built (suboptimal)' : 'Position built';
+    status = warnings.length
+      ? `Position built, but: ${warnings.map((w) => `${w.message.replace(/\.$/, '')} (suboptimal)`).join('; ')}. Next board…`
+      : 'Position built. Next board…';
+    syncPlanDetails(); draw(ticks());
+  }
+  function buildPositionMove(action: Action, fromQueue = false): void {
+    if (!game || !buildStart || buildStopped || (buildSubmitPending && !fromQueue)) return;
+    if (busy()) { if (queued.length < 4) queued.push(action); return; }
+    const g = game;
+    const list = act(g, action);
+    if (!list.length) {
+      if (g.booched) { shown = positionOf(g); captionText = 'Board booched'; status = 'Board booched. Press Enter to submit.'; }
+      if (g.booched) queued = [];
+      const nextMove = queued.shift();
+      if (nextMove) buildPositionMove(nextMove, true);
+      else if (buildSubmitPending) judgeBuildPosition();
+      return;
+    }
+    buildMoves++;
+    marks = []; stepping = false;
+    captionText = `Board ${buildBoard} · ${buildMoves} moves · Enter to submit`;
+    status = buildSubmitPending ? 'Finishing moves before judging…' : buildInstructions;
+    playScenes(list, captionsFor(outcome(list, positionOf(g))), () => {
+      shown = positionOf(g);
+      const nextMove = queued.shift();
+      if (nextMove) buildPositionMove(nextMove, true);
+      else if (buildSubmitPending) judgeBuildPosition();
+    });
+  }
+
+  // --- Finish the Combo: the first bag is placed; play on with the game's next stars to the triple. ---
+  let finishDeal: FinishDeal | null = null, finishOptions: PlanningOption[] = [];
+  let finishBoard = 0, finishSolved = 0, finishMoves = 0, finishNextAt = 0;
+  let finishStopped = false, finishFailed = false, finishHintShown = false;
+  const finishInstructions = 'Finish the vertical through rings 1–3 with the pair’s colour in ring 4 above it, fill the targets that won’t turn wild, and set it off.';
+  function newFinish(): void {
+    finishDeal = dealFinish(rng, strictness, finishBoard === 0);
+    finishOptions = buildOptionsFor(finishDeal.position.targets, strictness);
+    finishBoard++;
+    resetFinish();
+  }
+  function resetFinish(): void {
+    if (!finishDeal) return;
+    input.drain();
+    game = finishGame(finishDeal);
+    shown = positionOf(game);
+    scenes = []; afterScenes = null; waiting = false; marks = []; arrowRing = null;
+    queued = []; lastMove = null; replaying = false; replayWanted = false;
+    selected = TOP; finishMoves = 0; finishStopped = false; finishFailed = false; finishNextAt = 0;
+    captionText = `Board ${finishBoard} · ${finishSolved} finished`;
+    status = finishInstructions;
+  }
+  function failFinish(issue: BuildIssue, p: Position): void {
+    shown = p; scenes = []; afterScenes = null; waiting = false; queued = [];
+    finishStopped = true; finishFailed = true;
+    marks = issue.cells.map((cell) => ({ cell, colour: PLAN_PROBLEM_OUTLINE }));
+    captionText = issue.message; status = `${issue.message} Space: retry · Enter: next.`;
+    sounds.play('buzz', 0.6);
+    syncPlanDetails(); draw(ticks());
+  }
+  function finishMove(action: Action, fromQueue = false): void {
+    if (!game || !finishDeal || finishStopped) return;
+    if (busy() && !fromQueue) { if (queued.length < 4 && !replaying) queued.push(action); return; }
+    const g = game;
+    const before = positionOf(g);
+    const list = act(g, action);
+    const after = positionOf(g);
+    if (!list.length && !g.booched) { const nextMove = queued.shift(); if (nextMove) finishMove(nextMove, true); return; }
+    lastMove = { before, action };
+    finishMoves++; marks = []; stepping = false;
+    const o = outcome(list, after);
+    const judge = () => {
+      shown = positionOf(g);
+      const result = judgeFinish(o, after, g.booched, finishOptions, strictness, lesson().accepts);
+      if (result.kind === 'failed') { failFinish(result.issue, shown); return; }
+      if (result.kind === 'success') {
+        finishStopped = true; finishFailed = false; finishSolved++; queued = [];
+        finishNextAt = ticks() + 2500;
+        captionText = 'Triple!'; status = `Yes! ${lesson().success} Next board…`;
+        return;
+      }
+      // Suboptimal pieces: keep playing, but say so, with their cells in the softer colour.
+      marks = result.warnings.flatMap((w) => w.cells.map((cell) => ({ cell, colour: PLAN_WARNING_OUTLINE })));
+      captionText = `Board ${finishBoard} · ${finishMoves} moves`;
+      status = result.warnings.length ? `Careful: ${result.warnings.map((w) => `${w.message.replace(/\.$/, '')} (suboptimal)`).join('; ')}.` : finishInstructions;
+      const nextMove = queued.shift();
+      if (nextMove) finishMove(nextMove, true);
+    };
+    if (!list.length) { judge(); return; }
+    playScenes(list, captionsFor(o), judge);
+  }
+  function toggleFinishHint(): void { finishHintShown = !finishHintShown; draw(ticks()); }
+
   // --- Build from scratch ---
   /** What the board looks like it's building, and the line-ups already buzzed for. */
   let guess: BuildGuess | null = null, buzzed = new Set<string>();
@@ -257,7 +580,7 @@ export default (async ({ screen, panel, store, ticks }) => {
     const live = game;
     replaying = true; stepping = false; marks = []; shown = lastMove.before;
     captionText = `Last move: ${moveText(lastMove.action, lastMove.action.kind === 'drop' ? lastMove.before.entry : undefined)}`;
-    playScenes(list, captionsFor(o), () => { replaying = false; shown = positionOf(live); captionText = ''; checkScratch(); });
+    playScenes(list, captionsFor(o), () => { replaying = false; shown = positionOf(live); captionText = ''; if (mode === 'scratch') checkScratch(); });
   }
   function newScratch(): void {
     game = new NavigationGame(SETTINGS, rng.integer(1, 0x7fffffff));
@@ -349,6 +672,8 @@ export default (async ({ screen, panel, store, ticks }) => {
   }
   function practiceMove(action: Action): void {
     if (!game || !playing()) return;
+    if (mode === 'build') { buildPositionMove(action); return; }
+    if (mode === 'finish') { finishMove(action); return; }
     // From scratch: moves made while one plays out wait their turn, as in the game.
     if (busy() && mode === 'scratch') { if (queued.length < 4 && !replaying) queued.push(action); return; }
     if (busy()) return;
@@ -540,7 +865,8 @@ export default (async ({ screen, panel, store, ticks }) => {
     for (const m of glows) {
       const target = scene.targets.some((t) => t.ring * 8 + t.octant === m.cell);
       const empty = scene.cells[m.cell] < 0;
-      ringMark(m.cell, m.colour, empty ? (target ? 28 : 17) : 0, target ? 21 : 30);
+      if (mode === 'plan' || mode === 'build' || mode === 'finish') planningOutline(m.cell, m.colour, m.colour === PLAN_WILD_OUTLINE ? 29 : 24);
+      else ringMark(m.cell, m.colour, empty ? (target ? 28 : 17) : 0, target ? 21 : 30);
     }
     for (let ring = 0; ring < RINGS; ring++) for (let o = 0; o < 8; o++) {
       const colour = scene.cells[ring * 8 + o];
@@ -560,6 +886,13 @@ export default (async ({ screen, panel, store, ticks }) => {
       ctx.restore();
     }
   }
+  /** A thin perimeter only: keep the original piece and target colours unobscured. */
+  function planningOutline(cell: number, colour: string, size: number): void {
+    const [x, y] = position(cell % 8, radius(Math.floor(cell / 8)));
+    ctx.save(); ctx.strokeStyle = colour; ctx.lineWidth = 1.25; ctx.globalAlpha = 0.8;
+    ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
   /** A glow behind a star, added as light so a target under it still shows. */
   /** `outline`: draw a ring of that radius instead, round a target (so it stays readable) or an empty cell. */
   /** `size`: the glow's radius (smaller on a target, so its frame still shows). */
@@ -576,8 +909,8 @@ export default (async ({ screen, panel, store, ticks }) => {
     ctx.beginPath(); ctx.arc(x, y, size, 0, Math.PI * 2); ctx.fill(); ctx.restore();
   }
   /** The finished board, faint, wherever the board in play doesn't match it yet. */
-  function drawGoal(target: Position, cells: number[]): void {
-    ctx.save(); ctx.globalAlpha = 0.38;
+  function drawGoal(target: Position, cells: number[], alpha = 0.38): void {
+    ctx.save(); ctx.globalAlpha = alpha;
     target.cells.forEach((colour, i) => { if (colour !== EMPTY && cells[i] !== colour) star(colour, i % 8, radius(Math.floor(i / 8))); });
     ctx.restore();
   }
@@ -627,15 +960,27 @@ export default (async ({ screen, panel, store, ticks }) => {
     const scene: Scene = current?.scene ?? { cells: shown.cells, targets: shown.targets, duration: 0 };
     const duration = (current?.scene.duration ?? 0) * speed();
     const progress = duration ? Math.min(1, (now - sceneStart) / duration) : 1;
-    drawBoard(scene, progress, now, current ? [] : marks);
+    if (mode === 'plan') {
+      // Show the paintable slots even before there are any stars on the board.
+      ctx.save(); ctx.strokeStyle = 'rgba(180, 205, 255, 0.45)'; ctx.lineWidth = 1;
+      for (let ring = 0; ring < RINGS; ring++) for (let o = 0; o < 8; o++) {
+        const [x, y] = position(o, radius(ring));
+        ctx.beginPath(); ctx.arc(x, y, 15, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    drawBoard(scene, progress, now, current ? [] : [...marks, ...buildSolutionMarks()]);
+    const solution = current ? null : buildSolutionGoal();
+    if (solution) drawGoal(solution, scene.cells, 0.7);
+    if (!current && mode === 'finish' && finishHintShown && finishDeal) drawGoal(finishHint(shown, finishDeal.plan), scene.cells, 0.7);
     if (!current && mode === 'practise' && game && goal && showGoal) drawGoal(goal, scene.cells);
     if (!current) {
       if (arrowRing) drawArrow(arrowRing.ring, arrowRing.clockwise);
-      if (playing() && game && !game.finished && mode !== 'scratch') star(game.entry.colour, game.entry.octant, 205);
+      if (playing() && game && !game.finished && mode !== 'scratch' && mode !== 'build' && mode !== 'finish') star(game.entry.colour, game.entry.octant, 205);
       if (mode === 'when' && bad && bad.moves[buildAt]?.kind === 'drop') star(bad.boards[buildAt].entry.colour, bad.boards[buildAt].entry.octant, 205);
     }
     // From scratch keeps the next star in view while a move plays out.
-    if (mode === 'scratch' && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
+    if ((mode === 'scratch' || (mode === 'build' && !buildStopped) || (mode === 'finish' && !finishStopped)) && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
     drawCaption(captionText);
   }
 
@@ -674,11 +1019,19 @@ export default (async ({ screen, panel, store, ticks }) => {
   }
 
   function setMode(next: Mode): void {
+    if ((next === 'plan' || next === 'build' || next === 'finish') && !hasSteps()) {
+      lessonIndex = LESSONS.findIndex((l) => l.id === 'vertical-triple'); momentIndex = 0;
+      store.set('lesson', lesson().id); renderText();
+    }
     mode = next; store.set('mode', mode);
     scenes = []; marks = []; status = ''; mistake = null; bad = null; game = null; start = null;
-    waiting = false; afterScenes = null;
+    waiting = false; afterScenes = null; planNextAt = 0; planPaintWith = null; planPainting = false;
+    buildResetPending = false; buildSubmitPending = false; buildNextAt = 0; buildStopped = false; buildFailed = false; buildSolutionShown = false; queued = [];
     if (mode === 'learn') showExample(lesson().moments[momentIndex] ?? lesson().moments[0], (lesson().moments[momentIndex] ?? lesson().moments[0]).label);
     else if (mode === 'steps') newSteps(true);
+    else if (mode === 'plan') newPlan();
+    else if (mode === 'build') newBuildPosition(true);
+    else if (mode === 'finish') newFinish();
     else if (mode === 'practise') newPractice();
     else if (mode === 'scratch') newScratch();
     else if (mode === 'when') newBadBuild();
@@ -687,7 +1040,7 @@ export default (async ({ screen, panel, store, ticks }) => {
   function setLesson(index: number): void {
     lessonIndex = index; momentIndex = 0; store.set('lesson', lesson().id);
     renderText();
-    setMode(mode);
+    setMode((mode === 'plan' || mode === 'build' || mode === 'finish') && !hasSteps() ? 'learn' : mode);
   }
 
   // --- Panel ---
@@ -705,9 +1058,12 @@ export default (async ({ screen, panel, store, ticks }) => {
   const lessonGroup = panel.group('Lesson');
   lessonGroup.select('Lesson', LESSONS.map((l, value) => ({ value, label: l.title })), () => lessonIndex, setLesson);
   lessonGroup.select('Mode', MODES, () => mode, setMode);
-  lessonGroup.note(() => status);
+  lessonGroup.note(() => mode === 'build' || mode === 'finish' || (mode === 'plan' && (planCheck || revealedPlan || planNotice)) ? '' : status);
 
   const rowBreak = () => document.createElement('div');
+  panel.settings.group('Debug').toggle('Debug mode', () => debugMode, (on) => {
+    debugMode = on; store.set('debugMode', on); exportNotice = '';
+  });
   const learn = panel.group('Watch', { hidden: () => mode !== 'learn' });
   learn.button('Play move', () => watch(false), { variant: 'primary', disabled: busy })
     .button('Step', () => watch(true), { disabled: busy, title: 'Play the move one link at a time; press Next (or Space) for each link' })
@@ -728,6 +1084,63 @@ export default (async ({ screen, panel, store, ticks }) => {
     .button('Session board', () => { momentIndex = (momentIndex + 1) % lesson().moments.length; newSteps(true); }, { disabled: () => busy() || !hasSteps(), title: 'The next board from your replays' })
     .button('New example', () => newSteps(), { disabled: () => busy() || !hasSteps(), title: 'The same strategy in new colours and target layouts' });
   steps.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
+
+  const planning = panel.group('Plan a vertical triple', { hidden: () => mode !== 'plan' });
+  planning.select('Paint', [...COLOUR_NAMES.map((label, value) => ({ value, label })), { value: EMPTY, label: 'Eraser' }], () => brush, (value) => { brush = value; }, { disabled: () => !!revealedPlan || !!planNextAt });
+  planning.button('Show answer', revealPlan, { label: () => revealedPlan ? 'Hide answer' : 'Show answer', disabled: () => !!planNextAt })
+    .button('Clear painting', clearPlan, { disabled: () => !!planNextAt })
+    .button('New board', newPlan);
+  function addControls(group: typeof planning, building = false): void {
+  const controlsToggle = document.createElement('button');
+  controlsToggle.type = 'button'; controlsToggle.className = 'tutorial-controls-toggle';
+  controlsToggle.textContent = 'Show controls'; controlsToggle.setAttribute('aria-expanded', 'false');
+  const controlsId = building ? 'tutorial-build-controls' : 'tutorial-plan-controls';
+  controlsToggle.setAttribute('aria-controls', controlsId);
+  const controlsHelp = document.createElement('div');
+  controlsHelp.id = controlsId; controlsHelp.className = 'tutorial-controls'; controlsHelp.hidden = true;
+  controlsToggle.addEventListener('click', () => {
+    controlsHelp.hidden = !controlsHelp.hidden;
+    controlsToggle.textContent = controlsHelp.hidden ? 'Show controls' : 'Hide controls';
+    controlsToggle.setAttribute('aria-expanded', String(!controlsHelp.hidden));
+    if (!controlsHelp.hidden) {
+      const keys = document.createElement('p'), pointer = document.createElement('p');
+      keys.textContent = building
+        ? `${[1, 2, 3, 4].map((n) => keyLabel(keyFor('navigation', `selectRing${n}`, String(n)))).join('/')} Rings · ${keyLabel(keyFor('navigation', 'ccw', 'arrowleft'))}/${keyLabel(keyFor('navigation', 'cw', 'arrowright'))} Turn · ${keyLabel(keyFor('navigation', 'drop', 'space'))} Drop · Enter Submit`
+        : PLAN_PAINT_KEYS.map(({ id, defaultKey, colour }) => `${keyLabel(keyFor('navigation', id, defaultKey))} ${colour === EMPTY ? 'Erase' : COLOUR_NAMES[colour]}`).join(' · ');
+      pointer.textContent = building ? 'Click to select, then turn; right-click turns left. After a fail: Space retries, Enter skips.' : 'Hold a key and move to paint. Click/drag also paints; right-click erases.';
+      controlsHelp.replaceChildren(keys, pointer);
+    }
+    screen.canvas.focus({ preventScroll: true });
+  });
+  group.append(controlsToggle).append(controlsHelp);
+  }
+  addControls(planning);
+
+  const building = panel.group('Build Ring 1', { hidden: () => mode !== 'build' });
+  building.button('New board', () => newBuildPosition())
+    .button('Retry board', resetBuildPosition)
+    .button('Show solution', toggleBuildSolution, { label: () => buildSolutionShown ? 'Hide solution' : 'Show solution', title: 'Show an accepted ring 1 plan over your board' });
+  building.select('Strictness', STRICTNESS, () => strictness, (value) => {
+    strictness = value; store.set('buildStrictness', value);
+    if (buildStart) buildOptions = buildOptionsFor(buildStart.targets, strictness);
+  }, { title: 'Lenient: any combo that still sets off the triple. Standard: suboptimal pieces only warn. Strict: suboptimal pieces fail too.' });
+  building.toggle('Pause on fail', () => pauseBuildOnFail, (on) => {
+    pauseBuildOnFail = on; store.set('pauseBuildOnFail', on);
+    if (!on && buildFailed) newBuildPosition();
+  });
+  building.button('Submit (Enter)', submitBuildPosition, { variant: 'primary', disabled: () => buildStopped || buildSubmitPending });
+  addControls(building, true);
+
+  const finishing = panel.group('Finish the Combo', { hidden: () => mode !== 'finish' });
+  finishing.button('New board', () => newFinish())
+    .button('Retry board', resetFinish)
+    .button('Show hint', toggleFinishHint, { label: () => finishHintShown ? 'Hide hint' : 'Show hint', title: 'Show the finished combo faintly over your board' });
+  finishing.select('Strictness', STRICTNESS, () => strictness, (value) => {
+    strictness = value; store.set('buildStrictness', value);
+    if (finishDeal) finishOptions = buildOptionsFor(finishDeal.position.targets, strictness);
+  }, { title: 'Lenient: any combo that still sets off the triple. Standard: suboptimal pieces only warn. Strict: suboptimal pieces fail too.' });
+  finishing.button('Replay last move slowly', replayLast, { disabled: () => !lastMove, title: 'Play your last move again, slowed down, to see what it set off' });
+  addControls(finishing, true);
 
   const scratch = panel.group('Build from scratch', { hidden: () => mode !== 'scratch' });
   scratch.button('New board', newScratch, { variant: 'primary' });
@@ -779,16 +1192,58 @@ export default (async ({ screen, panel, store, ticks }) => {
   when.button('Show answer', () => { if (!bad) return; found = true; showBuild(bad.culprit + 1); status = wrongMoveText(); }, { disabled: () => busy() || !bad || found });
   when.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
-  panel.group('About this strategy', { collapsed: false }).append(text);
+  const debug = panel.group(undefined, { hidden: () => !debugMode });
+  debug.button('Export board', () => {
+    if (!debugMode || busy()) return;
+    const p = shown;
+    const data = boardExport(p, {
+      lesson: lesson().id, mode, feedback: status, selectedRing: RINGS - selected,
+      phase: mode === 'finish' ? finishFailed ? 'failed' : finishStopped ? 'complete' : 'building'
+        : mode === 'build' ? buildFailed ? 'failed' : buildStopped ? 'complete' : 'building'
+        : mode === 'plan' ? revealedPlan ? 'answer' : 'painting' : 'viewing',
+      boardNumber: mode === 'finish' ? finishBoard : mode === 'build' ? buildBoard : mode === 'plan' ? planBoard : undefined,
+      seed: mode === 'build' ? buildSeed : game?.seed,
+      initialPosition: mode === 'build' ? buildStart ?? undefined : mode === 'finish' ? finishDeal?.position : undefined,
+      action: mode === 'learn' ? example.action : undefined,
+      validation: mode === 'finish' ? checkBuildPosition(p, finishOptions, true, strictness) : mode === 'build' ? (({ check, turns }) => ({ ...check, ring2Turns: turns }))(checkBuildTurned(p, buildOptions, true, strictness)) : mode === 'plan' ? checkPlan(p) : undefined,
+    });
+    copyText(data, 'Copy board export:'); exportNotice = 'Board copied. Paste it into chat.';
+  }, { disabled: busy, title: 'Copy the board and validation details for chat' });
+  debug.note(() => exportNotice);
+
+  panel.group('About this strategy', { collapsed: true, hidden: () => mode === 'plan' || mode === 'build' }).append(text);
 
   setMode(mode);
 
   const key = (name: string, action: string, fallback: string) => keyMatches(name, 'navigation', action, fallback);
   return {
-    dispose() { sounds.dispose(); },
+    dispose() { sounds.dispose(); planDetails.remove(); },
     frame(events) {
       for (const event of events) {
+        if (mode === 'plan') {
+          const paintKey = event.type === 'keydown' || event.type === 'keyup'
+            ? PLAN_PAINT_KEYS.find(({ id, defaultKey }) => key(event.key, id, defaultKey)) : undefined;
+          if (paintKey) {
+            if (event.type === 'keyup') { if (planPaintWith === paintKey.colour) planPaintWith = null; }
+            else { planPaintWith = paintKey.colour; paintPlanningAt(input.mouse, paintKey.colour); }
+          } else if (event.type === 'mousedown' && (event.button === 1 || event.button === 3)) {
+            if (event.button === 1) planPainting = true;
+            paintPlanningAt(event.pos as [number, number], event.button === 3 ? EMPTY : planPaintWith ?? brush);
+          } else if (event.type === 'mouseup' && event.button === 1) planPainting = false;
+          continue;
+        }
         if (event.type === 'keydown') {
+          if (mode === 'build' && buildFailed && buildStopped) {
+            if (event.key === 'space') resetBuildPosition();
+            else if (event.key === 'enter') newBuildPosition();
+            continue;
+          }
+          if (mode === 'build' && event.key === 'enter') { submitBuildPosition(); continue; }
+          if (mode === 'finish' && finishStopped) {
+            if (finishFailed && event.key === 'space') resetFinish();
+            else if (event.key === 'enter') newFinish();
+            continue;
+          }
           if (key(event.key, 'drop', 'space') && waiting) { next(); continue; }
           if (mode === 'when') {
             if (key(event.key, 'ccw', 'arrowleft')) buildStep(-1);
@@ -816,8 +1271,24 @@ export default (async ({ screen, panel, store, ticks }) => {
           }
         }
       }
+      if (mode === 'plan') {
+        const mouse = input.mouse;
+        if (mouse[0] !== planMouse[0] || mouse[1] !== planMouse[1]) {
+          const colour = planPaintWith ?? (planPainting ? brush : null);
+          if (colour !== null) paintPlanningAt(mouse, colour);
+        }
+        planMouse = [...mouse];
+      }
       advance(ticks());
+      if (mode === 'plan' && planNextAt && ticks() >= planNextAt) newPlan();
+      if (mode === 'build') {
+        if (buildResetPending) {
+          const failure = status; newBuildPosition(); status = `Last fail: ${failure}`;
+        } else if (buildNextAt && ticks() >= buildNextAt) newBuildPosition();
+      }
+      if (mode === 'finish' && finishNextAt && ticks() >= finishNextAt) newFinish();
       if (mode === 'scratch' && settleAt && ticks() >= settleAt && !busy() && !queued.length) judgeScratch();
+      syncPlanDetails();
       draw(ticks());
     },
   };

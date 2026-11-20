@@ -8,6 +8,9 @@ import type { NavigationGame } from './game';
 export const COLOUR_NAMES = ['Blue', 'Orange', 'Red', 'White', 'Yellow'];
 /** Freeplay paints a colour, clears (-1), or for targets makes one wild (5). */
 export const CLEAR = -1, WILD = 5;
+/** Shared Freeplay painting bindings: hold a colour's initial over a cell, X clears, A makes targets wild. */
+export const PAINT_KEYS = [...COLOUR_NAMES.map((name, colour) => ({ id: `paint${name}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: name[0].toLowerCase(), colour })),
+  { id: 'paintClear', label: 'Clear (Freeplay)', defaultKey: 'x', colour: CLEAR }, { id: 'paintWild', label: 'Wild target (Freeplay)', defaultKey: 'a', colour: WILD }];
 export const OCTANT_NAMES = ['East', 'North-east', 'North', 'North-west', 'West', 'South-west', 'South', 'South-east'];
 
 /** Paints a star, or clears one, in the cell given. Stars can float: they settle inward at the next Drop. Returns false when nothing changed. */
