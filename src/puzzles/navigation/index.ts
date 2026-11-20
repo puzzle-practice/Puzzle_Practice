@@ -13,7 +13,8 @@ import { TEXT } from '../../core/duty/report';
 
 /** A constellation charted in a chain of each length, from none. */
 const CHAIN_NAMES = ['—', 'Single', 'Double', 'Triple', 'Bingo', 'Donkey'];
-const chainName = (chain: number): string => chain > 5 ? `Vegas ${chain - 5}` : CHAIN_NAMES[chain];
+/** A 6-chain is a Vegas; only the ones past it are numbered (Vegas 2 is a 7-chain). */
+const chainName = (chain: number): string => chain > 6 ? `Vegas ${chain - 5}` : chain === 6 ? 'Vegas' : CHAIN_NAMES[chain];
 const MOONS = ['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-donkey', 'moon-vegas', 'moon-seven'];
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
