@@ -218,6 +218,54 @@ export function analyseBreak(before: Position, action: Action, goal = DONKEY_CHA
   return analysis;
 }
 
+/** One still of a finished board, to step through with the arrow keys. */
+export interface BreakFrame {
+  kind: 'move' | 'before' | 'turn' | 'fall' | 'clear' | 'end';
+  position: Position;
+  /** For a build move: its number on the board (1 is the first move) and the move about to be made. */
+  move?: number;
+  action?: Action;
+  /** The scene of the break this still is from, if any (its caption is the link's). */
+  scene?: Scene;
+  /** Stars to blame and targets to blame, where they are in this still. */
+  blame: number[];
+  targets: number[];
+  /** Stars this still's clear takes, and which clear of the move it is (0 is the first). */
+  clearing: number[];
+  link?: number;
+}
+
+const samePosition = (a: Position, b: Position) => a.cells.join() === b.cells.join() && JSON.stringify(a.targets) === JSON.stringify(b.targets);
+
+/**
+ * Every still of a board that broke: the board before each build move, then the break itself (the
+ * board before it, each turn, fall and clear, and the board it left). Stills that look the same as the
+ * one before are left out. Returns the stills and where the break starts.
+ */
+export function breakFrames(history: { before: Position; action: Action }[], before: Position, action: Action, analysis: DonkeyAnalysis): { frames: BreakFrame[]; start: number; result: Outcome } {
+  const frames: BreakFrame[] = history.map((h, i) => ({ kind: 'move', position: h.before, move: i + 1, action: h.action, blame: [], targets: [], clearing: [] }));
+  const start = frames.length;
+  frames.push({ kind: 'before', position: before, action, blame: analysis.stars, targets: analysis.targets, clearing: [] });
+  const { scenes, result } = breakScenes(before, action);
+  const tracked = trackStars(scenes, analysis.stars);
+  let clears = 0;
+  scenes.forEach((scene, i) => {
+    const position: Position = { cells: scene.cells, targets: scene.targets, entry: before.entry };
+    // A fall's stars are drawn where they land, so its blamed stars are where the fall leaves them.
+    const blame = (scene.falls?.length && !scene.clear ? tracked.get(scenes[i + 1]) : tracked.get(scene)) ?? [];
+    if (scene.clear) {
+      frames.push({ kind: 'clear', position, scene, blame, targets: analysis.targets, clearing: scene.clear.cells.map((c) => c.ring * 8 + c.octant), link: clears++ });
+      return;
+    }
+    if (samePosition(position, frames[frames.length - 1].position)) return;
+    frames.push({ kind: scene.falls?.length ? 'fall' : 'turn', position, scene, blame, targets: analysis.targets, clearing: [] });
+  });
+  const last = frames[frames.length - 1];
+  if (last.kind !== 'clear' && last.kind !== 'before' && samePosition(last.position, result.after)) frames.pop();
+  frames.push({ kind: 'end', position: result.after, blame: analysis.end, targets: analysis.targets, clearing: [] });
+  return { frames, start, result };
+}
+
 /**
  * Where each of `cells` (stars of the board before the move) sits in every scene of the move: they
  * turn with their ring, fall inwards, and are gone once cleared.

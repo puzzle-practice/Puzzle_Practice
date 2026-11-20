@@ -19,7 +19,7 @@ import { besideTop, checkPlan, dealPlanningBoard, paintPlan, planningOptions, ty
 import { builtComboIssue, buildOptionsFor, checkBuildPosition, checkBuildTurned, solutionsFor, unturnedCell, type BuildIssue, type Strictness } from './build-position';
 import { boardExport } from './board-export';
 import { dealFinish, finishGame, finishHint, judgeFinish, type FinishDeal } from './finish-combo';
-import { DONKEY_CHAIN, analyseBreak, donkeyGame, breakScenes, setsOff, trackStars, type DonkeyAnalysis } from './donkey-practice';
+import { DONKEY_CHAIN, analyseBreak, breakFrames, donkeyGame, breakScenes, setsOff, trackStars, type BreakFrame, type DonkeyAnalysis } from './donkey-practice';
 
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 const imageUrls = import.meta.glob<string>('../navigation/media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -801,12 +801,16 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   // --- Donkey from a blank board ---
   /** The move that set the board off, and what it did against a donkey (or a vegas, on that lesson). */
   let donkeyBreak: { before: Position; action: Action; analysis: DonkeyAnalysis } | null = null;
+  /** The moves made on this board before the break, each with the board before it. */
+  let donkeyHistory: { before: Position; action: Action }[] = [];
+  /** Stills of the build and the break, stepped through with the arrow keys once the board has broken. */
+  let donkeyFrames: { frames: BreakFrame[]; start: number; result: Outcome } | null = null, frameAt = 0;
   const BLAME = '#ff4040', TARGET_BLAME = '#ffb040', FIXED = '#40ff70';
   const donkeyGoal = () => lesson().id === 'vegas' ? DONKEY_CHAIN + 1 : DONKEY_CHAIN;
   const donkeyWord = () => lesson().id === 'vegas' ? 'vegas' : 'donkey';
   function newDonkey(): void {
     game = donkeyGame(rng.integer(1, 0x7fffffff));
-    start = null; upcoming = []; goal = null; donkeyBreak = null; sceneMarks = null;
+    start = null; upcoming = []; goal = null; donkeyBreak = null; sceneMarks = null; donkeyHistory = []; donkeyFrames = null; frameAt = 0;
     shown = positionOf(game);
     scenes = []; afterScenes = null; waiting = false; stepping = false; replaying = false; queued = []; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1;
     captionText = '';
@@ -824,6 +828,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     const o = outcome(list, positionOf(game));
     const g = game;
     const broke = setsOff(o);
+    if (!broke) donkeyHistory.push({ before, action });
     if (broke) queued = [];
     stepping = false;
     // Only the break is described: a stray single while building plays out without a caption.
@@ -835,27 +840,44 @@ export default (async ({ screen, input, panel, store, ticks }) => {
       if (nextMove) donkeyMove(nextMove);
     });
   }
-  function breakMarks(a: DonkeyAnalysis): { cell: number; colour: string }[] {
-    return [...a.stars.map((cell) => ({ cell, colour: BLAME })), ...a.targets.map((cell) => ({ cell, colour: TARGET_BLAME }))];
-  }
   function endDonkey(before: Position, action: Action): void {
     const analysis = analyseBreak(before, action, donkeyGoal());
     donkeyBreak = { before, action, analysis };
+    donkeyFrames = breakFrames(donkeyHistory, before, action, analysis);
     game = null; queued = [];
     showBreakBoard();
-    status = `${analysis.headline} ${analysis.problem}${analysis.fix ? ` ${analysis.fix.text}` : ''} ${analysis.success ? '' : 'Replay the break to watch it with that ringed. '}Ctrl starts a new board.`;
+    status = `${analysis.headline} ${analysis.problem}${analysis.fix ? ` ${analysis.fix.text}` : ''} ${analysis.success ? '' : 'Replay the break to watch it with that ringed. '}The left and right arrows step through it, and back through your build. Ctrl starts a new board.`;
   }
   /** The board just before the break, with the stars to blame ringed red and targets amber. */
   function showBreakBoard(): void {
     if (!donkeyBreak || busy()) return;
-    const { before, action, analysis } = donkeyBreak;
-    shown = before; sceneMarks = null;
-    marks = breakMarks(analysis);
-    arrowRing = action.kind === 'rotate' ? { ring: action.ring, clockwise: action.clockwise } : null;
-    captionText = `Before the break: ${moveText(action, action.kind === 'drop' ? before.entry : undefined)}.`;
+    showFrame(donkeyFrames?.start ?? 0);
   }
+  /** One still of the build or the break: blamed stars red, blamed targets amber, a clear's stars in its link colour. */
+  function showFrame(index: number): void {
+    if (!donkeyBreak || !donkeyFrames || busy()) return;
+    const { frames, start, result } = donkeyFrames;
+    frameAt = Math.max(0, Math.min(frames.length - 1, index));
+    const f = frames[frameAt];
+    shown = f.position; sceneMarks = null;
+    marks = [
+      ...f.clearing.map((cell) => ({ cell, colour: f.scene?.clear?.kind === 'target' ? GOLD : linkColour(f.link ?? 0) })),
+      ...f.blame.filter((cell) => !f.clearing.includes(cell)).map((cell) => ({ cell, colour: BLAME })),
+      ...f.targets.map((cell) => ({ cell, colour: TARGET_BLAME })),
+    ];
+    arrowRing = (f.kind === 'move' || f.kind === 'before') && f.action?.kind === 'rotate' ? { ring: f.action.ring, clockwise: f.action.clockwise } : null;
+    const move = (a: Action | undefined) => (a ? moveText(a, a.kind === 'drop' ? f.position.entry : undefined) : '');
+    const text = f.kind === 'move' ? `Move ${f.move}: ${move(f.action)}.`
+      : f.kind === 'before' ? `Before the break (move ${start + 1}): ${move(f.action)}.`
+      : f.kind === 'clear' ? (f.scene && captionsFor(result).get(f.scene)) || 'The constellation charts.'
+      : f.kind === 'fall' ? 'Stars fall in.'
+      : f.kind === 'turn' ? 'After the move.'
+      : result.charted ? `Charted as a ${chainName(result.charted).toLowerCase()}.` : 'Nothing charted.';
+    captionText = `${text} (${frameAt + 1} / ${frames.length})`;
+  }
+  function stepFrame(by: number): void { if (donkeyFrames) showFrame(frameAt + by); }
   /** Plays the break again, slowed, with the blamed stars ringed as they move; or the fixed board. */
-  function replayBreak(fixed: boolean, step: boolean): void {
+  function replayBreak(fixed: boolean): void {
     if (!donkeyBreak || busy()) return;
     const { analysis } = donkeyBreak;
     const fix = analysis.fix;
@@ -872,7 +894,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     ]]));
     const last = list.at(-1);
     if (last && !fixed && analysis.end.length) sceneMarks.set(last, [...(sceneMarks.get(last) ?? []), ...analysis.end.map((cell) => ({ cell, colour: BLAME }))]);
-    shown = p; marks = []; arrowRing = null; stepping = step;
+    shown = p; marks = []; arrowRing = null; stepping = false;
     captionText = `${fixed ? 'Fixed' : 'Your break'}: ${moveText(action, action.kind === 'drop' ? p.entry : undefined)}`;
     playScenes(list, captionsFor(result), () => {
       replaying = false; stepping = false;
@@ -1331,11 +1353,12 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     .button('Rotate right', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: true }), { disabled: () => !!donkeyBreak })
     .button('Drop star', () => practiceMove({ kind: 'drop' }), { disabled: () => !!donkeyBreak });
   donkeyGroup.append(rowBreak());
-  donkeyGroup.button('Replay the break', () => replayBreak(false, false), { disabled: () => busy() || !donkeyBreak, title: 'Watch the move that set it off, slowed down, with the stars to blame ringed red' })
-    .button('Step through it', () => replayBreak(false, true), { disabled: () => busy() || !donkeyBreak, title: 'One link at a time: press Next (or Space) for each' })
-    .button('Next', next, { disabled: () => !waiting });
+  donkeyGroup.button('◀ Earlier', () => stepFrame(-1), { disabled: () => busy() || !donkeyFrames || frameAt === 0, title: 'One still back (Left arrow): back through the break, then your build' })
+    .button('Later ▶', () => stepFrame(1), { disabled: () => busy() || !donkeyFrames || frameAt >= donkeyFrames.frames.length - 1, title: 'One still on (Right arrow)' });
   donkeyGroup.append(rowBreak());
-  donkeyGroup.button('Watch it fixed', () => replayBreak(true, false), { disabled: () => busy() || !donkeyBreak?.analysis.fix, title: 'The same break with the fix made' })
+  donkeyGroup.button('Replay the break', () => replayBreak(false), { disabled: () => busy() || !donkeyBreak, title: 'Watch the move that set it off, slowed down, with the stars to blame ringed red' });
+  donkeyGroup.append(rowBreak());
+  donkeyGroup.button('Watch it fixed', () => replayBreak(true), { disabled: () => busy() || !donkeyBreak?.analysis.fix, title: 'The same break with the fix made' })
     .button('Board before the break', showBreakBoard, { disabled: () => busy() || !donkeyBreak });
   donkeyGroup.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
@@ -1451,6 +1474,12 @@ export default (async ({ screen, input, panel, store, ticks }) => {
           if (mode === 'when') {
             if (key(event.key, 'ccw', 'arrowleft')) buildStep(-1);
             else if (key(event.key, 'cw', 'arrowright')) buildStep(1);
+            continue;
+          }
+          if (mode === 'donkey' && donkeyBreak) {
+            // Once the board has broken, the arrows step through what happened instead of turning rings.
+            if (key(event.key, 'ccw', 'arrowleft')) stepFrame(-1);
+            else if (key(event.key, 'cw', 'arrowright')) stepFrame(1);
             continue;
           }
           if (!playing()) continue;

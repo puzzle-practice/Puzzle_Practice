@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
 import { gameAt, generate, innerCounts, makeMistake, positionOf, readPosition, type Action } from './engine';
 import { LESSONS, VEGAS_AS_PLAYED } from './lessons';
-import { DONKEY_CHAIN, analyseBreak, breakScenes, donkeyGame, findFix, setsOff, trackStars } from './donkey-practice';
+import { DONKEY_CHAIN, analyseBreak, breakFrames, breakScenes, donkeyGame, findFix, setsOff, trackStars } from './donkey-practice';
 
 const donkey = LESSONS.find((l) => l.id === 'donkey')!;
 const session = donkey.moments[0];
@@ -66,6 +66,32 @@ describe('donkey from a blank board', () => {
       expect(perRing(g.targets), `seed ${seed}`).toBe('0,1,2,3');
       // The constellations the board deals after charting.
       for (let i = 0; i < 3; i++) expect(perRing(g.board.nextConstellation()), `seed ${seed}, constellation ${i + 2}`).toBe('0,1,2,3');
+    }
+  });
+
+  it('lists the stills of a broken board: the build, then the break link by link', () => {
+    const { position: before, action } = session;
+    const history = [
+      { before: readPosition('N4:................................:300,201,210,104:30'), action: { kind: 'drop' } as Action },
+      { before, action: { kind: 'rotate', ring: 1, clockwise: true } as Action },
+    ];
+    const analysis = analyseBreak(before, action);
+    const { frames, start, result } = breakFrames(history, before, action, analysis);
+    expect(start).toBe(2);
+    expect(frames.slice(0, 2).map((f) => f.move)).toEqual([1, 2]);
+    expect(frames[start].kind).toBe('before');
+    expect(frames[start].position).toBe(before);
+    expect(frames.at(-1)!.kind).toBe('end');
+    expect(frames.at(-1)!.position).toEqual(result.after);
+    // One still per clear of the move, in order, each with the stars it takes.
+    const clears = frames.filter((f) => f.kind === 'clear');
+    expect(clears.length).toBe(result.links.length);
+    expect(clears.map((f) => f.link)).toEqual(clears.map((_, i) => i));
+    for (const f of clears) expect(f.clearing.length).toBeGreaterThan(0);
+    // No two stills in a row look the same, except a clear (its stars are ringed on the board before it goes).
+    for (let i = 1; i < frames.length; i++) {
+      if (frames[i].kind === 'clear' || frames[i].kind === 'move' || frames[i - 1].kind === 'move') continue;
+      expect(frames[i].position.cells.join(), `still ${i}`).not.toBe(frames[i - 1].position.cells.join());
     }
   });
 
