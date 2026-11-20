@@ -18,7 +18,7 @@ const MOONS = ['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-do
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { InputEvent } from '../../core/input';
-import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, targetLit, type NavigationSettings, type RunTotals, type Scene } from './game';
+import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, runsScore, targetLit, type NavigationSettings, type RunTotals, type Scene } from './game';
 import { LEVEL_TARGETS } from './logic';
 import { copyText, pasteText } from '../../core/clipboard';
 import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
@@ -66,11 +66,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let running = false, finished = false, selected = 0;
   /**
    * The rules a game is played by (the replay format's simulatorVersion). 2: the first click on a
-   * new board only focuses it and never selects or turns a ring. Replays play by the rules they
-   * were recorded with.
+   * new board only focuses it and never selects or turns a ring. 3: run clears score nothing in
+   * Dennav and Old Dennav. Replays play by the rules they were recorded with.
    */
-  const RULES = 2;
+  const RULES = 3;
   let rules = RULES;
+  /** Whether this game's run clears add points: always in Normal, and in either Dennav only for replays from before rules 3. */
+  const scoreRuns = () => runsScore(liveSettings.mode) || rules < 3;
   /** Set on each new board: the next click on the board is the one that focuses it. */
   let focusClick = false;
   let startTime = 0, endTime = 0;
@@ -121,7 +123,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     layer = 'stars'; palette = paintWith = null; painting = false; setup = ''; pasteNote = '';
     runSeed = seed; board = 0; banked = NO_TOTALS; charts = []; longestChain = longestCascade = 0;
     dealAt = 0; pendingStart = null;
-    game = new NavigationGame(liveSettings, seed);
+    game = new NavigationGame(liveSettings, seed, undefined, true, scoreRuns());
     selectInnerRing(); focusClick = rules >= 2;
     running = true; finished = false; hold.clear();
     startTime = endTime = sceneStart = ticks();
@@ -143,7 +145,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     banked = totals();
     board++;
     // A quota run's count carries on; a timed WW board has its own quota.
-    game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0), opening);
+    game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0), opening, scoreRuns());
     selectInnerRing(); focusClick = rules >= 2;
     scenes = []; fastDrop = false; incomingRadius = 220;
     message = note; messageAt = ticks(); messagePx = gameFont(3); messageFill = TEXT_WHITE;
@@ -180,11 +182,15 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function startScene(scene: Scene): void {
     if (!scene.clear) return;
     const clear = scene.clear;
-    message = `${chainName(clear.chain)}! ${clear.kind === 'target' ? 'Constellation! ' : ''}+${clear.points}`;
-    messageAt = sceneStart;
-    // Chains are 30px yellow; other clears are white and grow with their points (GameFonts.get(points, 300)).
-    messagePx = clear.chain > 1 ? gameFont(1) : gameFontFor(clear.points, 300);
-    messageFill = clear.chain > 1 ? TEXT_YELLOW : TEXT_WHITE;
+    // A run clear that scores nothing (Dennav) shows no points: just the chain from a double on.
+    const scoreless = clear.kind === 'run' && !scoreRuns();
+    if (!scoreless || clear.chain > 1) {
+      message = `${chainName(clear.chain)}!${scoreless ? '' : ` ${clear.kind === 'target' ? 'Constellation! ' : ''}+${clear.points}`}`;
+      messageAt = sceneStart;
+      // Chains are 30px yellow; other clears are white and grow with their points (GameFonts.get(points, 300)).
+      messagePx = clear.chain > 1 ? gameFont(1) : gameFontFor(clear.points, 300);
+      messageFill = clear.chain > 1 ? TEXT_YELLOW : TEXT_WHITE;
+    }
     let sound = 'star_destroy';
     if (clear.kind === 'target') {
       const rings = clear.cells.map(c => c.ring);
@@ -246,7 +252,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       loadBoard(game, read);
     } else if (name === 'generate') {
       board++;
-      game = new NavigationGame(liveSettings, boardSeed(runSeed, board));
+      game = new NavigationGame(liveSettings, boardSeed(runSeed, board), undefined, true, scoreRuns());
     } else return;
     selectInnerRing();
     setup = boardCode(game); incomingRadius = 220;
@@ -490,7 +496,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   options.toggle('Slow drop', () => settings.slowDrop, on => { settings.slowDrop = on; saveSettings(); }, { disabled: busy, title: 'Each star waits at the top until you press Drop.' });
   options.toggle('Wild targets', () => settings.wildTargets, on => { settings.wildTargets = on; saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
   options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
-  options.hint(() => settings.mode === 'ww-test' ? 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
+  options.hint(() => settings.mode === 'ww-test' ? 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
   options.button('Reset to defaults', () => { settings = { ...DEFAULT_SETTINGS }; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy });
   panel.controls('navigation', [
     { id: 'ringOut', label: 'Select outer ring', defaultKey: 'arrowup' },

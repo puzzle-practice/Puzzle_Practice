@@ -106,8 +106,8 @@ describe('navigation sessions', () => {
     g.board.set(0, 2, 4);
     g.rotate(3, true);
     expect(g.constellations).toBe(1);
-    // The run is 3 points; the one inner-ring target, trunc(3 * 1.5²) = 6, doubles.
-    expect(g.points).toBe(3 + 6 * 2);
+    // The run scores nothing in Dennav; the one inner-ring target, trunc(3 * 1.5²) = 6, doubles.
+    expect(g.points).toBe(6 * 2);
     // Charted in a double chain: a half moon on the duty report.
     expect(g.moons).toEqual([0, 1, 0]);
   });
