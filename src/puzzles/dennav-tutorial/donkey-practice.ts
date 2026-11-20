@@ -55,8 +55,12 @@ export function breakScenes(p: Position, action: Action): { scenes: Scene[]; res
   return { scenes, result: outcome(scenes, positionOf(game)) };
 }
 
-/** Whether the move set anything off: the first such move of a practice board ends it. */
-export const setsOff = (o: Outcome): boolean => o.links.length > 0;
+/**
+ * Whether the move set off a chain of two or more links (a double or longer): the first such move
+ * of a practice board ends it. A single clear on its own, or a constellation charted as a single,
+ * happens now and then while building and play goes on.
+ */
+export const setsOff = (o: Outcome): boolean => o.links.some((l) => l.chain >= 2);
 
 const ACTIONS: Action[] = [{ kind: 'drop' }, ...[0, 1, 2, 3].flatMap((ring) => [true, false].map((clockwise): Action => ({ kind: 'rotate', ring, clockwise })))];
 const chainOf = (o: Outcome) => o.charted ?? 0;

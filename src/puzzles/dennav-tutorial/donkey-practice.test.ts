@@ -51,6 +51,12 @@ describe('donkey from a blank board', () => {
     expect(a.stars.sort()).toEqual([16, 24]);
   });
 
+  it('a single clear does not end the board; a double does', () => {
+    const single = readPosition('N4:................0.......01234012:362,213,224,104:00');
+    expect(setsOff(breakScenes(single, { kind: 'drop' }).result)).toBe(false);
+    expect(setsOff(breakScenes(session.position, session.action).result)).toBe(true);
+  });
+
   it('a quiet move does not end the board', () => {
     const blank = positionOf(gameAt(readPosition('N4:................................:300,201,210,104:30')));
     expect(setsOff(breakScenes(blank, { kind: 'drop' }).result)).toBe(false);
