@@ -19,6 +19,7 @@ import { besideTop, checkPlan, dealPlanningBoard, paintPlan, planningOptions, ty
 import { builtComboIssue, buildOptionsFor, checkBuildPosition, checkBuildTurned, solutionsFor, unturnedCell, type BuildIssue, type Strictness } from './build-position';
 import { boardExport } from './board-export';
 import { dealFinish, finishGame, finishHint, judgeFinish, type FinishDeal } from './finish-combo';
+import { DONKEY_CHAIN, analyseBreak, breakScenes, setsOff, trackStars, type DonkeyAnalysis } from './donkey-practice';
 
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 const imageUrls = import.meta.glob<string>('../navigation/media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -35,12 +36,12 @@ const radius = (ring: number) => 55 + (RINGS - 1 - ring) * 47;
 const position = (octant: number, r: number): [number, number] => [CX + Math.cos(octant * Math.PI / 4) * r, CY - Math.sin(octant * Math.PI / 4) * r];
 const ringLabel = (ring: number) => `ring ${RINGS - ring}`;
 
-type Mode = 'learn' | 'steps' | 'plan' | 'build' | 'finish' | 'practise' | 'scratch' | 'spot' | 'when';
+type Mode = 'learn' | 'steps' | 'plan' | 'build' | 'finish' | 'practise' | 'scratch' | 'donkey' | 'spot' | 'when';
 const MODES: { value: Mode; label: string }[] = [
   { value: 'learn', label: '1. Example' }, { value: 'plan', label: '2. Plan Position' },
   { value: 'build', label: '3. Build Ring 1' }, { value: 'finish', label: '4. Finish the Combo' },
   { value: 'steps', label: 'Build it step by step' }, { value: 'practise', label: 'Practice' },
-  { value: 'scratch', label: 'Build from scratch' },
+  { value: 'scratch', label: 'Build from scratch' }, { value: 'donkey', label: 'Donkey from scratch' },
   { value: 'spot', label: 'Spot the wrong star' }, { value: 'when', label: 'Find the wrong move' },
 ];
 /** Practice stages: turns only (0–3 turns before the move), or building up the last few stars (negative: -n moves of build-up). */
@@ -114,7 +115,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   const speed = () => (isSlow() ? 2 : 1);
   const busy = () => scenes.length > 0;
   /** Modes where the player moves the rings. */
-  const playing = () => mode === 'practise' || mode === 'scratch' || mode === 'build' || mode === 'finish';
+  const playing = () => mode === 'practise' || mode === 'scratch' || mode === 'donkey' || mode === 'build' || mode === 'finish';
 
   function playScenes(list: Scene[], captions: Map<Scene, string>, done: (() => void) | null = null): void {
     scenes = list.map((scene) => ({ scene, caption: captions.get(scene) }));
@@ -674,6 +675,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     if (!game || !playing()) return;
     if (mode === 'build') { buildPositionMove(action); return; }
     if (mode === 'finish') { finishMove(action); return; }
+    if (mode === 'donkey') { donkeyMove(action); return; }
     // From scratch: moves made while one plays out wait their turn, as in the game.
     if (busy() && mode === 'scratch') { if (queued.length < 4 && !replaying) queued.push(action); return; }
     if (busy()) return;
@@ -718,6 +720,92 @@ export default (async ({ screen, input, panel, store, ticks }) => {
       playScenes(paced(list, g), captionsFor(o), () => { shown = positionOf(g); if (queue.length) next(); });
     };
     next();
+  }
+
+  // --- Donkey from a blank board ---
+  /** The move that set the board off, and what it did against a donkey (or a vegas, on that lesson). */
+  let donkeyBreak: { before: Position; action: Action; analysis: DonkeyAnalysis } | null = null;
+  /** Marks for each scene of a replayed break: the blamed stars follow the move. */
+  let sceneMarks: Map<Scene, { cell: number; colour: string }[]> | null = null;
+  const BLAME = '#ff4040', TARGET_BLAME = '#ffb040', FIXED = '#40ff70';
+  const donkeyGoal = () => lesson().id === 'vegas' ? DONKEY_CHAIN + 1 : DONKEY_CHAIN;
+  const donkeyWord = () => lesson().id === 'vegas' ? 'vegas' : 'donkey';
+  function newDonkey(): void {
+    game = new NavigationGame(SETTINGS, rng.integer(1, 0x7fffffff));
+    start = null; upcoming = []; goal = null; donkeyBreak = null; sceneMarks = null;
+    shown = positionOf(game);
+    scenes = []; afterScenes = null; waiting = false; stepping = false; replaying = false; queued = []; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1;
+    captionText = '';
+    status = `Build a ${donkeyWord()} on a fresh board. The first move that sets off a clear ends the board, and you’ll see what it charted and what to change. Ctrl starts a new board.`;
+  }
+  function donkeyMove(action: Action): void {
+    if (!game || donkeyBreak) return;
+    // Moves made while one plays out wait their turn, as in the game.
+    if (busy()) { if (queued.length < 4 && !replaying) queued.push(action); return; }
+    if (action.kind === 'drop' && game.board.get(game.entry.octant, 0) !== EMPTY) { status = 'That drop would booch the board.'; return; }
+    const before = positionOf(game);
+    const list = act(game, action);
+    if (!list.length) return;
+    moves++;
+    const o = outcome(list, positionOf(game));
+    const g = game;
+    const broke = setsOff(o);
+    if (broke) queued = [];
+    stepping = false;
+    playScenes(list, captionsFor(o), () => {
+      shown = positionOf(g);
+      if (broke) { endDonkey(before, action); return; }
+      const nextMove = queued.shift();
+      if (nextMove) donkeyMove(nextMove);
+    });
+  }
+  function breakMarks(a: DonkeyAnalysis): { cell: number; colour: string }[] {
+    return [...a.stars.map((cell) => ({ cell, colour: BLAME })), ...a.targets.map((cell) => ({ cell, colour: TARGET_BLAME }))];
+  }
+  function endDonkey(before: Position, action: Action): void {
+    const analysis = analyseBreak(before, action, donkeyGoal());
+    donkeyBreak = { before, action, analysis };
+    game = null; queued = [];
+    showBreakBoard();
+    status = `${analysis.headline} ${analysis.problem}${analysis.fix ? ` ${analysis.fix.text}` : ''} ${analysis.success ? '' : 'Replay the break to watch it with that ringed. '}Ctrl starts a new board.`;
+  }
+  /** The board just before the break, with the stars to blame ringed red and targets amber. */
+  function showBreakBoard(): void {
+    if (!donkeyBreak || busy()) return;
+    const { before, action, analysis } = donkeyBreak;
+    shown = before; sceneMarks = null;
+    marks = breakMarks(analysis);
+    arrowRing = action.kind === 'rotate' ? { ring: action.ring, clockwise: action.clockwise } : null;
+    captionText = `Before the break: ${moveText(action, action.kind === 'drop' ? before.entry : undefined)}.`;
+  }
+  /** Plays the break again, slowed, with the blamed stars ringed as they move; or the fixed board. */
+  function replayBreak(fixed: boolean, step: boolean): void {
+    if (!donkeyBreak || busy()) return;
+    const { analysis } = donkeyBreak;
+    const fix = analysis.fix;
+    if (fixed && !fix) return;
+    const p = fixed ? fix!.position : donkeyBreak.before, action = fixed ? fix!.action : donkeyBreak.action;
+    replaying = true;
+    const { scenes: played, result } = breakScenes(p, action);
+    const list = paced(played, gameAt(p));
+    const tracked = trackStars(list, fixed ? fix!.cells : analysis.stars);
+    const fixedTargets = fixed ? [] : analysis.targets;
+    sceneMarks = new Map(list.map((scene) => [scene, [
+      ...(tracked.get(scene) ?? []).map((cell) => ({ cell, colour: fixed ? FIXED : BLAME })),
+      ...fixedTargets.map((cell) => ({ cell, colour: TARGET_BLAME })),
+    ]]));
+    const last = list.at(-1);
+    if (last && !fixed && analysis.end.length) sceneMarks.set(last, [...(sceneMarks.get(last) ?? []), ...analysis.end.map((cell) => ({ cell, colour: BLAME }))]);
+    shown = p; marks = []; arrowRing = null; stepping = step;
+    captionText = `${fixed ? 'Fixed' : 'Your break'}: ${moveText(action, action.kind === 'drop' ? p.entry : undefined)}`;
+    playScenes(list, captionsFor(result), () => {
+      replaying = false; stepping = false;
+      const end = last ? sceneMarks?.get(last) ?? [] : [];
+      sceneMarks = null;
+      if (last) shown = { cells: last.cells, targets: last.targets, entry: p.entry };
+      marks = end;
+      captionText = `${fixed ? 'Fixed' : 'As you built it'}: ${result.charted ? `charted as a ${chainName(result.charted).toLowerCase()}` : 'nothing charted'}.`;
+    });
   }
 
   // --- Spot the wrong star ---
@@ -969,18 +1057,18 @@ export default (async ({ screen, input, panel, store, ticks }) => {
       }
       ctx.restore();
     }
-    drawBoard(scene, progress, now, current ? [] : [...marks, ...buildSolutionMarks()]);
+    drawBoard(scene, progress, now, current ? sceneMarks?.get(current.scene) ?? [] : [...marks, ...buildSolutionMarks()]);
     const solution = current ? null : buildSolutionGoal();
     if (solution) drawGoal(solution, scene.cells, 0.7);
     if (!current && mode === 'finish' && finishHintShown && finishDeal) drawGoal(finishHint(shown, finishDeal.plan), scene.cells, 0.7);
     if (!current && mode === 'practise' && game && goal && showGoal) drawGoal(goal, scene.cells);
     if (!current) {
       if (arrowRing) drawArrow(arrowRing.ring, arrowRing.clockwise);
-      if (playing() && game && !game.finished && mode !== 'scratch' && mode !== 'build' && mode !== 'finish') star(game.entry.colour, game.entry.octant, 205);
+      if (playing() && game && !game.finished && mode !== 'scratch' && mode !== 'donkey' && mode !== 'build' && mode !== 'finish') star(game.entry.colour, game.entry.octant, 205);
       if (mode === 'when' && bad && bad.moves[buildAt]?.kind === 'drop') star(bad.boards[buildAt].entry.colour, bad.boards[buildAt].entry.octant, 205);
     }
     // From scratch keeps the next star in view while a move plays out.
-    if ((mode === 'scratch' || (mode === 'build' && !buildStopped) || (mode === 'finish' && !finishStopped)) && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
+    if ((mode === 'scratch' || mode === 'donkey' || (mode === 'build' && !buildStopped) || (mode === 'finish' && !finishStopped)) && game && !game.finished) star(game.entry.colour, game.entry.octant, 205);
     drawCaption(captionText);
   }
 
@@ -1023,7 +1111,12 @@ export default (async ({ screen, input, panel, store, ticks }) => {
       lessonIndex = LESSONS.findIndex((l) => l.id === 'vertical-triple'); momentIndex = 0;
       store.set('lesson', lesson().id); renderText();
     }
+    if (next === 'donkey' && lesson().id !== 'donkey' && lesson().id !== 'vegas') {
+      lessonIndex = LESSONS.findIndex((l) => l.id === 'donkey'); momentIndex = 0;
+      store.set('lesson', lesson().id); renderText();
+    }
     mode = next; store.set('mode', mode);
+    sceneMarks = null; donkeyBreak = null; replaying = false; stepping = false;
     scenes = []; marks = []; status = ''; mistake = null; bad = null; game = null; start = null;
     waiting = false; afterScenes = null; planNextAt = 0; planPaintWith = null; planPainting = false;
     buildResetPending = false; buildSubmitPending = false; buildNextAt = 0; buildStopped = false; buildFailed = false; buildSolutionShown = false; queued = [];
@@ -1034,13 +1127,14 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     else if (mode === 'finish') newFinish();
     else if (mode === 'practise') newPractice();
     else if (mode === 'scratch') newScratch();
+    else if (mode === 'donkey') newDonkey();
     else if (mode === 'when') newBadBuild();
     else newMistake();
   }
   function setLesson(index: number): void {
     lessonIndex = index; momentIndex = 0; store.set('lesson', lesson().id);
     renderText();
-    setMode((mode === 'plan' || mode === 'build' || mode === 'finish') && !hasSteps() ? 'learn' : mode);
+    setMode(((mode === 'plan' || mode === 'build' || mode === 'finish') && !hasSteps()) || (mode === 'donkey' && lesson().id !== 'donkey' && lesson().id !== 'vegas') ? 'learn' : mode);
   }
 
   // --- Panel ---
@@ -1153,6 +1247,21 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   scratch.append(rowBreak());
   scratch.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
+  const donkeyGroup = panel.group('Donkey from a blank board', { hidden: () => mode !== 'donkey' });
+  donkeyGroup.button('New board (Ctrl)', newDonkey, { variant: 'primary', title: 'A fresh board, without judging this one' });
+  donkeyGroup.append(rowBreak());
+  donkeyGroup.button('Rotate left', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: false }), { disabled: () => !!donkeyBreak })
+    .button('Rotate right', () => practiceMove({ kind: 'rotate', ring: selected, clockwise: true }), { disabled: () => !!donkeyBreak })
+    .button('Drop star', () => practiceMove({ kind: 'drop' }), { disabled: () => !!donkeyBreak });
+  donkeyGroup.append(rowBreak());
+  donkeyGroup.button('Replay the break', () => replayBreak(false, false), { disabled: () => busy() || !donkeyBreak, title: 'Watch the move that set it off, slowed down, with the stars to blame ringed red' })
+    .button('Step through it', () => replayBreak(false, true), { disabled: () => busy() || !donkeyBreak, title: 'One link at a time: press Next (or Space) for each' })
+    .button('Next', next, { disabled: () => !waiting });
+  donkeyGroup.append(rowBreak());
+  donkeyGroup.button('Watch it fixed', () => replayBreak(true, false), { disabled: () => busy() || !donkeyBreak?.analysis.fix, title: 'The same break with the fix made' })
+    .button('Board before the break', showBreakBoard, { disabled: () => busy() || !donkeyBreak });
+  donkeyGroup.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
+
   const practise = panel.group('Practice', { hidden: () => mode !== 'practise' });
   practise.select('Stage', STAGES, () => stage, (value) => { stage = value; store.set('stage', value); newPractice(); }, { disabled: busy, title: 'How many moves before the board sets the strategy off' });
   practise.button('New board', newPractice, { variant: 'primary', disabled: busy })
@@ -1211,11 +1320,27 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   }, { disabled: busy, title: 'Copy the board and validation details for chat' });
   debug.note(() => exportNotice);
 
+  panel.controls('dennav-tutorial', [{ id: 'newBoard', label: 'New board (without judging this one)', defaultKey: 'control' }]);
+
   panel.group('About this strategy', { collapsed: true, hidden: () => mode === 'plan' || mode === 'build' }).append(text);
 
   setMode(mode);
 
   const key = (name: string, action: string, fallback: string) => keyMatches(name, 'navigation', action, fallback);
+  /** Ctrl: a new board straight away, without judging the one in play. */
+  function newBoardShortcut(): void {
+    scenes = []; afterScenes = null; waiting = false; stepping = false; replaying = false; queued = []; sceneMarks = null;
+    if (mode === 'donkey') newDonkey();
+    else if (mode === 'scratch') newScratch();
+    else if (mode === 'build') newBuildPosition();
+    else if (mode === 'finish') newFinish();
+    else if (mode === 'practise') newPractice();
+    else if (mode === 'plan') newPlan();
+    else if (mode === 'spot') newMistake();
+    else if (mode === 'when') newBadBuild();
+    else if (mode === 'learn') newExample();
+    else if (mode === 'steps' && hasSteps()) newSteps();
+  }
   return {
     dispose() { sounds.dispose(); planDetails.remove(); },
     frame(events) {
@@ -1232,6 +1357,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
           } else if (event.type === 'mouseup' && event.button === 1) planPainting = false;
           continue;
         }
+        if (event.type === 'keydown' && keyMatches(event.key, 'dennav-tutorial', 'newBoard', 'control')) { newBoardShortcut(); continue; }
         if (event.type === 'keydown') {
           if (mode === 'build' && buildFailed && buildStopped) {
             if (event.key === 'space') resetBuildPosition();
