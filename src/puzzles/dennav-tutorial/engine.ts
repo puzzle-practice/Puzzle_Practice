@@ -142,6 +142,11 @@ export function innerFromBag(p: Position): boolean {
   return ring.some((c, o) => counts1.get(c) === 1 && counts1.get(ring[(o + 1) % 8]) === 1);
 }
 
+/** Whether the constellation is the one Dennav deals after the opening: 3 targets in ring 1, 2 in ring 2, 1 in ring 3. */
+export function dealtConstellation(p: Position): boolean {
+  return [0, 1, 2, 3].map((ring) => p.targets.filter((t) => t.ring === ring).length).join() === '0,1,2,3';
+}
+
 // --- Making new examples ---------------------------------------------------------------------
 
 /** Turns every ring by `steps` octants and optionally mirrors the board, keeping the move the same move. */

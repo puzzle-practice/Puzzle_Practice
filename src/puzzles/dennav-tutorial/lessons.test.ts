@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
 import { LESSONS, VEGAS_AS_PLAYED } from './lessons';
-import { act, gameAt, generate, innerFromBag, outcome, play, positionOf, readPosition, scramble, settled } from './engine';
+import { act, dealtConstellation, gameAt, generate, innerFromBag, outcome, play, positionOf, readPosition, scramble, settled } from './engine';
 
 describe('Dennav tutorial lessons', () => {
   it.each(LESSONS.map((l) => [l.id, l] as const))('%s: every board sets off its strategy', (_id, lesson) => {
@@ -17,8 +17,15 @@ describe('Dennav tutorial lessons', () => {
   it('donkey boards lay ring 1 out from one bag: three pairs, then the two leftover colours together', () => {
     const donkey = LESSONS.find((l) => l.id === 'donkey')!;
     const rng = new Random(3);
-    for (const m of donkey.moments) expect(innerFromBag(m.position), m.label).toBe(true);
-    for (let i = 0; i < 6; i++) expect(innerFromBag(generate(donkey.moments[0], donkey.accepts, rng, donkey.keep).position)).toBe(true);
+    for (const m of donkey.moments) {
+      expect(innerFromBag(m.position), m.label).toBe(true);
+      expect(dealtConstellation(m.position), `${m.label} has 3/2/1 targets`).toBe(true);
+    }
+    for (let i = 0; i < 6; i++) {
+      const { position } = generate(donkey.moments[0], donkey.accepts, rng, donkey.keep);
+      expect(innerFromBag(position)).toBe(true);
+      expect(dealtConstellation(position)).toBe(true);
+    }
     // One colour split round another, as the old example had it, is not a bag layout.
     expect(innerFromBag(readPosition('N4:4.1.1...124002334240230400141122:374,232,242,104:20'))).toBe(false);
   });

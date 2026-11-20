@@ -140,7 +140,7 @@ export class NaviBoard {
   /** A constellation completed in a chain is worth its points times the chain count. */
   clearConstellation(targets: Target[], chain = 1): Clear {
     const counts = [0, 0, 0];
-    const cells = targets.map(t => { const colour = this.get(t.octant, t.ring); this.set(t.octant, t.ring, EMPTY); counts[t.ring - (this.rings - 3)]++; return { ...t, colour }; });
+    const cells = targets.map(t => { const colour = this.get(t.octant, t.ring); this.set(t.octant, t.ring, EMPTY); if (t.ring >= this.rings - 3) counts[t.ring - (this.rings - 3)]++; return { ...t, colour }; });
     const points = counts.reduce((sum, count, i) => sum + Math.trunc([9, 5, 3][i] * (count * 1.5)**2), 0) * chain;
     return { kind: 'target', cells, points, chain };
   }

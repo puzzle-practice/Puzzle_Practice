@@ -1,6 +1,6 @@
 // The Dennav tutorial's lessons: what each kind of clear is, how to recognise it from what a move
 // sets off, and the boards it starts from (most of them from real sessions).
-import { INNER, TOP, freeEntry, horizontalIn, innerFromBag, verticalThroughInner, readPosition, type Action, type Example, type Outcome, type Position } from './engine';
+import { INNER, TOP, freeEntry, dealtConstellation, horizontalIn, innerFromBag, verticalThroughInner, readPosition, type Action, type Example, type Outcome, type Position } from './engine';
 
 export interface Moment extends Example { label: string }
 
@@ -156,13 +156,14 @@ export const LESSONS: Lesson[] = [
       'Targets near the ring 1 pairs, so the cascade turns them wild.',
     ],
     accepts: (o) => (o.charted ?? 0) >= 5 && before(o).filter((l) => horizontalIn(l, INNER)).length >= 3,
-    keep: innerFromBag,
+    keep: (p) => innerFromBag(p) && dealtConstellation(p),
     success: 'The ring 1 pairs chained round and the constellation charted as a donkey or better.',
     moments: [
-      // Ring 1 is 1 1 0 0 2 4 3 3 (D = 2, E = 4); ring 2's 2 and 4 sit one apart over ring 1's 4 and 3s.
-      // Turning ring 2 clockwise stacks 2 over 2 over the ring 3 2: the vertical drops a 0 into ring 1,
-      // then the 0s, 1s and 3s clear round the ring in turn, the 4 never clears, and it charts at link 5.
-      moment('Built example', 'N4:....0...301321231331021411002433:260,374,360:40', rotate(2, true)),
+      // Ring 1 is 1 0 2 3 3 4 4 1 (pairs of 1, 3 and 4; D = 0, E = 2), with the usual 3/2/1 constellation.
+      // Ring 2's 0 and 2 sit one apart over ring 1's 2 and 3. Turning ring 2 clockwise stacks 0 over 0 over
+      // the ring 3 0: the vertical drops a 1 into ring 1, then the 1s, 4s and 3s clear round the ring in
+      // turn and it charts at link 5. The 2 only clears after charting, leaving the next ring 1 wild.
+      moment('Built example', 'N4:.1.1.410103420314301203210233441:373,340,363,251,233,131:00', rotate(2, true)),
     ],
   },
   {
