@@ -44,6 +44,15 @@ const MODES: { value: Mode; label: string }[] = [
   { value: 'scratch', label: 'Build from scratch' }, { value: 'donkey', label: 'Donkey from scratch' },
   { value: 'spot', label: 'Spot the wrong star' }, { value: 'when', label: 'Find the wrong move' },
 ];
+/** Modes built for one lesson only: the vertical-triple walkthrough and drills, and the donkey practice (donkey and vegas). Example, Practice, Spot the wrong star and Find the wrong move work for every lesson. */
+function modeFits(mode: Mode, lesson: string): boolean {
+  if (mode === 'steps' || mode === 'plan' || mode === 'build' || mode === 'finish' || mode === 'scratch') return lesson === 'vertical-triple';
+  if (mode === 'donkey') return lesson === 'donkey' || lesson === 'vegas';
+  return true;
+}
+/** The Mode list for a lesson, the same array each time so the panel only rebuilds it when the lesson changes. */
+const modeLists = new Map<string, { value: Mode; label: string }[]>();
+const modesFor = (lesson: string) => { let list = modeLists.get(lesson); if (!list) modeLists.set(lesson, list = MODES.filter((m) => modeFits(m.value, lesson))); return list; };
 /** Practice stages: turns only (0–3 turns before the move), or building up the last few stars (negative: -n moves of build-up). */
 const STAGES = [
   ...[0, 1, 2, 3].map((value) => ({ value, label: value ? `${value + 1} moves out (turns only)` : 'One move to go' })),
@@ -1172,14 +1181,8 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   }
 
   function setMode(next: Mode): void {
-    if ((next === 'plan' || next === 'build' || next === 'finish') && !hasSteps()) {
-      lessonIndex = LESSONS.findIndex((l) => l.id === 'vertical-triple'); momentIndex = 0;
-      store.set('lesson', lesson().id); renderText();
-    }
-    if (next === 'donkey' && lesson().id !== 'donkey' && lesson().id !== 'vegas') {
-      lessonIndex = LESSONS.findIndex((l) => l.id === 'donkey'); momentIndex = 0;
-      store.set('lesson', lesson().id); renderText();
-    }
+    // A mode the lesson has nothing built for falls back to its example; the lesson never changes here.
+    if (!modeFits(next, lesson().id)) next = 'learn';
     mode = next; store.set('mode', mode);
     sceneMarks = null; donkeyBreak = null; replaying = false; stepping = false;
     scenes = []; marks = []; status = ''; mistake = null; bad = null; game = null; start = null;
@@ -1199,7 +1202,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   function setLesson(index: number): void {
     lessonIndex = index; momentIndex = 0; store.set('lesson', lesson().id);
     renderText();
-    setMode(((mode === 'plan' || mode === 'build' || mode === 'finish') && !hasSteps()) || (mode === 'donkey' && lesson().id !== 'donkey' && lesson().id !== 'vegas') ? 'learn' : mode);
+    setMode(mode);
   }
 
   // --- Panel ---
@@ -1216,7 +1219,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
 
   const lessonGroup = panel.group('Lesson');
   lessonGroup.select('Lesson', LESSONS.map((l, value) => ({ value, label: l.title })), () => lessonIndex, setLesson);
-  lessonGroup.select('Mode', MODES, () => mode, setMode);
+  lessonGroup.select('Mode', () => modesFor(lesson().id), () => mode, setMode);
   lessonGroup.note(() => mode === 'build' || mode === 'finish' || (mode === 'plan' && (planCheck || revealedPlan || planNotice)) ? '' : status);
 
   const rowBreak = () => document.createElement('div');
