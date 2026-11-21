@@ -1,10 +1,11 @@
-// The current shipwide records: the best any crew has managed, kept in known-records.json.
-// On the Voyage Records page, a player's voyage that ties one is yellow and one that beats it is red.
-import table from './known-records.json';
+// The best score and most tier 3 chests any crew has managed for each crew size: the den records in
+// records.json. On the Voyage Records page, a player's voyage that ties one is yellow and one that beats it is red.
 import { byName, recordsByCrewSize, type ExpeditionId, type Run } from './records';
+import { DEN_CATEGORIES, denKind, globalRecords, type GlobalRecord } from './global-records';
 import { hasIgnoredPirate } from './ignored-pirates';
 import reviewedRuns from './excluded-runs.json';
 
+/** A den record as My records compares against it. */
 export interface KnownRecord {
   voyage: ExpeditionId;
   /** Lower case, as in a chatlog's file name: emerald, meridian, cerulean, obsidian... */
@@ -28,29 +29,15 @@ export interface AgainstRecord {
   chests: Standing | null;
 }
 
-const VOYAGES: ExpeditionId[] = ['woodhallow', 'cursedIsles', 'vampireLairs'];
-
-/** Every problem with the table, so a bad edit fails the tests instead of quietly matching nothing. */
-export function tableProblems(records: unknown[]): string[] {
-  const problems: string[] = [];
-  const seen = new Set<string>();
-  records.forEach((value, index) => {
-    const record = value as Partial<KnownRecord>;
-    const at = `Record ${index + 1}`;
-    if (!VOYAGES.includes(record.voyage as ExpeditionId)) problems.push(`${at}: voyage must be one of ${VOYAGES.join(', ')}`);
-    if (typeof record.ocean !== 'string' || record.ocean !== record.ocean.toLowerCase() || !record.ocean) problems.push(`${at}: ocean must be a lower-case name`);
-    if (!Number.isInteger(record.crewSize) || record.crewSize! < 1) problems.push(`${at}: crewSize must be a whole number`);
-    if (record.kind !== 'score' && record.kind !== 'chests') problems.push(`${at}: kind must be "score" or "chests"`);
-    if (!Number.isInteger(record.value) || record.value! < 0) problems.push(`${at}: value must be a whole number`);
-    if (record.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(record.date)) problems.push(`${at}: date must be YYYY-MM-DD`);
-    const key = JSON.stringify([record.voyage, record.ocean, record.crewSize, record.kind]);
-    if (seen.has(key)) problems.push(`${at}: there is already a ${record.kind} record for this voyage, ocean and crew size`);
-    seen.add(key);
-  });
-  return problems;
+/** A den record from records.json in the shape My records compares against, or null for any other category. */
+export function toKnownRecord(record: GlobalRecord): KnownRecord | null {
+  const kind = denKind(record);
+  if (!kind || record.crewSize === undefined) return null;
+  const { voyage, ocean, crewSize, value, date, pirates, source } = record;
+  return { voyage, ocean, crewSize, kind, value, ...(date ? { date } : {}), ...(pirates ? { pirates } : {}), ...(source ? { source } : {}) };
 }
 
-export const knownRecords = table.records as KnownRecord[];
+export const knownRecords: KnownRecord[] = globalRecords.flatMap((record) => toKnownRecord(record) ?? []);
 
 // Reviewed runs that can stay in personal history but are ineligible for global records.
 const excludedRuns = reviewedRuns;
@@ -87,12 +74,24 @@ export function againstRecords(runs: Iterable<Run>, records: KnownRecord[] = kno
   return results;
 }
 
-/** A personal record as the Export records button writes it: a table entry plus what backs it up. */
-export interface ExportedRecord extends KnownRecord {
+/**
+ * A personal record as the Export records button writes it: a records.json record (see
+ * docs/records-format.md) plus how it stands against the table.
+ */
+export interface ExportedRecord {
+  voyage: ExpeditionId;
+  ocean: string;
+  /** "Best score", or "Most dire chests" and so on: see DEN_CATEGORIES. */
+  category: string;
+  crewSize: number;
+  value: number;
+  date?: string;
   /** The date and time written in the chatlog. */
   time: string | null;
+  pirates: string[];
   /** Chests brought aboard, tier 3 to tier 1. */
   loot: [number, number, number];
+  source: string;
   /** Against the table when exported: "new" where the table has no record for that crew size yet. */
   standing: Standing | 'new' | null;
 }
@@ -116,14 +115,14 @@ export function exportRecords(runs: Run[], logs: string[], now = new Date(), rec
       exported.push({
         voyage: run.expedition,
         ocean: group.ocean,
+        category: DEN_CATEGORIES[run.expedition][kind],
         crewSize: group.crewSize,
-        kind,
         value,
         ...(time ? { date: time.slice(0, 10) } : {}),
-        pirates: run.players,
-        source: `Exported from ${logs.join(', ')}`,
         time,
+        pirates: run.players,
         loot: run.loot,
+        source: `Exported from ${logs.join(', ')}`,
         standing: !record ? 'new' : value > record.value ? 'beat' : value === record.value ? 'tie' : null,
       });
     }
@@ -141,7 +140,6 @@ export function standingFor(run: Run, kind: KnownRecord['kind'], records: KnownR
 }
 
 const VOYAGE_NAMES: Record<ExpeditionId, string> = { woodhallow: 'Woodhallow', cursedIsles: 'Cursed Isles', vampireLairs: 'Vampire Lairs' };
-const TOP_CHESTS: Record<ExpeditionId, string> = { woodhallow: 'dire chests', cursedIsles: 'cursed chests', vampireLairs: 'immortal chests' };
 
 /** The biggest crew whose records are worth sending in: past this, crews are too rare to keep records for. */
 export const MAX_SENT_CREW: Record<ExpeditionId, number> = { woodhallow: 12, cursedIsles: 7, vampireLairs: 12 };
@@ -156,25 +154,27 @@ export function claimedRecords(exported: RecordsExport): ExportedRecord[] {
 
 /**
  * A message to paste to Jice: one numbered line per beaten record, then the same records as JSON, in the
- * same order, so they can go straight into known-records.json. The numbers are what the player's pictures
+ * same order and in the shape records.json keeps (see docs/records-format.md), so npm run add-records can
+ * take them as they are. The numbers are what the player's pictures
  * are named by when Jice files them (see docs/voyage-records-screenshots.md).
  */
 export function recordsMessage(exported: RecordsExport, records: KnownRecord[] = knownRecords): string {
   const claimed = claimedRecords(exported);
   const lines = claimed.map((record, index) => {
     const standing = records.find((known) =>
-      known.voyage === record.voyage && known.ocean === record.ocean && known.crewSize === record.crewSize && known.kind === record.kind);
-    const what = record.kind === 'score' ? 'best score' : `most ${TOP_CHESTS[record.voyage]}`;
+      known.voyage === record.voyage && known.ocean === record.ocean && known.crewSize === record.crewSize &&
+      DEN_CATEGORIES[known.voyage][known.kind] === record.category);
+    const what = `${record.category[0].toLowerCase()}${record.category.slice(1)}`;
     const ocean = `${record.ocean[0].toUpperCase()}${record.ocean.slice(1)}`;
     const verb = `beats ${standing?.value ?? '?'}`;
     return `${index + 1}. ${VOYAGE_NAMES[record.voyage]} (${ocean}), ${record.crewSize} pirates, ${what}: ${record.value} (${verb}) on ${record.time ?? record.date ?? 'an unknown date'}. Loot ${record.loot.join('/')}. Crew: ${byName(record.pirates ?? []).join(', ') || 'not in the log'}`;
   });
-  const data = claimed.map(({ voyage, ocean, crewSize, kind, value, date, time, pirates, loot }) => ({ voyage, ocean, crewSize, kind, value, date, time, pirates, loot }));
+  const data = claimed.map(({ voyage, ocean, category, crewSize, value, date, time, pirates, loot }) => ({ voyage, ocean, category, crewSize, value, date, time, pirates, loot }));
   return [
     `Hi Jice, I've beaten ${claimed.length === 1 ? 'a voyage record' : `${claimed.length} voyage records`} on Puzzle Practice:`,
     ...lines,
     '',
-    'Data for the records table:',
+    'Data for the records:',
     JSON.stringify(data),
   ].join('\n');
 }
