@@ -30,7 +30,7 @@ Every global voyage record is in one file: `src/voyage-records/records.json`. Ev
 | `crewSize` | for categories kept per crew size | the number of pirates in the crew |
 | `value` | yes | always a whole number: a score, chests, frays, holes... |
 | `date` | no | `YYYY-MM-DD` |
-| `time` | no | `YYYY-MM-DDTHH:MM:SS`, as the chatlog gives it |
+| `time` | no | `YYYY-MM-DDTHH:MM:SS` as the chatlog gives it, or `YYYY-MM-DDTHH:MM` |
 | `pirates` | no | the crew, or the one pirate |
 | `pirateScores` | no | each pirate's own share, one number per pirate, in the same order as `pirates` |
 | `loot` | no | chests brought aboard, tier 3 first: Woodhallow `[dire, lunar, wolf]`, Cursed Isles `[cursed, fetish, bone]`, Vampire Lairs `[immortal, nocturnal, blood]` |
