@@ -17,7 +17,7 @@ export interface GlobalRecord {
   value: number;
   /** YYYY-MM-DD, when known. */
   date?: string;
-  /** The date and time the chatlog gives, YYYY-MM-DDTHH:MM:SS, when known. */
+  /** The date and time the chatlog gives, YYYY-MM-DDTHH:MM:SS (or without the seconds), when known. */
   time?: string;
   pirates?: string[];
   /** Each pirate's own share of the record, in the same order as pirates. */
@@ -87,7 +87,7 @@ export function recordsProblems(records: unknown[]): string[] {
     if (!Number.isInteger(record.value) || record.value! < 0) problems.push(`${at}: value must be a whole number`);
     if (record.crewSize !== undefined && (!Number.isInteger(record.crewSize) || record.crewSize < 1)) problems.push(`${at}: crewSize must be a whole number`);
     if (record.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(record.date)) problems.push(`${at}: date must be YYYY-MM-DD`);
-    if (record.time != null && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(record.time)) problems.push(`${at}: time must be YYYY-MM-DDTHH:MM:SS`);
+    if (record.time != null && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(record.time)) problems.push(`${at}: time must be YYYY-MM-DDTHH:MM or YYYY-MM-DDTHH:MM:SS`);
     if (record.pirateScores !== undefined && (!Array.isArray(record.pirateScores) || record.pirateScores.length !== record.pirates?.length || !record.pirateScores.every(Number.isFinite))) problems.push(`${at}: pirateScores must be one number per pirate`);
     if (record.loot !== undefined && (!Array.isArray(record.loot) || record.loot.length !== 3 || !record.loot.every(Number.isInteger))) problems.push(`${at}: loot must be three whole numbers, tier 3 first`);
     for (const shot of [record.screenshot, ...(record.more ?? [])]) {

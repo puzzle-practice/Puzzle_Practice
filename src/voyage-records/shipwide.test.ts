@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { crewSizeRows, otherCategories, screenshotsFor, sheetRecords, type SheetRecord } from './shipwide';
+import { knownRecords } from './known-records';
 
 describe('shipwide records', () => {
   it('keeps every category but the den records apart, with values as text', () => {
@@ -15,8 +16,11 @@ describe('shipwide records', () => {
   it('puts best score and most chests for a crew size on one row', () => {
     const rows = crewSizeRows('woodhallow', 'emerald');
     const eight = rows.find((row) => row.crewSize === 8)!;
-    expect(eight.score?.value).toBe(1762);
-    expect(eight.chests?.value).toBe(127);
+    const known = (kind: 'score' | 'chests') => knownRecords.find((record) =>
+      record.voyage === 'woodhallow' && record.ocean === 'emerald' && record.crewSize === 8 && record.kind === kind)?.value;
+    expect(eight.score?.value).toBe(known('score'));
+    expect(eight.chests?.value).toBe(known('chests'));
+    expect(eight.score!.value).toBeGreaterThan(eight.chests!.value);
     expect(rows.map((row) => row.crewSize)).toEqual([...rows.map((row) => row.crewSize)].sort((a, b) => a - b));
   });
 
