@@ -69,7 +69,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * The rules a game is played by (the replay format's simulatorVersion). 2: the first click on a
    * new board only focuses it and never selects or turns a ring. 3: run clears score nothing in
    * Dennav and Old Dennav. 4: a timed Dennav board that charts its level's constellations deals a
-   * fresh board, opening on 1/2/1, while time is left. Replays play by the rules they were recorded with.
+   * fresh board, carrying on at 3/2/1, while time is left. Replays play by the rules they were recorded with.
    */
   const RULES = 4;
   let rules = RULES;
@@ -177,11 +177,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }
   /**
    * A finished board ends the run, except a booch in Dennav, Old Dennav or Freeplay, which deals a fresh board in the same run while time is left.
-   * A timed Dennav board that charts its level's constellations starts the level again on a fresh board while time is left.
+   * A timed Dennav board that charts its level's constellations starts the level again on a fresh board, at 3/2/1, while time is left.
    */
   function boardDone(): void {
     if (!running || !game) return;
-    if (!game.booched && levelLoops(liveSettings, rules) && !timeUp()) deal('Level complete! New board');
+    if (!game.booched && levelLoops(liveSettings, rules) && !timeUp()) deal('Level complete! New board', false);
     else if (game.booched && (isWerewolf(liveSettings.mode) || liveSettings.create) && !boochEnds && !timeUp()) { sounds.play('booched'); deal('Booched! New board', !!liveSettings.boochOpens); }
     else end(game.booched ? 'Booched!' : 'Level complete');
   }
