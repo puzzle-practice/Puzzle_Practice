@@ -35,6 +35,8 @@ export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 
 export const settingsKey = (s: NavigationSettings): string => `${s.mode}:${s.difficulty}:${isWerewolf(s.mode) && s.extraRing ? 4 : 3}:${isWerewolf(s.mode) && s.wildTargets ? 1 : 0}:${s.timerMs}${s.clears ? ':c' : ''}${s.slowDrop ? ':s' : ''}`;
 /** The constellations a run is played to: the quota, except with no timer or in Freeplay, which loop. */
 export const runGoal = (s: NavigationSettings): number => !s.create && (s.timerMs || s.clears) ? LEVEL_TARGETS[s.difficulty] : Infinity;
+/** Rules 4 on: a timed Dennav board that charts its level starts the level again on a fresh board, rather than ending the run. */
+export const levelLoops = (s: NavigationSettings, rules: number): boolean => s.mode === 'ww-test' && !!s.timerMs && !s.create && rules >= 4;
 export interface NavigationSeed { boardSeed: number; timerElapsedMs: number }
 export function readNavigationSeed(value: unknown): NavigationSeed | null {
   const seed = typeof value === 'number' ? { boardSeed: value, timerElapsedMs: 0 } : value as NavigationSeed | null;
