@@ -19,7 +19,7 @@ it("Woodhallow marks an early defeat as the den result", () => {
   ]));
   expect(run.result).toBe("Lost");
   expect(run.fraysWon).toBe(0);
-  expect(run.frays).toEqual([{ number: 1, result: "Lost", survivors: 0, deaths: ["Aster", "Birch"] }]);
+  expect(run.frays).toEqual([{ number: 1, result: "Lost", survivors: 0, deaths: ["Aster", "Birch"], earlyDeaths: ["Aster", "Birch"] }]);
 });
 
 it("Cursed Isles sums aboard batches, including the final salvage", () => {

@@ -1,10 +1,17 @@
-import { alphabetize, elimination, leftVessel, pirateName, winners, type ChatEvent, type ExpeditionId, type Fray, type RunDetails, type RunResult } from './chat';
+import { alphabetize, elapsedMs, elimination, leftVessel, pirateName, winners, type ChatEvent, type ExpeditionId, type Fray, type RunDetails, type RunResult } from './chat';
 
 const islandLoot = /^Ye have taken aboard (\d+) (cursed chests?|fetish jars?|bone box(?:es)?)!$/i;
 const lairLoot = /^Ye have taken aboard (\d+) (immortal chests?|nocturnal lockers?|blood box(?:es)?)!$/i;
 const tierIndex: Record<string, number> = { cursed: 0, fetish: 1, bone: 2, immortal: 0, nocturnal: 1, blood: 2 };
 const returned = /^Ye (?:abandoned the (?:island|gauntlet|sanctum)|return(?:ed)? to (?:yer|the) (?:ship|vessel))\b/i;
 const rustling = "Ye hear the sound of rustling in coffins.";
+/**
+ * In a lost lair fray, pirates who fall this soon after its first elimination count toward death
+ * rates. The log has no line for the moment a lair fray begins, so its first elimination stands in.
+ */
+const earlyDeathMs = 60_000;
+/** Vampires have two-word names, which the pirate elimination pattern leaves out. */
+const anyElimination = / is eliminated!$/;
 
 export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: ExpeditionId, onEvent?: (event: ChatEvent) => void): RunDetails | null {
   const isLair = expedition === "vampireLairs";
@@ -13,6 +20,9 @@ export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: Expedi
   // Participants stay null until the end when a fray's crew had to be inferred.
   const frays: (Fray & { participants: string[] | null })[] = [];
   const eliminated = new Set<string>();
+  // Lair frays only: when the current fray's first elimination happened, and which pirates fell soon after.
+  let firstElimination = null as ChatEvent | null;
+  const earlyDeaths = new Set<string>();
   let crew = null as string[] | null;
   // A crew inferred from eliminations alone is only the pirates who happened to die.
   let crewFromWinners = false;
@@ -36,9 +46,12 @@ export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: Expedi
       result: won ? "Won" : "Lost",
       survivors: null,
       deaths: [...eliminated],
+      ...(isLair && !won && earlyDeaths.size ? { earlyDeaths: alphabetize(earlyDeaths) } : {}),
       participants,
     });
     eliminated.clear();
+    earlyDeaths.clear();
+    firstElimination = null;
   }
 
   for (const event of events) {
@@ -64,6 +77,7 @@ export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: Expedi
 
     const outcome = winners.exec(message);
     const defeated = elimination.exec(message);
+    if (isLair && anyElimination.test(message)) firstElimination ??= event;
     if (outcome) {
       const pirates = outcome[1].split(", ").filter(name => pirateName.test(name));
       const won = pirates.length > 0;
@@ -75,6 +89,8 @@ export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: Expedi
       }
     } else if (defeated && pirateName.test(defeated[1])) {
       eliminated.add(defeated[1]);
+      const elapsed = firstElimination ? elapsedMs(firstElimination, event) : null;
+      if (elapsed !== null && elapsed >= 0 && elapsed <= earlyDeathMs) earlyDeaths.add(defeated[1]);
     } else if (isLair && message === rustling) {
       // The station-period warning also confirms the preceding win after a log gap.
       if (!wonSinceRustling) recordFray(true, null);
@@ -97,11 +113,13 @@ export function parseIslesOrLair(events: Iterable<ChatEvent>, expedition: Expedi
     loot,
     fraysWon: frays.filter(fray => fray.result === "Won").length,
     result,
-    frays: frays.map(({ participants, ...fray }) => {
+    frays: frays.map(({ participants, earlyDeaths: fellEarly, ...fray }) => {
       const present = participants ?? players;
       const deaths = alphabetize(present.filter(name => fray.deaths.includes(name)));
       const survivors = fray.result === "Won" ? (present.length ? present.length - deaths.length : null) : 0;
-      return { ...fray, survivors, deaths };
+      const early = fellEarly?.filter(name => present.includes(name)) ?? [];
+      const crew = isLair && participants && alphabetize(participants).join() !== players.join() ? { crew: alphabetize(participants) } : {};
+      return { ...fray, survivors, deaths, ...(early.length ? { earlyDeaths: early } : {}), ...crew };
     }),
   };
 }

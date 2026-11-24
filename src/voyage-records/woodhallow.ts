@@ -1,13 +1,21 @@
-import { alphabetize, elimination, leftVessel, pirateName, winners, type ChatEvent, type RunDetails, type RunResult } from './chat';
+import { alphabetize, elapsedMs, elimination, leftVessel, pirateName, winners, type ChatEvent, type RunDetails, type RunResult } from './chat';
 
 interface Round {
   won: boolean | null;
   standing: number | null;
   eliminated: Set<string>;
+  /** The line the fray began on, when the log shows it. */
+  start: ChatEvent | null;
+  earlyDeaths: Set<string>;
 }
 
 const nextFray = /^(?:Beware! More )?(?:wolf-kin|wolven) approach!$/i;
 const finalFray = "We've reached their lair! Almost done!";
+const getReady = "Get ready!";
+/** "Get ready!" comes this long before the fray itself. */
+const readyCountdownMs = 5_000;
+/** In a lost fray, pirates who fall this soon after it begins count toward death rates. */
+const earlyDeathMs = 2 * 60_000;
 const survivors = /^(\d+) o' (\d+) still standin'! (?:To yer stations!|Plunder the lair!)$/;
 const aboard = /^Ye have taken aboard (?:(\d+) (dire chests?|lunar lockers?|wolf boxes|wolf box)|m\.werewolf_(small|medium|large)_treasure\((\d+)\))!$/i;
 const tierIndex: Record<string, number> = { dire: 0, large: 0, lunar: 1, medium: 1, wolf: 2, small: 2 };
@@ -65,18 +73,24 @@ export function parseWoodhallow(events: Iterable<ChatEvent>, onEvent?: (event: C
 
     const winner = winners.exec(message);
     const count = survivors.exec(message);
-    const missedStart = (!fray || fray.won !== null) && (message === "Get ready!" || winner);
+    const ready = message === getReady;
+    const missedStart = (!fray || fray.won !== null) && (ready || winner);
     if (nextFray.test(message) || message === finalFray || missedStart) {
       const index = message === finalFray ? 5 : rounds.findIndex(round => round === null);
       if (index >= 0) {
-        fray = { won: null, standing: null, eliminated: new Set() };
+        fray = { won: null, standing: null, eliminated: new Set(), start: winner ? null : event, earlyDeaths: new Set() };
         rounds[index] = fray;
       }
     }
     if (!fray) continue;
+    if (ready && fray.won === null && fray.eliminated.size === 0) fray.start = event;
     const defeated = elimination.exec(message);
     if (defeated && fray.won === null && pirateName.test(defeated[1])) {
-      fray.eliminated.add(defeated[1]);
+      const pirate = defeated[1];
+      fray.eliminated.add(pirate);
+      const elapsed = fray.start ? elapsedMs(fray.start, event) : null;
+      const cutoff = earlyDeathMs + (fray.start?.message === getReady ? readyCountdownMs : 0);
+      if (elapsed !== null && elapsed >= 0 && elapsed <= cutoff) fray.earlyDeaths.add(pirate);
     } else if (winner && fray.won === null) {
       const names = winner[1].split(", ");
       fray.won = names.every(name => pirateName.test(name));
@@ -116,6 +130,7 @@ export function parseWoodhallow(events: Iterable<ChatEvent>, onEvent?: (event: C
       result: round.won === null ? null : round.won ? "Won" : "Lost",
       survivors: round.standing,
       deaths: crew.filter(name => round.eliminated.has(name)),
+      ...(round.won === false && round.earlyDeaths.size ? { earlyDeaths: alphabetize(round.earlyDeaths) } : {}),
     }] : []),
   };
 }

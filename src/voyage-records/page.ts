@@ -12,6 +12,16 @@ import { againstRecords, claimedRecords, exportRecords, recordsMessage, standing
 import { ignoredRun, runId, withoutIgnoredRuns, type IgnoredRun } from './run-preferences';
 import { debugExport, DEBUG_LOG_INCLUDES } from './debug-log';
 import {
+  DEATH_RATE_MIN_CREW,
+  DEATH_RATE_VOYAGES,
+  deathRates,
+  inDateRange,
+  sortDeathRates,
+  voyageDay,
+  type DeathRate,
+  type DeathRateColumn,
+} from './death-rates';
+import {
   askToReadLog,
   canReadLog,
   canRememberLogs,
@@ -79,6 +89,8 @@ const EXPEDITION_IDS = Object.keys(expeditions) as ExpeditionId[];
 const SHEET_WIDTH = 36;
 const SHEET_HEIGHT = 12;
 const VOYAGES_PER_PAGE = 20;
+/** Pirates on each page of the death-rate table. */
+const DEATH_RATES_PER_PAGE = 50;
 
 // Chatlog times are the ones written in the log, stored as if UTC, so they are shown back as UTC.
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeZone: 'UTC' });
@@ -86,6 +98,9 @@ const dateTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium',
 const count = new Intl.NumberFormat();
 const shareFormat = new Intl.NumberFormat(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const familiarFormat = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const percentFormat = new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 0 });
+/** The fewest frays a pirate can need before their death rate is listed. */
+const DEATH_MINIMUMS = [1, 10, 25, 50];
 
 const state = {
   logs: [] as LoadedLog[],
@@ -95,6 +110,14 @@ const state = {
   openCrew: null as number | null,
   sort: 'newest' as 'newest' | 'score',
   voyagePage: 0,
+  /** True on the death rates page (#/death-rates), which only covers Woodhallow and Vampire Lairs. */
+  deathsView: false,
+  deathSort: { key: 'frays' as DeathRateColumn, descending: true },
+  deathMinimum: 1,
+  /** Death rates only count voyages from this log date to this one (YYYY-MM-DD); empty is open. */
+  deathFrom: '',
+  deathTo: '',
+  deathPage: 0,
   ignored: loadIgnored(),
   ignoredRuns: loadIgnoredRuns(),
   debug: loadDebugMode(),
@@ -184,6 +207,7 @@ async function addFiles(sources: LogSource[]): Promise<void> {
   state.ocean = null;
   state.openCrew = null;
   state.voyagePage = 0;
+  state.deathPage = 0;
   rememberLogs();
   renderPage();
 }
@@ -336,6 +360,7 @@ function restoreRun(id: string): void {
   const saved = saveIgnoredRuns(state.ignoredRuns);
   state.notice = { message: saved ? 'Run restored to your history and records.' : 'Run restored for this visit. Browser storage is unavailable.' };
   state.voyagePage = 0;
+  state.deathPage = 0;
   renderPage();
 }
 
@@ -346,6 +371,7 @@ function ignoreRun(run: Run): void {
   state.notice = { message: saved ? 'Run ignored. Hidden from your history and records; still included in totals.' : 'Run ignored for this visit; still included in totals. Browser storage is unavailable.', undoId: entry.id };
   state.openCrew = null;
   state.voyagePage = 0;
+  state.deathPage = 0;
   document.querySelectorAll<HTMLDialogElement>('dialog[data-voyage-dialog]').forEach((dialog) => dialog.close());
   renderPage();
 }
@@ -435,6 +461,7 @@ function setIgnored(names: string[]): void {
   saveIgnored(state.ignored);
   state.openCrew = null;
   state.voyagePage = 0;
+  state.deathPage = 0;
   renderPage();
 }
 
@@ -484,6 +511,7 @@ function fileList(): HTMLElement | null {
       state.logs = state.logs.filter((other) => other !== log);
       state.openCrew = null;
       state.voyagePage = 0;
+      state.deathPage = 0;
       rememberLogs();
       renderPage();
     });
@@ -502,7 +530,7 @@ function fileList(): HTMLElement | null {
 }
 
 function voyagePicker(runs: Run[], selected: ExpeditionId): HTMLElement {
-  return el('nav', 'vr-tabs', ...EXPEDITION_IDS.map((id) => {
+  return el('nav', 'vr-tabs', ...(state.deathsView ? DEATH_RATE_VOYAGES : EXPEDITION_IDS).map((id) => {
     const amount = runs.filter((run) => run.expedition === id).length;
     const tab = button(
       el(
@@ -517,6 +545,7 @@ function voyagePicker(runs: Run[], selected: ExpeditionId): HTMLElement {
         state.ocean = null;
         state.openCrew = null;
         state.voyagePage = 0;
+        state.deathPage = 0;
         renderPage();
       },
     );
@@ -532,6 +561,7 @@ function oceanPicker(oceans: string[], selected: string): HTMLElement | null {
       state.ocean = ocean;
       state.openCrew = null;
       state.voyagePage = 0;
+      state.deathPage = 0;
       renderPage();
     });
     pill.setAttribute('aria-pressed', String(ocean === selected));
@@ -756,6 +786,7 @@ function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, Aga
     const pill = button(label, `vr-pill${state.sort === sort ? ' is-active' : ''}`, () => {
       state.sort = sort;
       state.voyagePage = 0;
+      state.deathPage = 0;
       renderPage();
     });
     pill.setAttribute('aria-pressed', String(state.sort === sort));
@@ -828,6 +859,153 @@ function allVoyages(runs: Run[], bests: Map<Run, NewBest>, records: Map<Run, Aga
         el('tbody', '', ...rows),
       ),
     ),
+  );
+}
+
+/** The death-rate table's columns, each of which sorts the table when its header is clicked. */
+function deathColumns(id: ExpeditionId): { key: DeathRateColumn; label: string; numeric: boolean }[] {
+  return [
+    { key: 'pirate', label: 'Pirate', numeric: false },
+    { key: 'voyages', label: id === 'woodhallow' ? 'Dens' : 'Lairs', numeric: true },
+    { key: 'frays', label: 'Frays', numeric: true },
+    { key: 'died', label: 'Died in (frays)', numeric: true },
+    { key: 'rate', label: 'Death rate (per fray)', numeric: true },
+  ];
+}
+
+function pill(label: string, active: boolean, onClick: () => void): HTMLButtonElement {
+  const node = button(label, `vr-pill${active ? ' is-active' : ''}`, onClick);
+  node.setAttribute('aria-pressed', String(active));
+  return node;
+}
+
+function rateBar(rate: DeathRate): HTMLElement {
+  const bar = el('span', 'vr-death-bar', el('span', 'vr-death-fill'));
+  (bar.firstElementChild as HTMLElement).style.width = `${(rate.rate * 100).toFixed(1)}%`;
+  bar.setAttribute('aria-hidden', 'true');
+  return bar;
+}
+
+/** How often each pirate falls per fray, in voyages with a crew of DEATH_RATE_MIN_CREW or more. */
+function deathRatesSection(allRuns: Run[], id: ExpeditionId): HTMLElement {
+  const voyage = id === 'woodhallow' ? 'den' : 'lair';
+  const runs = allRuns.filter((run) => inDateRange(run, state.deathFrom, state.deathTo));
+  const all = deathRates(runs, id);
+  const counted = runs.filter((run) => run.crewSize !== null && run.crewSize >= DEATH_RATE_MIN_CREW).length;
+  const days = allRuns.map(voyageDay).filter((day): day is string => day !== null).sort();
+  const redraw = (change: () => void) => () => {
+    change();
+    renderPage();
+  };
+  const dateInput = (label: string, value: string, set: (day: string) => void) => {
+    const input = el('input', 'vr-date');
+    input.type = 'date';
+    input.value = value;
+    if (days.length) {
+      input.min = days[0];
+      input.max = days[days.length - 1];
+    }
+    input.addEventListener('change', redraw(() => { set(input.value); state.deathPage = 0; }));
+    return el('label', 'vr-date-field', label, input);
+  };
+  const listed = sortDeathRates(
+    all.filter((rate) => rate.frays >= state.deathMinimum),
+    state.deathSort.key,
+    state.deathSort.descending,
+  );
+  const pages = Math.max(1, Math.ceil(listed.length / DEATH_RATES_PER_PAGE));
+  const page = Math.min(state.deathPage, pages - 1);
+  const first = page * DEATH_RATES_PER_PAGE;
+  const shown = listed.slice(first, first + DEATH_RATES_PER_PAGE);
+  const turnPage = (label: string, target: number) => {
+    const turn = button(label, 'vr-pill', redraw(() => { state.deathPage = target; }));
+    turn.disabled = target < 0 || target >= pages;
+    return turn;
+  };
+  const pager = pages > 1
+    ? el(
+        'div',
+        'vr-pager',
+        turnPage('Previous', page - 1),
+        el('span', 'vr-page-label', `${count.format(first + 1)}–${count.format(first + shown.length)} of ${count.format(listed.length)}`),
+        turnPage('Next', page + 1),
+      )
+    : null;
+  const header = (column: ReturnType<typeof deathColumns>[number]) => {
+    const sorted = state.deathSort.key === column.key;
+    const { descending } = state.deathSort;
+    const arrow = sorted ? (descending ? ' ▼' : ' ▲') : '';
+    const sort = button(`${column.label}${arrow}`, `vr-sort${sorted ? ' is-active' : ''}`, redraw(() => {
+      // A second click on the same column flips it; a new column starts names A–Z and numbers high first.
+      state.deathSort = { key: column.key, descending: sorted ? !descending : column.numeric };
+      state.deathPage = 0;
+    }));
+    sort.title = `Sort by ${column.label.toLowerCase()}`;
+    const cell = el('th', column.numeric ? 'vr-num' : '', sort);
+    cell.setAttribute('aria-sort', sorted ? (descending ? 'descending' : 'ascending') : 'none');
+    return cell;
+  };
+  const dateRange = el(
+    'div',
+    'vr-date-range',
+    dateInput('From', state.deathFrom, (day) => { state.deathFrom = day; }),
+    dateInput('To', state.deathTo, (day) => { state.deathTo = day; }),
+    state.deathFrom || state.deathTo
+      ? button('Clear dates', 'vr-pill', redraw(() => { state.deathFrom = ''; state.deathTo = ''; state.deathPage = 0; }))
+      : null,
+  );
+  const minimumPills = el(
+    'div',
+    'vr-pills',
+    ...DEATH_MINIMUMS.map((minimum) => pill(
+      minimum === 1 ? 'Any' : `${minimum}+ frays`,
+      state.deathMinimum === minimum,
+      redraw(() => { state.deathMinimum = minimum; state.deathPage = 0; }),
+    )),
+  );
+  const rows = shown.map((rate) => el(
+    'tr',
+    '',
+    el('td', 'vr-death-name', rate.pirate),
+    el('td', 'vr-num', count.format(rate.voyages)),
+    el('td', 'vr-num', count.format(rate.frays)),
+    el('td', 'vr-num', count.format(rate.died)),
+    el('td', 'vr-num vr-death-rate', el('strong', '', percentFormat.format(rate.rate)), rateBar(rate)),
+  ));
+  const dayName = (day: string) => dateFormat.format(Date.parse(`${day}T12:00:00Z`));
+  const range = state.deathFrom && state.deathTo
+    ? ` between ${dayName(state.deathFrom)} and ${dayName(state.deathTo)}`
+    : state.deathFrom ? ` from ${dayName(state.deathFrom)} on` : state.deathTo ? ` up to ${dayName(state.deathTo)}` : '';
+  const rule = id === 'woodhallow'
+    ? 'After the first fray, wins count for everyone. A loss counts as one fray and one death for each pirate eliminated within two minutes of its start.'
+    : 'Every fray counts, and wins count for everyone who fought. A loss counts as one fray and one death for each pirate eliminated within one minute of the fray\'s first elimination.';
+  const note = `From ${plural(counted, voyage)}${range} with ${DEATH_RATE_MIN_CREW} or more pirates aboard. ${rule}`;
+  return el(
+    'section',
+    'vr-section vr-deaths',
+    el(
+      'header',
+      'vr-section-head',
+      el('h3', '', 'Death rates'),
+      el('div', 'vr-section-tools', dateRange, minimumPills, pager),
+    ),
+    rows.length
+      ? el(
+          'div',
+          'vr-table-wrap',
+          el(
+            'table',
+            'vr-table vr-death-table',
+            el('thead', '', el('tr', '', ...deathColumns(id).map(header))),
+            el('tbody', '', ...rows),
+          ),
+        )
+      : el('p', 'vr-notes', all.length
+        ? 'No pirate has fought that many frays yet.'
+        : state.deathFrom || state.deathTo
+          ? `No ${voyage}s with ${DEATH_RATE_MIN_CREW} or more pirates between those dates.`
+          : `No ${voyage}s with ${DEATH_RATE_MIN_CREW} or more pirates and known names in these logs.`),
+    el('p', 'vr-notes', note),
   );
 }
 
@@ -931,7 +1109,10 @@ function resultsSection(): HTMLElement {
     );
   }
 
-  const id = state.expedition ?? mostCommon(runs.map((run) => run.expedition)) ?? EXPEDITION_IDS[0];
+  const choices = state.deathsView ? DEATH_RATE_VOYAGES : EXPEDITION_IDS;
+  const id = state.expedition && choices.includes(state.expedition)
+    ? state.expedition
+    : mostCommon(runs.map((run) => run.expedition).filter((kind) => choices.includes(kind))) ?? choices[0];
   const voyageRuns = runs.filter((run) => run.expedition === id);
   const oceans = [...new Set(voyageRuns.map(oceanKey))].sort();
   const ocean = state.ocean !== null && oceans.includes(state.ocean)
@@ -951,6 +1132,17 @@ function resultsSection(): HTMLElement {
     ...(noCrew ? [`${plural(noCrew, 'voyage')} without a known crew size ${noCrew === 1 ? 'is' : 'are'} left out of the table.`] : []),
   ];
 
+  const empty = el('p', 'vr-empty', `No ${expeditions[id].name} voyages in these logs. If you've sailed one, add the log from the folder the game saves to now, as older logs may stop before it.`);
+  if (state.deathsView) {
+    return el(
+      'div',
+      'vr-results',
+      notice(),
+      el('div', 'vr-pickers', voyagePicker(runs, id), oceanPicker(oceans, ocean)),
+      scoped.length ? deathRatesSection(scoped, id) : empty,
+    );
+  }
+
   return el(
     'div',
     'vr-results',
@@ -968,12 +1160,18 @@ function resultsSection(): HTMLElement {
           ),
           allVoyages(visible, personalBests(counted), againstRecords(counted)),
         ]
-      : [el('p', 'vr-empty', `No ${expeditions[id].name} voyages in these logs. If you've sailed one, add the log from the folder the game saves to now, as older logs may stop before it.`)]),
+      : [empty]),
   );
 }
 
-export function showVoyageRecords(app: HTMLElement): void {
-  document.title = 'My records · Voyage Records · Puzzle Practice';
+/**
+ * The Voyage Records page. The death rates view (#/death-rates) is the same page showing only death
+ * rates; nothing links to it, and it asks search engines not to index it.
+ */
+export function showVoyageRecords(app: HTMLElement, view: 'records' | 'deaths' = 'records'): void {
+  state.deathsView = view === 'deaths';
+  document.title = state.deathsView ? 'Death rates · Puzzle Practice' : 'My records · Voyage Records · Puzzle Practice';
+  setNoIndex(state.deathsView);
   const content = el('main', 'vr');
   const toolbar = el('div', 'vr-toolbar');
   acceptDrops(toolbar);
@@ -987,9 +1185,26 @@ export function showVoyageRecords(app: HTMLElement): void {
   const back = el('a', 'back', '← All puzzles');
   back.href = '#/';
   app.replaceChildren(
-    el('header', 'bar', back, el('h1', '', 'Voyage Records'), recordsSwitch('mine'), toolbar),
+    state.deathsView
+      ? el('header', 'bar', back, el('h1', '', 'Death rates'), toolbar)
+      : el('header', 'bar', back, el('h1', '', 'Voyage Records'), recordsSwitch('mine'), toolbar),
     content,
     el('footer', 'about', el('p', 'credits', 'Based on Puzzle Pirates, created by Three Rings Design and now operated by Grey Havens.')),
   );
   renderPage();
+}
+
+/** Keeps search engines from indexing the page while it shows. */
+export function setNoIndex(hidden: boolean): void {
+  const existing = document.head.querySelector<HTMLMetaElement>('meta[name="robots"][data-hidden-page]');
+  if (!hidden) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const meta = document.createElement('meta');
+  meta.name = 'robots';
+  meta.content = 'noindex, nofollow';
+  meta.dataset.hiddenPage = '';
+  document.head.append(meta);
 }
