@@ -14,10 +14,13 @@
 //
 //   panel.clock(() => (timed ? { label: 'Time left', ms: left, countdown: true } : null));
 //   const session = panel.session();
-//   session.select('Mode', MODES, () => settings.mode, (m) => (settings.mode = m), { disabled: () => running });
+//   session.select('Mode', MODES, () => settings.mode, (m) => (settings.mode = m));
 //   session.button('Start', start, { variant: 'primary', label: () => (running ? 'Stop' : 'Start') });
 //   panel.score().stats(['', 'Now', 'Best'], () => [['Moves', String(moves), String(best)]]);
-//   panel.settings.group('Game').toggle('Ants', () => settings.ants, (on) => (settings.ants = on), { disabled: () => running });
+//   panel.settings.group('Game').toggle('Ants', () => settings.ants, (on) => (settings.ants = on));
+//
+// Settings are never greyed out for a game: changing one mid-game stops the game (unsaved) or the
+// replay first, then applies (see `sessionLock`).
 
 import { getVolume, setVolume, getWarningTimer, setWarningTimer } from './audio';
 import { keyFor, keyLabel, resetKeys, setKey, type KeyBinding } from './controls';
@@ -48,12 +51,16 @@ export interface ControlOptions {
   hidden?: Get<boolean>;
   /** Tooltip. */
   title?: string;
+  /** Outside the Settings tab, a change still stops the game or replay first, as a setting does. */
+  stopsSession?: boolean;
 }
 
 export interface ButtonOptions extends ControlOptions {
   variant?: 'primary' | 'secondary';
   /** A label that changes with the game, e.g. Start / Stop. */
   label?: Get<string>;
+  /** On a settings tab, a button that changes nothing (e.g. Copy): the game or replay carries on. */
+  keepsSession?: boolean;
 }
 
 export interface NumberOptions extends ControlOptions {
@@ -361,9 +368,9 @@ export class Panel {
   }
 
   /** @internal A control is about to change something: a puzzle setting abandons the game or replay first. */
-  beforeChange(node: HTMLElement, isButton = false): void {
+  beforeChange(node: HTMLElement, isButton = false, stopsSession = false): void {
     if (!this.lock?.active()) return;
-    const setting = this.settings.element.contains(node) || (!isButton && this.sessionElement.contains(node));
+    const setting = stopsSession || this.settings.element.contains(node) || (!isButton && this.sessionElement.contains(node));
     if (!setting) return;
     this.lock.abandon();
     this.sync();
@@ -546,7 +553,7 @@ export class Group {
     };
     syncOptions();
     select.addEventListener('change', () => {
-      this.panel.beforeChange(this.element);
+      this.panel.beforeChange(this.element, false, opts.stopsSession);
       const option = current?.[Number(select.value)];
       if (option) set(option.value);
       this.panel.used();
@@ -566,7 +573,7 @@ export class Group {
     const input = el('input', 'panel-switch');
     input.type = 'checkbox';
     input.addEventListener('change', () => {
-      this.panel.beforeChange(this.element);
+      this.panel.beforeChange(this.element, false, opts.stopsSession);
       set(input.checked);
       this.panel.used();
     });
@@ -602,7 +609,7 @@ export class Group {
     const control = el('div', 'panel-range-control');
     control.append(input, output);
     input.addEventListener('input', () => {
-      this.panel.beforeChange(this.element);
+      this.panel.beforeChange(this.element, false, opts.stopsSession);
       set(Number(input.value));
       this.panel.sync();
     });
@@ -629,7 +636,7 @@ export class Group {
     if (opts.max !== undefined) input.max = String(opts.max);
     input.step = String(opts.step ?? 1);
     input.addEventListener('change', () => {
-      this.panel.beforeChange(this.element);
+      this.panel.beforeChange(this.element, false, opts.stopsSession);
       let value = Number(input.value);
       if (input.value === '' || Number.isNaN(value)) value = get();
       if (opts.min !== undefined) value = Math.max(opts.min, value);
@@ -656,7 +663,7 @@ export class Group {
     if (opts.placeholder) input.placeholder = opts.placeholder;
     if (opts.inputMode) input.inputMode = opts.inputMode;
     input.addEventListener('change', () => {
-      this.panel.beforeChange(this.element);
+      this.panel.beforeChange(this.element, false, opts.stopsSession);
       set(input.value);
       input.value = get();
       this.panel.used();
@@ -675,7 +682,7 @@ export class Group {
     const button = el('button', `panel-button ${opts.variant === 'primary' ? 'is-primary' : ''}`, label);
     button.type = 'button';
     button.addEventListener('click', () => {
-      this.panel.beforeChange(this.element, true);
+      if (!opts.keepsSession) this.panel.beforeChange(this.element, true);
       onClick();
       this.panel.used();
     });

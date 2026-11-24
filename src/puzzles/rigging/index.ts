@@ -54,7 +54,6 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   let palettePiece:number|null=null, paletteShape:number|null=null, paintWith:number|null=null, painting=false, pasteNote='';
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'rigging','Rigging',[]);
-  const busy=()=>running||(replays?.isPlaying??false);
   const elapsed=()=>Math.min(timerMs()||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
   const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
@@ -229,7 +228,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
 
   panel.clock(()=>running||finished?{label:timerMs()?'Time left':'Time',ms:timerMs()?Math.max(0,timerMs()-elapsed()):elapsed(),countdown:!!timerMs()}:null);
   const session=panel.session();
-  session.select('Mode',MODES,()=>settings.mode,value=>{settings.mode=value;save();preview();},{disabled:busy});
+  session.select('Mode',MODES,()=>settings.mode,value=>{settings.mode=value;save();preview();});
   session.button('Start',()=>{if(replays.isPlaying)replays.stop();if(running)end('Stopped');else start();},{variant:'primary',label:()=>running&&!replays.isPlaying?'Stop':'Start'});
   pause.install(panel,()=>running&&!replays.isPlaying);
   panel.score().stats(['','Now'],()=>[['Points / slide',game.efficiency.toFixed(2)]]);
@@ -284,12 +283,12 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   boardGroup.button('Fill board',()=>queue(`fill:${palettePiece??0}`),{hidden:createOnly,disabled:editing,title:'Make every space the selected piece'});
   boardGroup.note(()=>pasteNote||'After you paint, the next click or S pulls the board as it stands at the active pulley.',{hidden:createOnly});
   const options=panel.settings.group('Game');
-  options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();},{disabled:busy});
-  options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();},{disabled:busy});
-  options.select('Timer (Normal)',TIMER,()=>settings.timerMs,value=>{settings.timerMs=value;save();},{disabled:busy});
+  options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();});
+  options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();});
+  options.select('Timer (Normal)',TIMER,()=>settings.timerMs,value=>{settings.timerMs=value;save();});
   options.hint(()=>'Difficulty sets the colours (6, 7 from 2 stars, 8 from 4) and which specials can appear: gaff from difficulty 3, tar from 5 and splices from 6; below that they come as wilds. Difficulty stays at your selected level after each board is cleared.');
   const approximations=panel.settings.group('Approximations');
-  approximations.number('Top indicator threshold (approx.)',()=>settings.indicatorMax,value=>{settings.indicatorMax=value;save();preview();},{min:1,max:1000,step:0.01,disabled:busy});
+  approximations.number('Top indicator threshold (approx.)',()=>settings.indicatorMax,value=>{settings.indicatorMax=value;save();preview();},{min:1,max:1000,step:0.01});
   approximations.hint(()=>'The indicator uses the game’s default threshold curve (top 7.48 points/slide), which may differ from live play. Reports use Learning until live ratings are verified. Token availability is forced for practice; ship maneuver conversion is not simulated.');
   panel.controls('rigging',KEYS);
   historyGroup(panel,history,[{label:'Points / slide',value:g=>g.score.toFixed(2)},{label:'Biggest',value:g=>String(g.biggest)},{label:'Maneuvers',value:g=>String(g.maneuvers)}],'Past games',{

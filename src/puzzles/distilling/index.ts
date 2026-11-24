@@ -1153,18 +1153,18 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
     if (on) { seedText = lastSeed || seedText || generateSeed(); store.set('sessionSeed', seedText); }
     fixedSeed = on; store.set('seedMode', on);
     if (mode === 'Standard' || mode === 'Seeded') mode = save('mode', on ? 'Seeded' : 'Standard');
-  }, { disabled: () => running || !!replays?.isPlaying, title: 'On: repeat this seed without setting PBs. Off: a fresh seed for every run.' });
+  }, { title: 'On: repeat this seed without setting PBs. Off: a fresh seed for every run.' });
   seedGroup.text('Seed', () => fixedSeed ? seedText : lastSeed, setSeed,
-    { inputMode: 'numeric', disabled: () => running || !!replays?.isPlaying });
+    { inputMode: 'numeric' });
   seedGroup.button('Copy', () => copyText(fixedSeed ? seedText : lastSeed, 'Copy this seed:'), {
-    disabled: () => !(fixedSeed ? seedText : lastSeed),
+    disabled: () => !(fixedSeed ? seedText : lastSeed), keepsSession: true,
     title: 'Copy the seed of the last start',
   });
-  seedGroup.button('Paste', () => void pasteSeed(), { disabled: () => running, title: 'Use a pasted seed for the next start' });
+  seedGroup.button('Paste', () => void pasteSeed(), { title: 'Use a pasted seed for the next start' });
   seedGroup.button('New', () => {
     setSeed(generateSeed());
     copyText(seedText, 'Copy this seed:');
-  }, { disabled: () => running, title: 'Make a new seed, copy it and use it for the next start' });
+  }, { title: 'Make a new seed, copy it and use it for the next start' });
 
   panel.settings.group('Reset').button('Reset to defaults', () => {
     mode = save('mode', 'Standard');

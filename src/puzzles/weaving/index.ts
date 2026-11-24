@@ -209,7 +209,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const info = difficultyInfo(value);
     return { value, label: `${value}: ${info.colours} colors${value === 0 ? ', pairs' : ''}${info.gaps ? ', gaps' : ''}${info.special ? ', sparkles' : ''}` };
   });
-  session.select('Mode', MODES, () => mode, value => { mode = value; store.set('mode', value); }, { disabled: busy });
+  session.select('Mode', MODES, () => mode, value => { mode = value; store.set('mode', value); });
   session.note(() => mode === 'create' ? 'Freeplay: paint any loom, no goal' : `${difficultyInfo(difficulty).target} groups per bolt`);
   session.button('Start', () => {
     if (running) { replays.command('stop'); finish('Stopped'); }
@@ -265,7 +265,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return issues.length ? `Not a loom the game could deal: ${issues.join(' ')}` : '';
   }, { hidden: () => createOnly() || !running });
   const settings = panel.settings.group('Difficulty');
-  settings.select('Difficulty', options, () => difficulty, value => { difficulty = value; store.set('difficulty', value); }, { disabled: busy });
+  settings.select('Difficulty', options, () => difficulty, value => { difficulty = value; store.set('difficulty', value); });
   settings.hint(() => 'Levels 5–8 have the same visible board rules. Difficulty stays fixed for each practice bolt.');
   panel.settings.group('Accuracy notes').hint(() => 'Offline shuttle draws follow the game’s built-in probabilities. Supplied draw sequences and performance ratings are unverified. Groups, threads and chains are measured directly.');
   panel.controls('weaving', [

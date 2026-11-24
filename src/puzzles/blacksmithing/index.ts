@@ -1005,7 +1005,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   session.select('Mode', MODES, () => mode, (m) => {
     mode = m;
     store.set('mode', m);
-  }, { disabled: () => running || run.active });
+  });
   const actions = panel.group();
   // Starting while a replay is open closes it and starts a game of your own.
   actions.button('Start', () => {
