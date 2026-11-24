@@ -2400,3 +2400,93 @@ a {
     justify-content: flex-start;
   }
 }
+
+/* Death rates (#/death-rates). */
+.vr-death-table td.vr-death-name {
+  font-weight: 500;
+}
+
+.vr-death-rate {
+  white-space: nowrap;
+}
+
+.vr-death-rate strong {
+  display: inline-block;
+  min-width: 3em;
+}
+
+.vr-death-bar {
+  display: inline-block;
+  width: 80px;
+  height: 6px;
+  margin-left: 8px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-2);
+  vertical-align: middle;
+}
+
+.vr-death-fill {
+  display: block;
+  height: 100%;
+  background: var(--vr-bad);
+}
+
+@media (max-width: 760px) {
+  .vr-death-bar {
+    display: none;
+  }
+}
+
+.vr-sort {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.vr-num .vr-sort {
+  text-align: right;
+}
+
+.vr-sort:hover,
+.vr-sort:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.vr-sort.is-active {
+  font-weight: 700;
+}
+
+
+/* Voyage Records: death rates date range. */
+.vr-date-range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.vr-date-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9em;
+  color: var(--muted, inherit);
+}
+
+.vr-date {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border, transparent);
+  border-radius: 6px;
+  padding: 3px 6px;
+  color-scheme: dark;
+}

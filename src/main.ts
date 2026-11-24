@@ -3,7 +3,7 @@
 import './style.css';
 import { runPuzzle, type RunningPuzzle } from './core/host';
 import { puzzles } from './core/registry';
-import { showVoyageRecords } from './voyage-records/page';
+import { setNoIndex, showVoyageRecords } from './voyage-records/page';
 import { showShipwideRecords } from './voyage-records/shipwide-page';
 import {
   chooseBackupFolder,
@@ -183,7 +183,10 @@ function route(): void {
   running = null;
   navigation++;
   const id = location.hash.replace(/^#\/?/, '');
+  setNoIndex(false);
   if (id === 'voyage-records') showVoyageRecords(app);
+  // Only reached by its address; nothing on the site links here.
+  else if (id === 'death-rates') showVoyageRecords(app, 'deaths');
   else if (id === 'records') showShipwideRecords(app);
   else if (id) void showPuzzle(id);
   else showLanding();
