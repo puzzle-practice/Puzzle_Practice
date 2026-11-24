@@ -193,5 +193,15 @@ function route(): void {
 }
 
 let dataReady = false;
+/**
+ * Shows the page once saved data has been restored, or after a short wait if restoring stalls
+ * (another tab holding the backup lock, or a stuck browser store), so the site never stays blank.
+ */
+function ready(): void {
+  if (dataReady) return;
+  dataReady = true;
+  route();
+}
 window.addEventListener('hashchange', () => { if (dataReady) route(); });
-void initializeDataBackups().finally(() => { dataReady = true; route(); });
+window.setTimeout(ready, 2000);
+void initializeDataBackups().finally(ready);
