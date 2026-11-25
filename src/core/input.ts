@@ -95,6 +95,14 @@ export class Input {
     return events;
   }
 
+  /**
+   * Moves anything queued later than `time` back to it, after the clock has left a gap out, so
+   * input that arrived just before the next frame still goes through on that frame.
+   */
+  clampTo(time: number): void {
+    for (const entry of this.queue) entry.at = Math.min(entry.at, time);
+  }
+
   dispose(): void {
     for (const remove of this.cleanup.splice(0)) remove();
   }
