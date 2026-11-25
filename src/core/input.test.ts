@@ -41,4 +41,18 @@ describe('page scrolling', () => {
     expect(input.drain().filter((event) => event.type === 'keydown')).toHaveLength(7);
     input.dispose();
   });
+
+  it('lets input queued during a dropped stall through on the next frame', () => {
+    const browser = new EventTarget(); vi.stubGlobal('window', browser);
+    const canvas = Object.assign(new EventTarget(), { focus() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 600 }) });
+    let now = 0;
+    const input = new Input({ canvas, width: 450, height: 600 } as unknown as Screen, () => now);
+    const send = (type: string, properties: Record<string, unknown>) => browser.dispatchEvent(Object.assign(new Event(type), properties));
+    now = 600_000; send('keydown', { key: 'a' });
+    // The clock leaves the stall out and is back at 1 s.
+    input.clampTo(1000);
+    expect(input.drain(1000)).toEqual([{ type: 'keydown', key: 'a' }]);
+    input.dispose();
+  });
 });
+

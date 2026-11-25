@@ -58,4 +58,43 @@ describe('GameTime', () => {
     time.show(); wait(1000); frame();
     expect(sim.time).toBe(1000);
   });
+
+  it('leaves out a stall that came without the tab hiding, so return does not race through it', () => {
+    const { time, sim, steps, frame, wait } = setup();
+    wait(1000); frame();
+    wait(10 * 60_000); // frames stopped, e.g. a covered Firefox window or a sleeping computer
+    expect(time.dropStall()).toBeGreaterThan(0);
+    steps.length = 0; frame();
+    expect(steps).toHaveLength(1);
+    wait(20); frame();
+    expect(steps.length).toBeLessThanOrEqual(3);
+    expect(sim.time).toBeLessThan(1100);
+  });
+
+  it('still catches up on a short hitch', () => {
+    const { time, sim, frame, wait } = setup();
+    wait(1000); frame();
+    wait(500);
+    expect(time.dropStall()).toBe(0);
+    frame();
+    expect(sim.time).toBe(1500);
+  });
+
+  it('does not drop time on return from a hidden tab, so the game moves on at once', () => {
+    const { time, sim, steps, frame, wait } = setup();
+    wait(1000); frame();
+    time.hide(); wait(60_000); time.show();
+    wait(20);
+    expect(time.dropStall()).toBe(0);
+    steps.length = 0; frame();
+    expect(steps).toHaveLength(1);
+    expect(sim.time).toBeGreaterThan(1000);
+  });
+
+  it('never cuts a video export short', () => {
+    const { time, frame, wait, setVirtual } = setup();
+    wait(1000); frame();
+    setVirtual(true); wait(30_000);
+    expect(time.dropStall()).toBe(0);
+  });
 });

@@ -5,7 +5,15 @@
  * shown again, so any frame that still runs while hidden can't move the game on either; if it
  * could, the game would sit frozen on return while the clock caught up with it, and inputs
  * would wait that long to go through.
+ *
+ * The browser can also stop animation frames without hiding the tab: Firefox does when its window
+ * is covered or the computer sleeps or locks. No visibilitychange comes, so the clock can't stop
+ * at the time; instead, a frame that finds the simulation more than MAX_BEHIND_MS behind lets go
+ * of that time, so the game carries on from where it was rather than racing through the gap.
  */
+/** The most game time the simulation catches up on after frames stop; any more is left out. */
+export const MAX_BEHIND_MS = 1000;
+
 export class GameTime {
   private start: number;
   private hiddenAt: number | null;
@@ -32,6 +40,20 @@ export class GameTime {
   reset(): void {
     this.start = this.now();
     if (this.hiddenAt !== null) this.hiddenAt = this.start;
+  }
+
+  /**
+   * Leaves out the game time the simulation is behind on, past one step, when that is more than
+   * MAX_BEHIND_MS. Returns how many milliseconds it left out. A video export drives the clock
+   * itself and is never cut short.
+   */
+  dropStall(): number {
+    if (!this.frozen()) return 0;
+    const behind = this.elapsed() - this.simulated();
+    if (behind <= MAX_BEHIND_MS) return 0;
+    const dropped = behind - Math.ceil(1000 / 60);
+    this.start += dropped;
+    return dropped;
   }
 
   hide(): void { this.hiddenAt ??= this.now(); }
