@@ -13,7 +13,10 @@ export function seedFor(seed: number | bigint | string, stream: string, index = 
 export const freshSeed = (): number => crypto.getRandomValues(new Uint32Array(1))[0];
 export const readSeed = (text: string): number | null => /^\d{1,10}$/.test(text.trim()) && Number(text) <= 0xffffffff ? Number(text) : null;
 
-/** The selected seed belongs to a session, rather than to the browser's random history. */
+/**
+ * The selected seed belongs to a session, rather than to the browser's random history. The seed
+ * stays changeable mid-game: a change stops the game or replay first (Panel.sessionLock).
+ */
 export function seedControls(panel: Panel, store: Store, busy: () => boolean) {
   let enabled = store.get<boolean>('seedMode', false) === true;
   let selected = readSeed(String(store.get('sessionSeed', freshSeed()))) ?? freshSeed();
@@ -22,12 +25,12 @@ export function seedControls(panel: Panel, store: Store, busy: () => boolean) {
   const set = (text: string) => { const value = readSeed(text); if (value !== null && !busy()) { selected = value; enabled = true; save(); } };
   const shown = () => busy() ? last ?? selected : enabled ? selected : last ?? selected;
   const group = panel.seedSettings.group('Seed');
-  group.toggle('Fixed seed', () => enabled, value => { if (value) selected = last ?? selected; enabled = value; save(); }, { disabled: busy,
+  group.toggle('Fixed seed', () => enabled, value => { if (value) selected = last ?? selected; enabled = value; save(); }, {
     title: 'On: repeat this seed without setting PBs. Off: a fresh seed for every run.' });
-  group.text('Seed', () => String(shown()), set, { inputMode: 'numeric', disabled: busy });
-  group.button('Copy', () => copyText(String(shown()), 'Copy this seed:'));
-  group.button('Paste', () => { void pasteText('Paste a seed:').then(text => { if (text !== null && !busy()) set(text); }); }, { disabled: busy });
-  group.button('New', () => { selected = freshSeed(); enabled = true; save(); }, { disabled: busy });
+  group.text('Seed', () => String(shown()), set, { inputMode: 'numeric' });
+  group.button('Copy', () => copyText(String(shown()), 'Copy this seed:'), { keepsSession: true });
+  group.button('Paste', () => { void pasteText('Paste a seed:').then(text => { if (text !== null) set(text); }); });
+  group.button('New', () => { selected = freshSeed(); enabled = true; save(); });
   return { next: () => { store.setScoresEnabled(!enabled); return last = enabled ? selected : freshSeed(); },
     remember: (seed: number) => { last = seed; }, get enabled() { return enabled; } };
 }

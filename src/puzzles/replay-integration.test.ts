@@ -3013,11 +3013,17 @@ describe('taking over a replay', () => {
 });
 
 describe('changing a setting mid-game', () => {
-  it.each(['forage', 'treasure-haul', 'blacksmithing', 'swordfight'] as const)('%s abandons the game with nothing saved', async (puzzle) => {
+  it.each(['forage', 'treasure-haul', 'blacksmithing', 'swordfight', 'rumble', 'distilling', 'navigation', 'bilging', 'gunning', 'rigging',
+    'sailing', 'patching', 'weaving', 'alchemistry', 'shipwrightery', 'vampire-carp'] as const)('%s abandons the game with nothing saved', async (puzzle) => {
     vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new Random(5)));
     const store = new Store(puzzle);
     if (puzzle === 'forage') store.set('settings', { mode: 'ci', roundSeconds: 5 });
     if (puzzle === 'treasure-haul') store.set('round', 30);
+    // A timed game: one with no timer keeps its replay when abandoned (tested below).
+    if (puzzle === 'bilging') store.set('settings', { mode: 'normal', difficulty: 3, tokens: 0, water: 3, timerMs: 120000, indicatorMax: 4.5 });
+    if (puzzle === 'gunning') store.set('settings', { mode: 'normal', timerMs: 120000 });
+    if (puzzle === 'rigging') store.set('settings', { mode: 'normal', difficulty: 6, tokens: 1, timerMs: 120000, indicatorMax: 7.48 });
+    if (puzzle === 'sailing') store.set('settings', { difficulty: 5, tokens: 1, desired: 3, timerMs: 120000, indicatorMax: 7.48 });
     const { panel, buttons, buttonStates } = panelHarness();
     let now = 0;
     const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
@@ -3035,7 +3041,7 @@ describe('changing a setting mid-game', () => {
     await replayWrites.idle();
     expect(await listReplayFiles(puzzle)).toHaveLength(0);
     expect(Object.keys(JSON.parse(exportAll()).data).filter((key) => key.includes(':history:'))).toEqual([]);
-    expect(buttonStates.get('Play::Start')!.label!()).toMatch(/Start|Play again|Fight again|New sword/);
+    expect(buttonStates.get('Play::Start')!.label!()).toMatch(/Start|Play again|Fight again|Rumble again|New sword/);
     instance.dispose?.();
   });
 

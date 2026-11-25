@@ -1716,7 +1716,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     aim = null;
     finished = showResults = false;
     viewer.on = false;
-  }, { disabled: () => running || replays?.isPlaying, title: 'Fight against opponents, build a board in Freeplay, or practise precision and bounce shots in Aim trainer (3 lives, 2 minutes).' });
+  }, { title: 'Fight against opponents, build a board in Freeplay, or practise precision and bounce shots in Aim trainer (3 lives, 2 minutes).' });
   session.select('Difficulty', AIM_DIFFICULTIES.map(value => ({ value, label: value })), () => aimDifficulty, (d) => {
     aimDifficulty = d;
     store.set('aimDifficulty', d);
@@ -1724,7 +1724,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     aim = null;
     finished = showResults = false;
   }, {
-    hidden: () => mode !== 'Aim trainer', disabled: () => running || replays?.isPlaying,
+    hidden: () => mode !== 'Aim trainer',
     title: 'Each target is graded by its easiest route. Easy goes straight in; Medium has a fair spread of angles or a bounce near the target; Hard has a tighter angle and a longer bank; Very hard needs two bounces, a window of a degree or less, or a bounce far from the target. Mixed deals all four.',
   });
   session.toggle('Shot hints', () => aimHints, (on) => { aimHints = on; store.set('aimHints', on); }, {
@@ -1885,14 +1885,14 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   boardGroup
     .button('Drop a row (D)', () => freeplay('fp-droprow'), { disabled: createOff, title: 'The board drops a row now, as it does every eighth shot, with a new row at the top.' })
     .button('Undo (U)', () => freeplay('fp-undo'), { disabled: () => createOff() || !undo.length })
-    .toggle('Werewolf (orange is furball)', () => settings.werewolf, setWerewolf, {
-      disabled: () => !!replays?.isPlaying,
+    // While a replay plays, the change closes it first; in the player's own Freeplay it applies at once.
+    .toggle('Werewolf (orange is furball)', () => settings.werewolf, (on) => { if (replays?.isPlaying) replays.stop(); setWerewolf(on); }, {
       title: 'Werewolf rumbling: orange balls are brown furballs, on the board, in your fists and in punches. Freeplay starts again on the same board, its oranges swapped.' })
     .toggle('Show colour numbers', () => create.showNumbers, (on) => { create.showNumbers = on; saveCreate(); })
     .toggle('Preview on board (V)', () => create.previewOnBoard, (on) => { create.previewOnBoard = on; saveCreate(); }, {
       title: 'Shows the next punch landed on the board, its balls bright and the rest dimmed. Punch! still lands it for real.' })
     .number('Starting rows', () => settings.startRows, (v) => { settings.startRows = Math.round(v); save(); }, { min: 0, max: 12, step: 1,
-      disabled: () => running || watching(), title: 'Rows of balls on a fight’s starting board: Freeplay starts on one, and Generate deals one.' })
+      stopsSession: true, title: 'Rows of balls on a fight’s starting board: Freeplay starts on one, and Generate deals one.' })
     .number('Rows', () => create.rows, (v) => { create.rows = Math.round(v); recordRules(); }, { min: 0, max: MAX_ROWS, step: 1, disabled: watching })
     .range('Density %', () => create.density, (v) => { create.density = v; recordRules(); }, { min: 0, max: 100, outputWidth: 4, disabled: watching })
     .button('Deal (G)', () => freeplay('fp-deal'), { disabled: createOff, title: 'A new board of these rows and density, with gaps.' })
@@ -1999,7 +1999,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function save(): void {
     store.set('settings', settings);
   }
-  const off = { disabled: () => running || replays?.isPlaying };
+  // Settings can change mid-fight: the first change abandons the fight (see Panel.sessionLock).
+  const off = { disabled: () => false };
 
   // Rosters, as Swordfight's: how many, then each NPC's type, bludgeon and skill.
   const npcBludgeons: Option<number>[] = [{ value: -1, label: 'Random' }, ...BLUDGEONS.map((value) => ({ value, label: gloveName(value) }))];
@@ -2081,7 +2082,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const fight = panel.settings.group('Fight', { hidden: () => mode === 'Aim trainer' });
   fight.toggle('Boxing (one fist)', () => settings.oneFisted, (on) => { settings.oneFisted = on; save(); }, { ...off,
     title: 'The one-fisted variant: a single fist in the middle, aiming 10° to 170°.' });
-  fight.toggle('Werewolf rumbling', () => settings.werewolf, setWerewolf, { disabled: () => (running && !creating()) || replays?.isPlaying,
+  fight.toggle('Werewolf rumbling', () => settings.werewolf, setWerewolf, {
     title: 'Orange balls are brown furballs, and everyone fights with werewolf claws. A furball group counts its charged balls as groups, and needs two of them to spark.' });
   fight.toggle('Rumless', () => settings.rumless, (on) => { settings.rumless = on; save(); }, { ...off,
     title: 'Without rum your fists wobble: every shot goes up to 2.5° off.' });

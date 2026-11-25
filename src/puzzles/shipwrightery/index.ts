@@ -421,10 +421,10 @@ export default (async ({ screen, panel, store, input, ticks: rawTicks, setReplay
   const controls = panel.session();
   controls.select('Mode', MODES, () => mode, value => {
     mode = value; store.set('mode', value); showPreview();
-  }, { disabled: () => running() || !!replays?.isPlaying });
+  });
   panel.settings.group('Game').select('Difficulty', difficulties, () => difficulty, value => {
     difficulty = value; store.set('difficulty', value); showPreview();
-  }, { disabled: () => running() || !!replays?.isPlaying });
+  });
   controls.button('Start', () => {
     if (replays.isPlaying) replays.stop();
     if (running()) stop(); else start();

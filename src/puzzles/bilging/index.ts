@@ -64,7 +64,6 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   let palettePiece:number|null=null, paletteToken:number|null=null, paintWith:number|null=null, painting=false, pasteNote='';
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'bilging','Bilging',[]);
-  const busy=()=>running||(replays?.isPlaying??false);
   const elapsed=()=>Math.min(timerMs()||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
   const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
@@ -221,7 +220,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
 
   panel.clock(()=>running||finished?{label:timerMs()?'Time left':'Time',ms:timerMs()?Math.max(0,timerMs()-elapsed()):elapsed(),countdown:!!timerMs()}:null);
   const session=panel.session();
-  session.select('Mode',MODES,()=>settings.mode,value=>{settings.mode=value;save();preview();},{disabled:busy});
+  session.select('Mode',MODES,()=>settings.mode,value=>{settings.mode=value;save();preview();});
   session.button('Start',()=>{if(replays.isPlaying)replays.stop();if(running)end('Stopped');else start();},{variant:'primary',label:()=>running&&!replays.isPlaying?'Stop':'Start'});
   pause.install(panel,()=>running&&!replays.isPlaying);
   panel.score().stats(['','Now'],()=>[['Points / swap',game.efficiency.toFixed(2)]]);
@@ -287,14 +286,14 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   boardGroup.note(()=>pasteNote,{hidden:createOnly});
   boardGroup.note(()=>{const issues=boardIssues(game.board,liveSettings);return issues.length?`Not a board the game could deal: ${issues.join(' ')}`:'';},{hidden:()=>createOnly()||!running});
   const options=panel.settings.group('Game');
-  options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();},{disabled:busy});
-  options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();},{disabled:busy});
-  options.select('Water level',WATER,()=>settings.water,value=>{settings.water=value;save();preview();},{disabled:busy});
-  options.select('Timer (Normal)',TIMER,()=>settings.timerMs,value=>{settings.timerMs=value;save();},{disabled:busy});
+  options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();});
+  options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();});
+  options.select('Water level',WATER,()=>settings.water,value=>{settings.water=value;save();preview();});
+  options.select('Timer (Normal)',TIMER,()=>settings.timerMs,value=>{settings.timerMs=value;save();});
   options.toggle('Alternate piece art',()=>altArt,on=>{altArt=on;store.set('altArt',on);});
   options.hint(()=>'Water level is set by the ship’s damage in the game: crabs leave once they float above it and pay 5 points per flooded row, and swaps above the water are quicker. Difficulty stays at your selected level after each level-up. Token practice gives a fifth of the coloured pieces a token half from the game’s selected pool.');
   const approximations=panel.settings.group('Approximations');
-  approximations.number('Top indicator threshold (approx.)',()=>settings.indicatorMax,value=>{settings.indicatorMax=value;save();preview();},{min:1,max:1000,step:0.01,disabled:busy});
+  approximations.number('Top indicator threshold (approx.)',()=>settings.indicatorMax,value=>{settings.indicatorMax=value;save();preview();},{min:1,max:1000,step:0.01});
   approximations.hint(()=>'The indicator uses the game’s default threshold curve (top 8.4 points/swap), which may differ from live play. Reports use Learning until live ratings are verified. Token availability is forced for practice; ship maneuver conversion is not simulated.');
   panel.controls('bilging',KEYS);
   historyGroup(panel,history,[{label:'Points / swap',value:g=>g.score.toFixed(2)},{label:'Chain',value:g=>String(g.chain)},{label:'Tokens',value:g=>String(g.tokens)}],'Past games',{

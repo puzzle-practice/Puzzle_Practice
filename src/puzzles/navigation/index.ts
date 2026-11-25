@@ -92,7 +92,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let lastMouse: [number, number] = [-1, -1];
   const creating = () => running && liveSettings.create && !!game;
   const duty = dutyDesk(panel, store, 'navigation', 'Navigation', []);
-  const busy = () => running || (replays?.isPlaying ?? false);
   const history = () => store.history(settingsKey(settings));
   const settingsRings = () => isWerewolf(settings.mode) && settings.extraRing ? 4 : 3;
   /** Every session, board and Freeplay setup starts with the innermost ring selected (selected counts from the outside). */
@@ -424,7 +423,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Freeplay keeps the last rule set chosen; the Rules setting changes it.
   session.select('Mode', MODE_OPTIONS, () => settings.create ? 'create' : settings.mode, value => {
     settings.create = value === 'create'; if (value !== 'create') settings.mode = value; saveSettings(); selectInnerRing(settingsRings());
-  }, { disabled: busy, title: 'Freeplay lets you paint the stars, targets and incoming star' });
+  }, { title: 'Freeplay lets you paint the stars, targets and incoming star' });
   session.button('Start', () => {
     if (replays.isPlaying) replays.stop();
     pendingStart = null;
@@ -489,21 +488,21 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }, { hidden: () => !creating() });
   const options = panel.settings.group('Game');
   options.select('Rules', RULE_OPTIONS, () => settings.mode, mode => { settings.mode = mode; saveSettings(); selectInnerRing(settingsRings()); },
-    { disabled: busy, hidden: () => !settings.create, title: 'The rules a Freeplay board is painted and played under' });
-  options.select('Difficulty', Array.from({ length: 10 }, (_, value) => ({ value, label: String(value) })), () => settings.difficulty, difficulty => { settings.difficulty = difficulty; saveSettings(); }, { disabled: busy });
+    { hidden: () => !settings.create, title: 'The rules a Freeplay board is painted and played under' });
+  options.select('Difficulty', Array.from({ length: 10 }, (_, value) => ({ value, label: String(value) })), () => settings.difficulty, difficulty => { settings.difficulty = difficulty; saveSettings(); });
   // A quota run is untimed, so it sits with the timers: No timer loops, the quota run ends at the difficulty's quota.
   const timerOptions = LEVEL_TARGETS.map(goal => [{ value: 0, label: 'No timer' }, { value: 'clears' as const, label: `${goal} clears` },
     { value: 120000, label: '2 minutes' }, { value: 300000, label: '5 minutes' }]);
   options.select<number | 'clears'>('Timer', () => timerOptions[settings.difficulty],
   () => settings.clears ? 'clears' : settings.timerMs, value => {
     settings.clears = value === 'clears'; settings.timerMs = value === 'clears' ? 0 : value; saveSettings();
-  }, { disabled: busy });
-  options.select('Dismiss delay', DISMISS_DELAYS.map(value => ({ value, label: value ? `${value / 1000} s` : 'None' })), () => settings.dismissDelayMs, delay => { settings.dismissDelayMs = delay; saveSettings(); }, { disabled: busy });
-  options.toggle('Slow drop', () => settings.slowDrop, on => { settings.slowDrop = on; saveSettings(); }, { disabled: busy, title: 'Each star waits at the top until you press Drop.' });
-  options.toggle('Wild targets', () => settings.wildTargets, on => { settings.wildTargets = on; saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
-  options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
+  });
+  options.select('Dismiss delay', DISMISS_DELAYS.map(value => ({ value, label: value ? `${value / 1000} s` : 'None' })), () => settings.dismissDelayMs, delay => { settings.dismissDelayMs = delay; saveSettings(); });
+  options.toggle('Slow drop', () => settings.slowDrop, on => { settings.slowDrop = on; saveSettings(); }, { title: 'Each star waits at the top until you press Drop.' });
+  options.toggle('Wild targets', () => settings.wildTargets, on => { settings.wildTargets = on; saveSettings(); }, { hidden: () => !isWerewolf(settings.mode) });
+  options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selectInnerRing(settingsRings()); saveSettings(); }, { hidden: () => !isWerewolf(settings.mode) });
   options.hint(() => settings.mode === 'ww-test' ? 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
-  options.button('Reset to defaults', () => { settings = { ...DEFAULT_SETTINGS }; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy });
+  options.button('Reset to defaults', () => { settings = { ...DEFAULT_SETTINGS }; selectInnerRing(settingsRings()); saveSettings(); });
   panel.controls('navigation', [
     { id: 'ringOut', label: 'Select outer ring', defaultKey: 'arrowup' },
     { id: 'ringIn', label: 'Select inner ring', defaultKey: 'arrowdown' },

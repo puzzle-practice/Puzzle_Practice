@@ -447,10 +447,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const controls = panel.session();
   controls.select('Mode', [{ value: 'normal', label: 'Normal' }, { value: 'create', label: 'Freeplay' }], () => mode, value => {
     mode = value as Mode; store.set('mode', value); preview();
-  }, { disabled: () => running || !!replays?.isPlaying });
+  });
   panel.settings.group('Game').select('Difficulty', difficulties, () => difficulty, value => {
     difficulty = value; store.set('difficulty', value); preview();
-  }, { disabled: () => running || !!replays?.isPlaying });
+  });
   controls.button('Start', () => {
     if (replays.isPlaying) { replays.stop(); start(); }
     else if (running) stop(); else start();

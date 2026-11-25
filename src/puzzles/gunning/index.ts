@@ -64,7 +64,6 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   const creating=()=>running&&liveSettings.mode==='create';
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'gunning','Gunning',[]);
-  const busy=()=>running||(replays?.isPlaying??false);
   const elapsed=()=>Math.min(liveSettings.mode!=='create'&&liveSettings.timerMs||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
   const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
@@ -223,17 +222,19 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   panel.clock(()=>running||finished?{label:timed()?'Time left':'Time',ms:timed()?Math.max(0,liveSettings.timerMs-elapsed()):elapsed(),countdown:timed()}:null);
   const session=panel.session();
   const hideInDrill=()=>settings.mode==='loop';
-  session.select('Mode',MODES,()=>settings.mode,value=>{settings.mode=value;save();preview();},{disabled:busy});
-  session.select('Cannons',CANNONS,()=>settings.cannons,value=>{settings.cannons=value;save();preview();},{disabled:busy,hidden:hideInDrill});
-  session.select('Firing',FIRING,()=>settings.firing,value=>{settings.firing=value;save();preview();},{disabled:busy,hidden:hideInDrill});
+  session.select('Mode',MODES,()=>settings.mode,value=>{settings.mode=value;save();preview();});
+  session.select('Cannons',CANNONS,()=>settings.cannons,value=>{settings.cannons=value;save();preview();},{hidden:hideInDrill});
+  session.select('Firing',FIRING,()=>settings.firing,value=>{settings.firing=value;save();preview();},{hidden:hideInDrill});
   session.button('Start',()=>{if(replays.isPlaying)replays.stop();if(running)end('Stopped');else start();},{variant:'primary',label:()=>running&&!replays.isPlaying?'Stop':'Start'});
   pause.install(panel,()=>running&&!replays.isPlaying);
   panel.score().stats(['','Now'],()=>[['Guns / minute',game.loadsPerMinute.toFixed(2)]]);
   const speedFooter=document.createElement('div');speedFooter.className='gunning-speed';
   if(screen.canvas?.parentElement){screen.canvas.parentElement.append(speedFooter);
+    // Speed changes live in a game; while a replay plays, a change closes the replay first.
     new Group(panel,speedFooter).range('Speed',()=>sliderOf(running?game.speed:settings.speed),value=>{
+      if(replays.isPlaying)replays.stop();
       const ms=sliderOf(value);settings.speed=ms;save();if(running&&!replays.isPlaying)queue(`speed:${ms}`);else if(!running)preview();
-    },{min:MIN_TICK,max:MAX_TICK,step:10,formatValue:value=>`${sliderOf(value)} ms`,outputWidth:7,disabled:()=>replays?.isPlaying??false});
+    },{min:MIN_TICK,max:MAX_TICK,step:10,formatValue:value=>`${sliderOf(value)} ms`,outputWidth:7});
   }
   const disabled=()=>!running||pause.paused||replays.isPlaying;
   panel.controlSettings.group('Cursor').button('←',()=>queue('left'),{disabled}).button('↑',()=>queue('up'),{disabled}).button('↓',()=>queue('down'),{disabled}).button('→',()=>queue('right'),{disabled});
@@ -271,13 +272,13 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   deck.note(()=>pasteNote);
   deck.note(()=>{const issues=boardIssues(game.board);return issues.length?`Not a deck the game could deal: ${issues.join(' ')}`:'';},{hidden:()=>!creating()});
   const options=panel.settings.group('Game');
-  options.select('Broadside every',VOLLEY,()=>settings.volleyMs,value=>{settings.volleyMs=value;save();preview();},{disabled:busy,hidden:()=>hideInDrill()||settings.firing!=='volley'});
-  options.select('Cannonballs',BALL,()=>settings.balls,value=>{settings.balls=value;save();preview();},{disabled:busy,hidden:hideInDrill});
-  options.select('Holes in the deck',HOLE,()=>settings.holes,value=>{settings.holes=value;save();preview();},{disabled:busy,hidden:hideInDrill});
-  options.toggle('Ship moves',()=>settings.shipMoves,on=>{settings.shipMoves=on;save();preview();},{disabled:busy,hidden:hideInDrill});
-  options.toggle('Click and drag',()=>settings.clickDrag,on=>{settings.clickDrag=on;save();preview();},{disabled:busy,
+  options.select('Broadside every',VOLLEY,()=>settings.volleyMs,value=>{settings.volleyMs=value;save();preview();},{hidden:()=>hideInDrill()||settings.firing!=='volley'});
+  options.select('Cannonballs',BALL,()=>settings.balls,value=>{settings.balls=value;save();preview();},{hidden:hideInDrill});
+  options.select('Holes in the deck',HOLE,()=>settings.holes,value=>{settings.holes=value;save();preview();},{hidden:hideInDrill});
+  options.toggle('Ship moves',()=>settings.shipMoves,on=>{settings.shipMoves=on;save();preview();},{hidden:hideInDrill});
+  options.toggle('Click and drag',()=>settings.clickDrag,on=>{settings.clickDrag=on;save();preview();},{
     title:'Drag from a cell to pick the arrow’s direction. Off, a click lays the selected arrow even if the mouse moves.'});
-  options.select('Timer',TIMER,()=>settings.timerMs,value=>{settings.timerMs=value;save();},{disabled:busy});
+  options.select('Timer',TIMER,()=>settings.timerMs,value=>{settings.timerMs=value;save();});
   options.hint(()=>settings.mode==='loop'?'Practise either mirrored side. Point an arrow towards a muzzle to load it; Down keeps pieces circulating. Darkened guns cannot accept pieces; they brighten when ready. Place arrows on any open cell; the three newest remain. A powder, wad, shot load fires, then leaves the gun clean. Swabs clear mistakes. Each barrel keeps three of each piece on its side and returns consumed pieces in delayed, shuffled batches.':'Pieces come out of the barrel and follow your arrows. Load each cannon through its open end with powder, then wad, then shot. Swab a cannon after it fires, or to clear a wrong load. Only your three newest arrows stay on the deck.');
   const approximations=panel.settings.group('Approximations');
   approximations.hint(()=>'In the game the ship decides when loaded cannons fire, when it turns and when the deck takes holes. Here broadsides come on a fixed timer, the ship turns at random every few seconds, and holes are only placed at the start. Viking firing follows the game: every cannon fires each time all of them have been loaded. Reports show Learning because the game doesn’t show how it rates gunning.');

@@ -988,7 +988,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const session = panel.session();
   session.select('Mode', [{ value: 'fight', label: 'Fight' }, { value: 'create', label: 'Freeplay' }] as Option<'fight' | 'create'>[],
     () => settings.mode ?? 'fight', (mode) => { settings.mode = mode; save(); }, {
-      disabled: () => running || !!replays?.isPlaying,
       title: 'Fight is the game. Freeplay is a sandbox on your own board: paint it, choose the pairs and play on. It never ends and keeps no history.',
     });
   // Starting while a replay is open closes it and starts a fight of your own.

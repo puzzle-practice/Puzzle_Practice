@@ -1045,7 +1045,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
   // Seeded: the board's own seed, so it deals what the game would.
   const seedGroup = panel.seedSettings.group('Seed');
   seedGroup.toggle('Fixed seed', () => seeded, on => { seeded = on; store.set('seeded', on); if (on) store.set('sessionSeed', seed); },
-    { disabled: () => boardActive || pauseAvailable() || !!replays?.isPlaying, title: 'On: repeat this seed without setting PBs. Off: a fresh seed for every run.' });
+    { title: 'On: repeat this seed without setting PBs. Off: a fresh seed for every run.' });
   seedGroup.text(
     'Seed',
     () => String(seed),
@@ -1057,7 +1057,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         seed = Number(text); seeded = true; store.set('seeded', true); store.set('sessionSeed', seed);
       }
     },
-    { placeholder: 'up to 15 digits', inputMode: 'numeric', disabled: () => boardActive || pauseAvailable() || !!replays?.isPlaying },
+    { placeholder: 'up to 15 digits', inputMode: 'numeric' },
   );
   seedGroup
     .button(
@@ -1066,7 +1066,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         copyText(String(seed), 'Copy this seed:');
         play('audio_options_change');
       },
-      { title: 'Copy the seed' },
+      { title: 'Copy the seed', keepsSession: true },
     )
     .button(
       'New',
@@ -1077,7 +1077,7 @@ export default (async ({ screen, input, panel, store, ticks, setReplayTime }) =>
         copyText(String(seed), 'Copy this seed:');
         play('audio_options_change');
       },
-      { disabled: () => boardActive || pauseAvailable() || !!replays?.isPlaying, title: 'Make a new fixed seed and copy it' },
+      { title: 'Make a new fixed seed and copy it' },
     );
 
   // Cheats: click a piece to hold it.
