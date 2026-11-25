@@ -95,17 +95,22 @@ describe('exportRecords', () => {
   });
 
   it('skips the reviewed chest-only run and submits the next eligible best', () => {
+    // Keep this exclusion test independent of newly submitted global records.
+    const records = [
+      record({ crewSize: 6, kind: 'chests', value: 120 }),
+      record({ crewSize: 6, kind: 'score', value: 1601 }),
+    ];
     const excluded = voyage({
       crewSize: 6, startedAt: Date.UTC(2026, 10, 2, 0, 35, 21), loot: [139, 0, 15], score: 432,
       players: ['Rock', 'amizing', 'Cono', 'Kriosussy', 'Mikethyson', 'Mrraffo'],
     });
     const eligible = voyage({ ...excluded, startedAt: Date.UTC(2026, 10, 2, 2), loot: [125, 300, 600], score: 1575 });
 
-    expect(standingFor(excluded, 'chests')).toBeNull();
-    expect(againstRecords([excluded, eligible])).toEqual(new Map([[eligible, { score: null, chests: 'beat' }]]));
-    expect(exportRecords([excluded], []).records).toEqual([]);
-    expect(claimedRecords(exportRecords([excluded, eligible], []))).toMatchObject([{ category: 'Most dire chests', value: 125 }]);
-    expect(standingFor({ ...excluded, startedAt: Date.UTC(2026, 10, 3) }, 'chests')).toBe('beat');
+    expect(standingFor(excluded, 'chests', records)).toBeNull();
+    expect(againstRecords([excluded, eligible], records)).toEqual(new Map([[eligible, { score: null, chests: 'beat' }]]));
+    expect(exportRecords([excluded], [], new Date(), records).records).toEqual([]);
+    expect(claimedRecords(exportRecords([excluded, eligible], [], new Date(), records))).toMatchObject([{ category: 'Most dire chests', value: 125 }]);
+    expect(standingFor({ ...excluded, startedAt: Date.UTC(2026, 10, 3) }, 'chests', records)).toBe('beat');
   });
 
   it('excludes ignored crews from standings and sends the next eligible best', () => {
