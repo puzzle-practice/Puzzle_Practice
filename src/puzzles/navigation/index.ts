@@ -19,7 +19,9 @@ const MOONS = ['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-do
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { InputEvent } from '../../core/input';
-import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, levelLoops, modeLabel, runsScore, targetLit, type NavigationSettings, type RunTotals, type Scene } from './game';
+import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, playableSettings, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, levelLoops, modeLabel, runsScore, type NavigationSettings, type RunTotals, type Scene } from './game';
+import { drawTarget, targetAppearance } from './appearance';
+import { mobileControls } from './mobile-controls';
 import { LEVEL_TARGETS } from './logic';
 import { copyText, pasteText } from '../../core/clipboard';
 import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
@@ -28,7 +30,7 @@ const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
 const CX = 225, CY = 300;
-const MODES = ['normal', 'ww-test', 'ww'] as const;
+const MODES = ['normal', 'ww-test'] as const;
 const RULE_OPTIONS = MODES.map(value => ({ value, label: modeLabel(value) }));
 const MODE_OPTIONS = [...RULE_OPTIONS, { value: 'create' as const, label: 'Freeplay' }];
 /** Freeplay mode paints with each colour's initial held over a cell, X to clear and A for a wild target. */
@@ -43,7 +45,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const sounds = new SoundBank(soundUrls, () => replays?.isSeeking ?? false);
   const warning = new TimerWarning('gauntlet', () => replays?.isSeeking ?? false);
   const ctx = screen.ctx;
-  let settings = readSettings(store.get('settings', DEFAULT_SETTINGS)) ?? { ...DEFAULT_SETTINGS };
+  const matchWildColour = targetAppearance(panel);
+  const storedSettings = readSettings(store.get('settings', DEFAULT_SETTINGS)) ?? { ...DEFAULT_SETTINGS };
+  let settings = playableSettings(storedSettings);
+  if (settings !== storedSettings) store.set('settings', settings);
   // WW now defaults to the 2-minute timer; move saved WW settings with no timer over once.
   if (!store.get('wwTimerDefault', false)) {
     if (isWerewolf(settings.mode) && settings.timerMs === 0) { settings.timerMs = DEFAULT_SETTINGS.timerMs; store.set('settings', settings); }
@@ -69,9 +74,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
    * The rules a game is played by (the replay format's simulatorVersion). 2: the first click on a
    * new board only focuses it and never selects or turns a ring. 3: run clears score nothing in
    * Dennav and Old Dennav. 4: a timed Dennav board that charts its level's constellations deals a
-   * fresh board, carrying on at 3/2/1, while time is left. Replays play by the rules they were recorded with.
+   * fresh board, carrying on at 3/2/1, while time is left. 5: clicks select rings;
+   * pointer drags turn them. Replays play by the rules they were recorded with, including the old
+   * click-to-turn controls.
    */
-  const RULES = 4;
+  const RULES = 5;
   let rules = RULES;
   /** Whether this game's run clears add points: always in Normal, and in either Dennav only for replays from before rules 3. */
   const scoreRuns = () => runsScore(liveSettings.mode) || rules < 3;
@@ -86,6 +93,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const dealing = () => running && ticks() < dealAt;
   let scenes: Scene[] = [], sceneStart = 0;
   let pendingCommands: string[] = [];
+  let inputFrame = 0;
   let message = '', messageAt = 0, messagePx = 30, messageFill = TEXT_WHITE;
   /** Freeplay mode: what painting changes, the palette choice a left click paints (recorded, so replays click the same way), the key held, the board as last edited, and pasted-text errors. */
   let layer: 'stars' | 'targets' = 'stars', palette: number | null = null, paintWith: number | null = null, painting = false, setup = '', pasteNote = '';
@@ -114,7 +122,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function start(seed?: number, timerElapsedMs = 0, tapeRules = RULES): void {
     pause.resume();
     rules = tapeRules;
-    if (seed === undefined) seed = seedMode.next(); seedMode.remember(seed);
+    if (seed === undefined) {
+      const nextSettings = playableSettings(settings);
+      if (nextSettings !== settings) { settings = nextSettings; saveSettings(); }
+      seed = seedMode.next();
+    }
+    seedMode.remember(seed);
     // An old replay's booch ends its run. The rule is kept apart from the game's settings, which replays check.
     const { boochEnds: oldBoochRule, ...played } = settings;
     boochEnds = !!oldBoochRule;
@@ -125,7 +138,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     runSeed = seed; board = 0; banked = NO_TOTALS; charts = []; longestChain = longestCascade = 0;
     dealAt = 0; pendingStart = null;
     game = new NavigationGame(liveSettings, seed, undefined, true, scoreRuns());
-    selectInnerRing(); focusClick = rules >= 2;
+    selectInnerRing(); focusClick = rules >= 2 && rules < 5;
     running = true; finished = false; hold.clear();
     startTime = endTime = sceneStart = ticks();
     timerElapsedBeforeBoard = timerElapsedMs;
@@ -147,7 +160,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     board++;
     // A quota run's count carries on; a timed WW board has its own quota.
     game = new NavigationGame(liveSettings, boardSeed(runSeed, board), runGoal(liveSettings) - (liveSettings.clears ? banked.constellations : 0), opening, scoreRuns());
-    selectInnerRing(); focusClick = rules >= 2;
+    selectInnerRing(); focusClick = rules >= 2 && rules < 5;
     scenes = []; fastDrop = false; incomingRadius = 220;
     message = note; messageAt = ticks(); messagePx = gameFont(3); messageFill = TEXT_WHITE;
     dealAt = liveSettings.dismissDelayMs ? ticks() + liveSettings.dismissDelayMs : 0;
@@ -253,7 +266,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     else if (name === 'load' || name === 'reset') {
       const read = readBoardCode(name === 'load' ? command.slice(5) : setup);
       if (!read) return;
-      if (read.rings !== game.board.rings) { pasteNote = `That board has ${read.rings} rings. ${read.rings === 4 ? 'Choose Dennav or Old Dennav with the extra ring' : 'Choose Normal, or Dennav or Old Dennav without the extra ring'}, then Start.`; return; }
+      if (read.rings !== game.board.rings) { pasteNote = `That board has ${read.rings} rings. ${read.rings === 4 ? 'Choose Dennav with the extra ring' : 'Choose Normal, or Dennav without the extra ring'}, then Start.`; return; }
       loadBoard(game, read);
     } else if (name === 'generate') {
       board++;
@@ -286,12 +299,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (scene) {
       // Draw targets first so settled and moving stars stay in front of them.
       for (const t of scene.targets) {
-        const matches = targetLit(scene, t);
-        if (t.wild) {
-          // A wild target is ringed in every colour, lit once any star fills it.
-          const [x,y] = position(t.octant,radius(t.ring));
-          ctx.drawImage(images.get('star_wild'), ((matches ? 8 : 0) + (t.octant + 2) % 8)*56, 0, 56, 56, Math.trunc(x)-28, Math.trunc(y)-28, 56, 56);
-        } else star(t.colour, t.octant, radius(t.ring), matches, true);
+        const [x, y] = position(t.octant, radius(t.ring));
+        drawTarget(ctx, images, scene, t, x, y, matchWildColour());
       }
       for (let ring = 0; ring < rings; ring++) for (let o = 0; o < 8; o++) {
         const colour = scene.cells[ring*8+o];
@@ -325,6 +334,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     replays.drawOverlay(ctx);
   }
   function frame(events: InputEvent[]): void {
+    inputFrame++;
     const resumed = pause.input(events, 'navigation', running);
     if (!resumed) return;
     if (pendingStart && !running && ticks() >= pendingStart.at) start(undefined, pendingStart.timerElapsedMs);
@@ -364,6 +374,20 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       if (command === 'ccw') rotate(false);
       else if (command === 'cw') rotate(true);
       else if (command === 'drop') drop();
+      else if (command === 'ringOut' || command === 'ringIn' || command.startsWith('ring:') || command.startsWith('turn:')) {
+        if (!running || !game || pause.paused || dealing() || timeUp()) continue;
+        const rings = game.board.rings;
+        if (command === 'ringOut') selected = Math.max(0, selected - 1);
+        else if (command === 'ringIn') selected = Math.min(rings - 1, selected + 1);
+        else {
+          const [, ring, direction] = command.split(':');
+          const number = Number(ring);
+          if (!Number.isInteger(number) || number < 1 || number > rings) continue;
+          selected = rings - number;
+          if (command.startsWith('turn:')) rotate(direction === 'cw');
+        }
+        focusClick = false;
+      }
       else if (command === 'dismiss') {
         // A replay can carry Dismiss on a later frame than live play saw it: settle the old board
         // first so a star that landed just before the Dismiss isn't held back by the delay.
@@ -379,7 +403,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     lastMouse = [mouse[0], mouse[1]];
     for (const event of routed.events) {
       if (!running || timeUp()) continue;
-      // The first click on a new board focuses it: it never selects or turns a ring.
+      // Historical replays retain their first-click-to-focus behaviour.
       const focusing = event.type === 'mousedown' && focusClick;
       if (event.type === 'mousedown') focusClick = false;
       if (creating()) {
@@ -403,13 +427,13 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
           const ring = [1, 2, 3, 4].findIndex(n => key(event.key, `selectRing${n}`, String(n)));
           if (ring >= 0 && ring < (game?.board.rings ?? 3)) selected = (game?.board.rings ?? 3) - 1 - ring;
         }
-      } else if (event.type === 'mousedown' && !focusing && (event.button === 1 || event.button === 3)) {
+      } else if (event.type === 'mousedown' && !focusing && (event.button === 1 || (rules < 5 && event.button === 3))) {
         const distance = Math.hypot(event.pos[0]-CX,event.pos[1]-CY);
         if (distance >= 30 && distance <= radius(0)+28) {
           let closest = 0;
           for (let r=1;r<(game?.board.rings ?? 3);r++) if (Math.abs(radius(r)-distance)<Math.abs(radius(closest)-distance)) closest=r;
           if (selected !== closest) selected = closest;
-          else rotate(event.button === 1);
+          else if (rules < 5) rotate(event.button === 1);
         }
       }
     }
@@ -443,6 +467,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }, { disabled: () => !game || (replays?.isPlaying ?? false) || (keepsTimer() && !timeLeft()) || dealing() || !!pendingStart });
   pause.install(panel, () => running && !replays.isPlaying);
   panel.score().stats(['', 'Now'], () => [['Points', String(totals().points)]]);
+  const disposeMobile = mobileControls(screen, panel, store, () => ({
+    active: running && !replays.isPlaying && !pause.paused && !dealing() && !timeUp(),
+    settling: scenes.length > 0,
+    painting: creating() && palette !== null,
+    rings: game?.board.rings ?? settingsRings(), selected, board: game, frame: inputFrame,
+  }), command => pendingCommands.push(command));
   panel.controlSettings.group('Controls')
     .button('Rotate left', () => pendingCommands.push('ccw'), { disabled: () => !running || scenes.length > 0 || replays.isPlaying || pause.paused || dealing() })
     .button('Rotate right', () => pendingCommands.push('cw'), { disabled: () => !running || scenes.length > 0 || replays.isPlaying || pause.paused || dealing() })
@@ -501,7 +531,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   options.toggle('Slow drop', () => settings.slowDrop, on => { settings.slowDrop = on; saveSettings(); }, { title: 'Each star waits at the top until you press Drop.' });
   options.toggle('Wild targets', () => settings.wildTargets, on => { settings.wildTargets = on; saveSettings(); }, { hidden: () => !isWerewolf(settings.mode) });
   options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selectInnerRing(settingsRings()); saveSettings(); }, { hidden: () => !isWerewolf(settings.mode) });
-  options.hint(() => settings.mode === 'ww-test' ? 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
+  options.toggle('Start with 3–2–1', () => !!settings.startDense, on => {
+    if (on) settings.startDense = true; else delete settings.startDense;
+    saveSettings();
+  }, { hidden: () => settings.mode !== 'ww-test', title: 'Skip the opening 1–2–1 constellation.' });
+  options.hint(() => settings.mode === 'ww-test' ? (settings.startDense ? 'Each board starts on 3/2/1. ' : 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. ') + 'Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
   options.button('Reset to defaults', () => { settings = { ...DEFAULT_SETTINGS }; selectInnerRing(settingsRings()); saveSettings(); });
   panel.controls('navigation', [
     { id: 'ringOut', label: 'Select outer ring', defaultKey: 'arrowup' },
@@ -535,10 +569,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Before version 4 a booch ended every run, Dennav and Old Dennav included.
   // In version 4 the Dennav board a booch dealt opened on 1/2/1 again.
   // Before version 6 Freeplay had no timer (its replays saved none) and a booch ended it.
-  const codec: ReplaySettingsCodec = { currentVersion: 6, simulatorVersion: RULES, migrate: (version, value) => {
-    const read = version <= 6 ? readSettings(value) : null;
+  const codec: ReplaySettingsCodec = { currentVersion: 7, simulatorVersion: RULES, migrate: (version, value) => {
+    const read = version <= 7 ? readSettings(value) : null;
     if (read?.mode === 'ww-test' && version < 3) return null;
-    if (!read || version === 6) return read;
+    if (!read || version >= 6) return read;
     const freeplay = read.create ? { boochEnds: true } : {};
     if (version === 5) return { ...read, ...freeplay };
     if (version === 4) return { ...read, boochOpens: true, ...freeplay };
@@ -572,5 +606,5 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // What decides how the game goes on; replays check it after every recorded input.
   replays.fingerprint = () => stateText(game, running, finished, selected, runSeed, board, banked, startTime, timerElapsedBeforeBoard,
     incomingRadius, fastDrop, dealAt, scenes, sceneStart);
-  return { frame, dispose: () => { if (running) end('Stopped'); replays.dispose(); sounds.dispose(); warning.dispose(); } };
+  return { frame, dispose: () => { disposeMobile(); if (running) end('Stopped'); replays.dispose(); sounds.dispose(); warning.dispose(); } };
 }) satisfies PuzzleFactory;
