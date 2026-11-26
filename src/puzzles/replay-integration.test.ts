@@ -2051,7 +2051,7 @@ describe('Navigation input during a move', () => {
   const key = (k: string): InputEvent => ({ type: 'keydown', key: k });
   const click = (pos: [number, number]): InputEvent => ({ type: 'mousedown', button: 1, pos });
 
-  it.each(['keyboard', 'mouse'] as const)('drops a %s turn made while a turn plays out, rather than playing it afterwards', async device => {
+  it.each(['keyboard', 'pointer'] as const)('drops a %s turn made while a turn plays out, rather than playing it afterwards', async device => {
     const { DEFAULT_SETTINGS, NavigationGame } = await import('./navigation/game');
     const rotate = vi.spyOn(NavigationGame.prototype, 'rotate');
     const store = new Store('navigation');
@@ -2068,18 +2068,22 @@ describe('Navigation input during a move', () => {
     // Drop a star (it falls to the inner ring) so the inner ring, selected at the start, has something to turn.
     now += 10; instance.frame([key('space')]);
     for (let i = 0; i < 40; i++) { now += 50; instance.frame([]); }
-    // A first click on a new board only focuses it.
-    const turn = device === 'keyboard' ? [key('arrowright')] : [click([225, 300 - 55])];
-    if (device === 'mouse') { now += 10; instance.frame([click([225, 300 - 55])]); }
-    now += 10; instance.frame(turn);
+    // A pointer turn (a drag or a turn button) goes through the same commands as the Rotate right button.
+    const rotateRight = [...buttons].find(([name]) => name.endsWith(':Rotate right'))?.[1];
+    const turn = (): InputEvent[] => {
+      if (device === 'keyboard') return [key('arrowright')];
+      rotateRight!();
+      return [];
+    };
+    now += 10; instance.frame(turn());
     const turns = rotate.mock.calls.length;
     expect(turns).toBe(1);
     // Just before the turn finishes: dropped, and it never plays later.
-    now += 90; instance.frame(turn);
+    now += 90; instance.frame(turn());
     for (let i = 0; i < 40; i++) { now += 50; instance.frame([]); }
     expect(rotate.mock.calls.length).toBe(turns);
     // Once the board is still, the same input turns the ring again.
-    now += 10; instance.frame(turn);
+    now += 10; instance.frame(turn());
     expect(rotate.mock.calls.length).toBe(turns + 1);
     rotate.mockRestore();
     instance.dispose?.();
