@@ -148,7 +148,7 @@ export class Fighter {
    * Freeplay mode's sandbox rules: an endless board isn't knocked out by its bottom row, without the
    * shot timer nothing warns or fires for you, and without drops the board never moves down.
    */
-  readonly sandbox = { endless: false, shotTimer: true, drops: true };
+  readonly sandbox: { endless: boolean; shotTimer: boolean; drops: boolean; dropFloating?: boolean } = { endless: false, shotTimer: true, drops: true };
   readonly stats: FighterStats = {
     shots: 0, popped: 0, dropped: 0, punchSquares: 0, sprinkleSent: 0, punches: 0, biggestPunch: 0,
     bestChain: 0, sparks: 0, received: 0, largestReceived: 0, drops: 0,
@@ -185,11 +185,7 @@ export class Fighter {
 
   /** Aims every fist at a point of the board view, each clamped to its range. */
   aimAt(x: number, y: number): void {
-    this.board.origins.forEach((o, f) => {
-      const [lo, hi] = this.board.ranges[f];
-      if (y > o.y) this.dir[f] = x < o.x ? hi : lo;
-      else this.dir[f] = clamp(Math.trunc(DIR_PREC * (Math.atan2(o.y - y, x - o.x) * 180 / Math.PI)), lo, hi);
-    });
+    this.board.origins.forEach((_, f) => { this.dir[f] = this.board.mouseDir(f, x, y); });
   }
 
   /** Turns every fist together (positive is anticlockwise). */
@@ -369,12 +365,19 @@ export class Fighter {
     this.flight = null;
     this.board.set(f.rest, f.piece);
     const sparksBefore = this.board.sparks.length;
-    const clear = this.board.place(f.rest);
+    let clear = this.board.place(f.rest);
     if (!clear) {
       if (this.board.sparks.length > sparksBefore) this.stats.sparks++;
       this.play(isCharged(this.board.get(f.rest)) ? 'ball_land_charged' : 'ball_land', t);
-      this.afterShot(t);
-      return;
+      if (this.sandbox.dropFloating) {
+        const grapes = this.board.grapesAfter(new Map());
+        if (grapes.length) clear = { popped: [], groups: [], grapes, lightened: [],
+          pieces: new Map(grapes.map(cell => [cell.y * 10 + cell.x, this.board.get(cell)])) };
+      }
+      if (!clear) {
+        this.afterShot(t);
+        return;
+      }
     }
     const groups = this.board.groupCount(clear);
     const sent = this.board.sent(groups, clear.popped.length, clear.grapes.length, this.hooks.minutes?.(t) ?? 0);
@@ -413,7 +416,7 @@ export class Fighter {
       this.later(at, sound);
     });
     // After the last group, what's left hanging falls off the bottom.
-    const fallAt = t + (n - 1) * POP_MS;
+    const fallAt = t + Math.max(0, n - 1) * POP_MS;
     let end = fallAt + EXPLODE_MS;
     for (const cell of clear.grapes) {
       const p = this.board.pixel(cell);
@@ -502,23 +505,32 @@ export class Fighter {
    * Freeplay mode: a punch lands now, between shots, as it would after one. The shot timer starts
    * over once it has landed. Returns the punch, or null if a ball or strike is still moving.
    */
-  strikeNow(s: Shaft, glove: Glove, now: number): PunchAnim | null {
+  strikeNow(s: Shaft, glove: Glove, now: number, allowExcessBruises = false): PunchAnim | null {
     if (!this.canFire || this.punch || this.sprinkle || this.flight) return null;
-    this.board.punched();
-    const result = this.board.punch(s, glove);
+    if (s.height > 0 && s.width > 0) this.board.punched();
+    const result = this.board.punch(s, glove, allowExcessBruises);
     const steps = result.columns.map(punchSteps);
     const end = now + Math.max(0, ...steps) * PUNCH_STEP_MS;
     this.punch = { result, side: s.side, start: now, steps, end };
     this.punchImpacts(result, s.side, now);
-    const landed = Math.min(s.width, 9) * Math.min(s.height, H - 1 - this.board.damage);
+    let landed = Math.min(s.width, 9) * Math.min(s.height, H - 1 - this.board.damage);
+    let settledAt = end;
+    if (s.count > 0 && s.height === 0) {
+      const balls = this.board.sprinkle(s, glove);
+      if (balls.length) {
+        settledAt = Math.max(end, ...balls.map(b => end + (H + 1 + b.depth - b.cell.y) * STEP_Y * SPRINKLE_MS_PER_PX));
+        this.sprinkle = { balls, start: end, end: settledAt };
+        landed += balls.length;
+      }
+    }
     this.stats.received += landed;
     this.stats.largestReceived = Math.max(this.stats.largestReceived, landed);
-    this.controlAt = end;
+    this.controlAt = settledAt;
     this.warned = false;
     this.charging = -1;
     this.phase = 'strike';
-    this.busyUntil = end;
-    if (this.board.isDead() && !this.sandbox.endless) this.knockOut(end);
+    this.busyUntil = settledAt;
+    if (this.board.isDead() && !this.sandbox.endless) this.knockOut(settledAt);
     return this.punch;
   }
 

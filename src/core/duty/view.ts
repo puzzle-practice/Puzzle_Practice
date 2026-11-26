@@ -276,6 +276,7 @@ export function randomFace(): FaceSpec {
   return {
     female, skin: pick(o.skin), hair: pick(o.hair), hairColour: pick(o.hairColour),
     beard: !female && Math.random() < 0.5 ? pick(o.beard) : '', eyepatch: Math.random() < 0.15,
+    eyepatchColour: pick(o.cloth), starfish: Math.random() < 0.15, starfishColour: pick(['', ...o.starfishColour]),
     hat: Math.random() < 0.8 ? pick(o.hat) : '', hatColour: pick(o.cloth), trimColour: pick(o.trimCloth),
   };
 }
@@ -283,7 +284,25 @@ export function randomFace(): FaceSpec {
 /** The Pirate card on a Settings tab: name and face, saved site-wide for every puzzle's reports. */
 export function pirateSettings(page: Page): Group {
   let profile: PirateProfile = loadProfile();
-  const group = page.group('Pirate', { title: 'Your name and face on duty reports, for every puzzle', collapsed: true });
+  const group = page.group('Edit pirate', { title: 'Your name and face on duty reports, for every puzzle', collapsed: true });
+  group.element.classList.add('panel-pirate-group');
+  const heading = group.element.querySelector<HTMLElement>('.panel-title')!;
+  const editPirate = heading.querySelector<HTMLButtonElement>('button')!;
+  editPirate.className = 'panel-pirate';
+  editPirate.setAttribute('aria-label', 'Edit pirate');
+  // Let the button's native keyboard activation reach it before game shortcuts.
+  for (const type of ['keydown', 'keyup'] as const) editPirate.addEventListener(type, (event) => {
+    if (event.key === ' ' || event.key === 'Enter') event.stopPropagation();
+  });
+  const pirateFace = faceCanvas(profile.face, 'normal', 'panel-pirate-face');
+  pirateFace.setAttribute('aria-hidden', 'true');
+  const pirateName = el('span', 'panel-pirate-name', profile.name);
+  const pirateText = el('span', 'panel-pirate-text');
+  pirateText.append(el('strong', '', 'Edit pirate'), pirateName);
+  const chevron = el('span', 'panel-pirate-chevron', '▾');
+  chevron.setAttribute('aria-hidden', 'true');
+  editPirate.replaceChildren(pirateFace, pirateText, chevron);
+  group.append(el('p', 'duty-pirate-note', 'Your name and appearance on duty reports. Saved for every puzzle.'));
   const preview = el('div', 'duty-preview');
   const faces = MOODS.map((mood) => faceCanvas(profile.face, mood, mood === 'normal' ? 'duty-face' : 'duty-face is-small'));
   const moodRow = el('div', 'duty-moods');
@@ -293,9 +312,11 @@ export function pirateSettings(page: Page): Group {
   let drawn = JSON.stringify(profile.face);
   let saving = false;
   const redraw = () => {
+    pirateName.textContent = profile.name;
     const key = JSON.stringify(profile.face);
     if (key !== drawn) {
       drawn = key;
+      void drawFaceInto(pirateFace, profile.face);
       MOODS.forEach((mood, i) => void drawFaceInto(faces[i], profile.face, mood));
     }
   };
@@ -331,6 +352,16 @@ export function pirateSettings(page: Page): Group {
   group.select('Hat colour', options(male.cloth), () => profile.face.hatColour, (hatColour) => face({ hatColour }), { hidden: () => !profile.face.hat });
   group.select('Trim colour', options(male.trimCloth), () => profile.face.trimColour, (trimColour) => face({ trimColour }), { hidden: () => !profile.face.hat });
   group.toggle('Eyepatch', () => profile.face.eyepatch, (eyepatch) => face({ eyepatch }));
+  group.select('Eyepatch colour', options(male.cloth), () => profile.face.eyepatchColour,
+    (eyepatchColour) => face({ eyepatchColour }), { hidden: () => !profile.face.eyepatch });
+  group.toggle('Starfish', () => profile.face.starfish, (starfish) => face({ starfish }));
+  group.select('Starfish colour', options(male.starfishColour, 'Default'), () => profile.face.starfishColour,
+    (starfishColour) => face({ starfishColour }), { hidden: () => !profile.face.starfish });
   group.button('Random face', () => face(randomFace()));
+  const editor = el('div', 'panel-pirate-editor');
+  for (const child of [...group.element.children]) {
+    if (child !== heading) editor.append(child);
+  }
+  group.element.append(editor);
   return group;
 }

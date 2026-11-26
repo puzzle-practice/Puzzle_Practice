@@ -45,7 +45,12 @@ export async function runPuzzle(
   // keeps going while the tab is hidden.
   const onVisibility = () => { if (document.hidden) time.hide(); else time.show(); };
   document.addEventListener('visibilitychange', onVisibility);
-  const catchUp = () => simulation.advance(time.elapsed(), at => clock.frame(() => instance.frame(input.drain(at))));
+  // When frames stopped without the tab being hidden (a covered window or a sleeping computer),
+  // the stalled time is left out rather than played back as a fast burst (see GameTime).
+  const catchUp = () => {
+    if (time.dropStall() > 0) input.clampTo(time.elapsed());
+    simulation.advance(time.elapsed(), at => clock.frame(() => instance.frame(input.drain(at))));
+  };
   // A video export steps the game itself, one video frame at a time, while the clock is virtual.
   const unregister = setFrameRunner({ canvas, run: catchUp });
   // Panel actions use the same logical time even if a display has not painted yet.

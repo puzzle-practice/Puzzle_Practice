@@ -16,6 +16,8 @@ export type InputEvent =
 export class Input {
   /** Latest mouse position in screen pixels. */
   mouse: Point = [-1, -1];
+  /** A puzzle may claim specific Control shortcuts while its editor is active. */
+  allowControlKey?: (key: string) => boolean;
   private queue: { at: number; event?: InputEvent; mouse: Point }[] = [];
   private pointer: Point = [-1, -1];
   private readonly cleanup: Array<() => void> = [];
@@ -73,6 +75,11 @@ export class Input {
       if (((event.ctrlKey || event.metaKey || event.altKey) && !ctrlAlone) || isTyping(event.target)) return;
       unlockAudio();
       const key = keyName(event);
+      if (event.ctrlKey && key !== 'control') {
+        if (!this.allowControlKey?.(key)) return;
+        event.preventDefault();
+      }
+      unlockAudio();
       // Keep the page from scrolling while playing, including on held-key auto-repeats.
       if (SCROLL_KEYS.has(key)) event.preventDefault();
       if (event.repeat) return;
@@ -96,6 +103,14 @@ export class Input {
     }
     this.queue.splice(0, count);
     return events;
+  }
+
+  /**
+   * Moves anything queued later than `time` back to it, after the clock has left a gap out, so
+   * input that arrived just before the next frame still goes through on that frame.
+   */
+  clampTo(time: number): void {
+    for (const entry of this.queue) entry.at = Math.min(entry.at, time);
   }
 
   dispose(): void {

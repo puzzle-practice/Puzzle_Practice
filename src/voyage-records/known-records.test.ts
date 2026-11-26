@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { againstRecords, claimedRecords, exportRecords, isExcludedRun, knownRecords, standingFor, tableProblems, type KnownRecord } from './known-records';
+import { againstRecords, claimedRecords, exportRecords, isExcludedRun, knownRecords, standingFor, toKnownRecord, type KnownRecord } from './known-records';
+import { globalRecords, recordsProblems, type GlobalRecord } from './global-records';
 import type { Run } from './records';
 
 const voyage = (overrides: Partial<Run> = {}) => ({
@@ -13,22 +14,37 @@ const record = (overrides: Partial<KnownRecord> = {}): KnownRecord => ({
 
 describe('the records table', () => {
   it('has no mistakes', () => {
-    expect(tableProblems(knownRecords)).toEqual([]);
+    expect(recordsProblems(globalRecords)).toEqual([]);
   });
 
   it('reports bad entries', () => {
-    expect(tableProblems([
-      record(),
-      record(),
-      { ...record({ kind: 'chests' }), voyage: 'woodhallowe', ocean: 'Emerald', crewSize: 0, value: 1.5, date: '23/10/2026' },
+    const den: GlobalRecord = { voyage: 'woodhallow', ocean: 'emerald', category: 'Best score', crewSize: 12, value: 2402 };
+    expect(recordsProblems([
+      den,
+      den,
+      { ...den, category: 'Most dire chests', voyage: 'woodhallowe', ocean: 'Emerald', crewSize: 0, value: 1.5, date: '23/10/2026' },
+      { voyage: 'cursedIsles', ocean: 'emerald', category: 'Best score', value: 1, pirates: ['A'], pirateScores: [1, 2], loot: [1, 2] },
+      { voyage: 'cursedIsles', ocean: 'emerald', category: 'X', value: 1, screenshot: 'https://i.imgur.com/a.png' },
     ])).toEqual([
-      'Record 2: there is already a score record for this voyage, ocean and crew size',
+      'Record 2: there is already a Best score record for this voyage, ocean and crew size',
       'Record 3: voyage must be one of woodhallow, cursedIsles, vampireLairs',
       'Record 3: ocean must be a lower-case name',
-      'Record 3: crewSize must be a whole number',
       'Record 3: value must be a whole number',
+      'Record 3: crewSize must be a whole number',
       'Record 3: date must be YYYY-MM-DD',
+      'Record 4: pirateScores must be one number per pirate',
+      'Record 4: loot must be three whole numbers, tier 3 first',
+      'Record 4: a Best score record needs a crewSize',
+      'Record 5: screenshots must be under voyage-records/screenshots/',
     ]);
+  });
+
+  it('finds the den records among the other categories', () => {
+    expect(knownRecords.length).toBeGreaterThan(0);
+    expect(toKnownRecord({ voyage: 'cursedIsles', ocean: 'emerald', category: 'Most cursed chests', crewSize: 3, value: 130, pirates: ['A'] }))
+      .toEqual({ voyage: 'cursedIsles', ocean: 'emerald', crewSize: 3, kind: 'chests', value: 130, pirates: ['A'] });
+    expect(toKnownRecord({ voyage: 'cursedIsles', ocean: 'emerald', category: 'Most cursed chests in one forage', crewSize: 3, value: 30 })).toBeNull();
+    expect(toKnownRecord({ voyage: 'woodhallow', ocean: 'emerald', category: 'Most cursed chests', crewSize: 3, value: 30 })).toBeNull();
   });
 });
 
@@ -63,11 +79,11 @@ describe('exportRecords', () => {
     ]);
     expect(result.exported).toBe('2026-11-07T13:00:00.000Z');
     expect(result.logs).toEqual(['Aster_emerald_x']);
-    expect(result.records.map(({ crewSize, kind, value, standing }) => [crewSize, kind, value, standing])).toEqual([
-      [3, 'score', 60, 'new'],
-      [3, 'chests', 10, 'new'],
-      [12, 'score', 2402, 'beat'],
-      [12, 'chests', 160, 'tie'],
+    expect(result.records.map(({ crewSize, category, value, standing }) => [crewSize, category, value, standing])).toEqual([
+      [3, 'Best score', 60, 'new'],
+      [3, 'Most dire chests', 10, 'new'],
+      [12, 'Best score', 2402, 'beat'],
+      [12, 'Most dire chests', 160, 'tie'],
     ]);
     expect(result.records[2]).toMatchObject({
       voyage: 'woodhallow', ocean: 'emerald', date: '2026-10-23', time: '2026-10-23T20:00:00',
@@ -75,21 +91,26 @@ describe('exportRecords', () => {
     });
     expect(result.records[3]).toMatchObject({ time: null, loot: [160, 300, 500] });
     expect(result.records[3]).not.toHaveProperty('date');
-    expect(tableProblems(result.records)).toEqual([]);
+    expect(recordsProblems(result.records)).toEqual([]);
   });
 
   it('skips the reviewed chest-only run and submits the next eligible best', () => {
+    // Keep this exclusion test independent of newly submitted global records.
+    const records = [
+      record({ crewSize: 6, kind: 'chests', value: 120 }),
+      record({ crewSize: 6, kind: 'score', value: 1601 }),
+    ];
     const excluded = voyage({
       crewSize: 6, startedAt: Date.UTC(2026, 10, 2, 0, 35, 21), loot: [139, 0, 15], score: 432,
       players: ['Rock', 'amizing', 'Cono', 'Kriosussy', 'Mikethyson', 'Mrraffo'],
     });
     const eligible = voyage({ ...excluded, startedAt: Date.UTC(2026, 10, 2, 2), loot: [125, 300, 600], score: 1575 });
 
-    expect(standingFor(excluded, 'chests')).toBeNull();
-    expect(againstRecords([excluded, eligible])).toEqual(new Map([[eligible, { score: null, chests: 'beat' }]]));
-    expect(exportRecords([excluded], []).records).toEqual([]);
-    expect(claimedRecords(exportRecords([excluded, eligible], []))).toMatchObject([{ kind: 'chests', value: 125 }]);
-    expect(standingFor({ ...excluded, startedAt: Date.UTC(2026, 10, 3) }, 'chests')).toBe('beat');
+    expect(standingFor(excluded, 'chests', records)).toBeNull();
+    expect(againstRecords([excluded, eligible], records)).toEqual(new Map([[eligible, { score: null, chests: 'beat' }]]));
+    expect(exportRecords([excluded], [], new Date(), records).records).toEqual([]);
+    expect(claimedRecords(exportRecords([excluded, eligible], [], new Date(), records))).toMatchObject([{ category: 'Most dire chests', value: 125 }]);
+    expect(standingFor({ ...excluded, startedAt: Date.UTC(2026, 10, 3) }, 'chests', records)).toBe('beat');
   });
 
   it('excludes ignored crews from standings and sends the next eligible best', () => {
@@ -104,7 +125,7 @@ describe('exportRecords', () => {
     expect(againstRecords([excluded], records).size).toBe(0);
     expect(exportRecords([excluded], [], new Date(), records).records).toEqual([]);
     const exported = exportRecords([excluded, eligible], [], new Date(), records);
-    expect(claimedRecords(exported)).toMatchObject([{ kind: 'chests', value: 125 }]);
+    expect(claimedRecords(exported)).toMatchObject([{ category: 'Most dire chests', value: 125 }]);
     expect(claimedRecords({ ...exported, records: exported.records.map((entry) => ({ ...entry, pirates: excluded.players })) })).toEqual([]);
   });
 
@@ -123,18 +144,22 @@ describe('recordsMessage', () => {
       exported: '2026-11-07T00:00:00Z',
       logs: [],
       records: [
-        { ...base, kind: 'chests' as const, value: 140, standing: 'beat' as const },
-        { ...base, kind: 'score' as const, value: 10, standing: null },
-        { ...base, crewSize: 4, kind: 'score' as const, value: 1800, standing: 'tie' as const },
-        { ...base, crewSize: 8, kind: 'score' as const, value: 9999, standing: 'beat' as const },
+        { ...base, category: 'Most cursed chests', value: 140, standing: 'beat' as const },
+        { ...base, category: 'Best score', value: 10, standing: null },
+        { ...base, crewSize: 4, category: 'Best score', value: 1800, standing: 'tie' as const },
+        { ...base, crewSize: 8, category: 'Best score', value: 9999, standing: 'beat' as const },
       ],
     };
     expect(claimedRecords(exported)).toHaveLength(1);
     const message = recordsMessage(exported);
     expect(message).toContain('Hi Jice');
     expect(message).toContain('1. Cursed Isles (Emerald), 3 pirates, most cursed chests: 140 (beats 130)');
-    expect(message).toContain('Crew: A, B, C\n\nData for the records table:\n');
-    expect(message).not.toContain('"kind":"score"');
-    expect(JSON.parse(message.split('\n').at(-1)!)).toHaveLength(1);
+    expect(message).toContain('Crew: A, B, C\n\nData for the records:\n');
+    const data = JSON.parse(message.split('\n').at(-1)!);
+    expect(data).toEqual([{
+      voyage: 'cursedIsles', ocean: 'emerald', category: 'Most cursed chests', crewSize: 3, value: 140,
+      date: '2026-11-03', time: '2026-11-03T20:00:00', pirates: ['A', 'B', 'C'], loot: [140, 1, 1],
+    }]);
+    expect(recordsProblems(data)).toEqual([]);
   });
 });

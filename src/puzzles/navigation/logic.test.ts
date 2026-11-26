@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import legacyFixture from './navigation-parity.json';
 import testFixture from './navigation-test-parity.json';
 import { NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, type Target, type Run } from './logic';
-import { NavigationGame, DEFAULT_SETTINGS, NO_TOTALS, addBoard, boardSeed, readSettings, readNavigationSeed, runGoal, settingsKey, targetLit } from './game';
+import { NavigationGame, DEFAULT_SETTINGS, NO_TOTALS, addBoard, boardSeed, levelLoops, readSettings, readNavigationSeed, runGoal, settingsKey, targetLit } from './game';
 
 const targets = (rows: (number | boolean)[][]): Target[] => rows.map(r => ({ octant: r[0] as number, ring: r[1] as number, colour: r[2] as number, wild: r[3] as boolean }));
 const runs = (rows: number[][]): Run[] => rows.map(r => ({ direction: r[0] as 0 | 1, octant: r[1], ring: r[2], length: r[3] }));
@@ -82,6 +82,16 @@ describe('navigation sessions', () => {
     chart(run);expect(run.constellations).toBe(13);expect(run.finished).toBe(true);
     expect(runGoal({ ...DEFAULT_SETTINGS,timerMs:0 })).toBe(Infinity);
     expect(runGoal({ ...DEFAULT_SETTINGS,timerMs:0,clears:true })).toBe(13);
+  });
+  it('starts the level again on a fresh board only in timed Dennav, from rules 4', () => {
+    expect(levelLoops({ ...DEFAULT_SETTINGS },4)).toBe(true);
+    expect(levelLoops({ ...DEFAULT_SETTINGS,timerMs:300000 },4)).toBe(true);
+    // Older replays ended at the level, as they did then.
+    expect(levelLoops({ ...DEFAULT_SETTINGS },3)).toBe(false);
+    expect(levelLoops({ ...DEFAULT_SETTINGS,mode:'ww' },4)).toBe(false);
+    expect(levelLoops({ ...DEFAULT_SETTINGS,mode:'normal' },4)).toBe(false);
+    expect(levelLoops({ ...DEFAULT_SETTINGS,timerMs:0,clears:true },4)).toBe(false);
+    expect(levelLoops({ ...DEFAULT_SETTINGS,create:true },4)).toBe(false);
   });
   it('counts a dismissed board toward the quota run', () => {
     const settings = { ...DEFAULT_SETTINGS,timerMs:0,clears:true };

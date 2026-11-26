@@ -223,7 +223,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const options = Array.from({ length: 11 }, (_, value) => { const d = difficultyInfo(value); return { value, label: `${value}: ${d.width}×${d.height}, ${d.ties} tie-off${d.ties === 1 ? '' : 's'}${d.blockers ? `, ${d.blockers} blockers` : ''}` }; });
   const setDifficulty = (value: number) => { settings.difficulty = value; save(); };
   const session = panel.session();
-  session.select('Mode', [{ value: 'normal', label: 'Normal' }, { value: 'create', label: 'Freeplay' }], () => settings.mode, value => { settings.mode = value as Mode; save(); }, { disabled: busy });
+  session.select('Mode', [{ value: 'normal', label: 'Normal' }, { value: 'create', label: 'Freeplay' }], () => settings.mode, value => { settings.mode = value as Mode; save(); });
   session.note(() => settings.mode === 'create' ? 'Freeplay has no wind: gust from the spool or Enter, and the board comes back afterwards.' : `Wind every ${settings.wind ?? difficultyInfo(settings.difficulty).wind} seconds${settings.wind === 0 ? ' (disabled)' : ''}.`);
   session.button('Start', () => { if (running) { replays.command('stop'); finish(); } else start(); }, { variant: 'primary', label: () => running ? 'Stop' : 'Start', disabled: () => replays?.isPlaying ?? false });
   pause.install(panel, () => running);
@@ -269,11 +269,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   }, { hidden: () => createOnly() || !running });
   panel.controlSettings.group('Controls').hint(() => 'Drag to swap. Wheel or Q/E to rotate. WASD or arrows to move; Space to select/swap. Enter or click the spool for a safe gust. Escape pauses.');
   const gameSettings = panel.settings.group('Game');
-  gameSettings.select('Difficulty', options, () => settings.difficulty, setDifficulty, { disabled: busy });
+  gameSettings.select('Difficulty', options, () => settings.difficulty, setDifficulty);
   gameSettings.select('Wind', [{ value: 'level', label: 'By difficulty (YPPedia mapping)' }, { value: 'custom', label: 'Custom interval' }, { value: 'off', label: 'No wind' }],
-    () => settings.wind === null ? 'level' : settings.wind === 0 ? 'off' : 'custom', value => { settings.wind = value === 'level' ? null : value === 'off' ? 0 : 60; save(); }, { disabled: busy });
-  gameSettings.number('Custom seconds', () => settings.wind || 60, value => { settings.wind = Math.max(1, Math.min(300, Math.round(value))); save(); }, { min: 1, max: 300, step: 1, disabled: () => busy() || settings.wind === null || settings.wind === 0 });
-  gameSettings.select('Maneuvers', [{ value: 0, label: 'None' }, { value: 1, label: '4 Tokens' }, { value: 2, label: '5 Tokens' }], () => settings.bonusMode, value => { settings.bonusMode = value; save(); }, { disabled: busy });
+    () => settings.wind === null ? 'level' : settings.wind === 0 ? 'off' : 'custom', value => { settings.wind = value === 'level' ? null : value === 'off' ? 0 : 60; save(); });
+  gameSettings.number('Custom seconds', () => settings.wind || 60, value => { settings.wind = Math.max(1, Math.min(300, Math.round(value))); save(); }, { min: 1, max: 300, step: 1, disabled: () => settings.wind === null || settings.wind === 0 });
+  gameSettings.select('Maneuvers', [{ value: 0, label: 'None' }, { value: 1, label: '4 Tokens' }, { value: 2, label: '5 Tokens' }], () => settings.bonusMode, value => { settings.bonusMode = value; save(); });
   gameSettings.hint(() => 'Difficulty stays fixed during practice. Each completed or torn board is followed by a new one.');
   panel.settings.group('Accuracy notes').hint(() => 'Board generation, connections, grommets and raw points follow the game rules. Wind intervals use YPPedia aligned highest to highest, with 75 s for the remaining lower levels. Live rating thresholds and supplied board seeds are unavailable. See docs/PATCHING.md for assumptions and open questions.');
   panel.controls('patching', [...keyBindings, ...PAINT_KEYS.map(({ id, label, defaultKey }) => ({ id, label, defaultKey }))]);

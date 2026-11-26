@@ -11,8 +11,11 @@ an optional 2- or 5-minute practice timer, and the independent Dennav options in
 
 Up/Down selects a ring, Left/Right rotates it, and Space speeds up the incoming star.
 Keys 1 to 4 select a ring directly, 1 being the innermost.
-Click another ring to select it; clicking the selected ring rotates it clockwise
-(right-click rotates counterclockwise). Buttons provide the same controls. Escape pauses.
+Click or tap a ring to select it. Mouse dragging follows the ring around the wheel, including below
+its centre. Touch uses left/right swipes, with circular dragging available under Settings > Controls >
+Touch gesture. Clicks never rotate a ring.
+Mobile controls in the same menu adds ring buttons 1–4, arrow buttons and Drop below the board;
+ring 4 is unavailable on a three-ring board. Escape pauses.
 The clock and replay exclude paused time. Settings > Controls lets you remap the keys.
 In either Dennav mode, and in any quota run, Dismiss deals a fresh board inside the same run:
 the score, statistics, timer and constellation count carry on, and the run is saved (one

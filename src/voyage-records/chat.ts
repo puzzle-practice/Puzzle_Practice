@@ -15,6 +15,8 @@ export interface ChatEvent {
   line?: number;
   /** The date and time written in the log, as if it were UTC. Null before the first date line. */
   at: number | null;
+  /** Milliseconds since midnight, including in undated logs. */
+  clock?: number;
 }
 
 export interface Fray {
@@ -22,6 +24,13 @@ export interface Fray {
   result: 'Won' | 'Lost' | null;
   survivors: number | null;
   deaths: string[];
+  /**
+   * In a lost fray, the pirates who fell soon after it began: within two minutes in Woodhallow and
+   * one minute in Vampire Lairs. Only death rates read it.
+   */
+  earlyDeaths?: string[];
+  /** Vampire Lairs: who fought this fray, when it differs from the voyage's crew. */
+  crew?: string[];
 }
 
 export interface RunDetails {
@@ -61,6 +70,16 @@ export function* chatEvents(text: string): Generator<ChatEvent> {
     const clock = (+event[1] * 3600 + +event[2] * 60 + +event[3]) * 1000;
     if (day !== null && previousClock - clock > dayMs / 2) day += dayMs;
     previousClock = clock;
-    yield { message: event[4], at: day === null ? null : day + clock, line: index + 1 };
+    yield { message: event[4], at: day === null ? null : day + clock, clock, line: index + 1 };
   }
+}
+
+/**
+ * Milliseconds from one event to a later one, or null when the log can't tell. Undated logs fall
+ * back to the clock, wrapping past midnight.
+ */
+export function elapsedMs(from: ChatEvent, to: ChatEvent): number | null {
+  if (from.at !== null && to.at !== null) return to.at - from.at;
+  if (from.clock === undefined || to.clock === undefined) return null;
+  return (to.clock - from.clock + dayMs) % dayMs;
 }

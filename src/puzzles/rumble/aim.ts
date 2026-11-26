@@ -1,8 +1,9 @@
-// Rotating bruise scaffolds, with two queued targets. Every target is checked against Rumble's
-// real shot solver, and graded by its easiest working route: how many wall bounces it takes,
-// how wide its window of angles is, and how far its last bounce lands from the target.
+// Randomly shaped bruise scaffolds, with two queued targets. Every target is checked against
+// Rumble's real shot solver and the aims the mouse can reach, and graded by its easiest working
+// route: how many wall bounces it takes, how wide its window of angles is, and how far its last
+// bounce lands from the target. Each board is made fresh for the run, and changes every few shots.
 import { Random } from '../../core/random';
-import { type Board, DIR_PREC, H, STEP_X, W, type Point, type Shot } from './board';
+import { type Board, DIR_PREC, H, STEP_X, VIEW_H, VIEW_W, W, type Point, type Shot } from './board';
 import { FLIGHT_SPEED, type Fighter } from './fighter';
 import { ball, dark, EMPTY, isBall } from './pieces';
 
@@ -10,8 +11,8 @@ export const AIM_MS = 120_000;
 export const AIM_LIVES = 3;
 /** Keep the landed ball and both targets visible before dealing the next shot. */
 export const AIM_LANDING_MS = 250;
-export const AIM_BOARD_SHOTS = 8;
-export const AIM_REPLAY_VERSION = 5;
+export const AIM_BOARD_SHOTS = 3;
+export const AIM_REPLAY_VERSION = 6;
 export const AIM_HISTORY = 'rumble:aim-trainer:v1';
 
 export const DIFFICULTIES = ['Easy', 'Medium', 'Hard', 'Very hard'] as const;
@@ -71,7 +72,7 @@ const rank = (d: Difficulty) => DIFFICULTIES.indexOf(d);
 const RECENT = 4;
 /** What a shot feels like: its hand, bounces, and which side of the board its target is on. */
 const style = (c: Candidate) => `${c.fist}|${c.routes[0].bounces}|${c.cells[0].x < W / 2 ? 'left' : 'right'}`;
-// Column heights. The later shapes add caves and overhangs, whose targets need long bank shots.
+// Hand-made column heights, which random boards sometimes start from.
 const BASE_PROFILES = [
   [7, 6, 5, 10, 13, 13, 10, 5, 6, 7],
   [10, 5, 5, 7, 12, 12, 7, 5, 5, 10],
@@ -95,15 +96,50 @@ const BASE_PROFILES = [
   [12, 5, 10, 15, 12, 13, 8, 3, 2, 12],
   [7, 10, 12, 14, 6, 4, 4, 3, 5, 12],
 ];
-/** Layouts in a fixed difficulty need at least this many of its targets. */
-const MIN_TARGETS = 6;
-// Side wings can grow or shrink independently. Related shapes share useful shot routes,
-// allowing the board to change without invalidating the ball already in the preview.
-const PROFILES = BASE_PROFILES.flatMap(base => [
-  base,
-  base.map((height, x) => x < 3 ? Math.max(height, 9) + 2 - x : height),
-  base.map((height, x) => x > 6 ? Math.max(height, 9) + x - 7 : height),
-]);
+/** A fixed difficulty's boards need at least this many of its targets. */
+const MIN_TARGETS = 4;
+/** A Mixed board needs at least this many targets. */
+const MIN_MIXED = 6;
+/** Boards tried when dealing the first board or planning the next one, before settling for less. */
+const TRIES = 10;
+/**
+ * The fewest mouse positions over the board that can aim a target's shot. The mouse sets the aim in
+ * whole half degrees from whole pixels, so a few steep angles beside a fist can only be reached with
+ * a handful of pixels (or none at all). Those targets are left out.
+ */
+export const MIN_MOUSE_AREA = 40;
+
+const dirMaps = new Map<string, Int16Array>();
+/** Each board pixel's mouse aim for a fist, row by row. */
+export function mouseDirs(b: Board, fist: number): Int16Array {
+  const id = JSON.stringify([b.origins[fist], b.ranges[fist]]);
+  let map = dirMaps.get(id);
+  if (!map) {
+    map = new Int16Array(VIEW_W * VIEW_H);
+    for (let y = 0; y < VIEW_H; y++) for (let x = 0; x < VIEW_W; x++) map[y * VIEW_W + x] = b.mouseDir(fist, x, y);
+    dirMaps.set(id, map);
+  }
+  return map;
+}
+
+const areaMaps = new Map<string, Map<number, number>>();
+/** How many board pixels aim a fist at each angle. */
+function mouseAreas(b: Board, fist: number): Map<number, number> {
+  const id = JSON.stringify([b.origins[fist], b.ranges[fist]]);
+  let areas = areaMaps.get(id);
+  if (!areas) {
+    areas = new Map();
+    for (const dir of mouseDirs(b, fist)) areas.set(dir, (areas.get(dir) ?? 0) + 1);
+    areaMaps.set(id, areas);
+  }
+  return areas;
+}
+
+/** Board pixels whose mouse aim connects with a target. */
+export function mouseArea(b: Board, target: Pick<Candidate, 'fist' | 'angles'>): number {
+  const areas = mouseAreas(b, target.fist);
+  return target.angles.reduce((n, dir) => n + (areas.get(dir) ?? 0), 0);
+}
 
 /** Fills each column down to its profile height with bruises, dropping anything left hanging. */
 export function scaffold(b: Board, profile: number[]): void {
@@ -114,15 +150,55 @@ export function scaffold(b: Board, profile: number[]): void {
   for (const p of b.grapesAfter(new Map())) b.set(p, EMPTY);
 }
 
-/** Every pair of touching scaffold balls either fist can connect with at two or more aims, graded. */
+/**
+ * A random board shape: one of the hand-made profiles nudged about, or a fresh random walk of
+ * column heights, sometimes mirrored. Some get a tunnel carved in from a wall or up from below,
+ * leaving caves, shelves and overhangs that need bank shots.
+ */
+export function randomBoard(b: Board, rng: Random): void {
+  const clamp = (h: number) => Math.min(15, Math.max(2, h));
+  let profile: number[];
+  if (rng.random() < 0.35) {
+    const base = rng.choice(BASE_PROFILES);
+    profile = (rng.random() < 0.5 ? base : [...base].reverse()).map(h => clamp(h + rng.integer(-2, 2)));
+  } else {
+    const half = rng.random() < 0.45;
+    profile = [rng.integer(2, 14)];
+    for (let x = 1; x < (half ? W / 2 : W); x++) profile.push(clamp(profile[x - 1] + rng.integer(-5, 5)));
+    if (half) profile.push(...[...profile].reverse());
+  }
+  scaffold(b, profile);
+  const carves = rng.choice([0, 0, 1, 1, 2]);
+  for (let i = 0; i < carves; i++) {
+    if (rng.random() < 0.5) {
+      // A tunnel in from one wall, one or two rows tall.
+      const y0 = rng.integer(2, 11), rows = rng.integer(1, 2), length = rng.integer(2, 6), left = rng.random() < 0.5;
+      for (let y = y0; y < y0 + rows; y++) for (let i = 0; i < length; i++) {
+        const x = left ? i : b.width(y) - 1 - i;
+        b.set({ x, y }, EMPTY);
+      }
+    } else {
+      // A pocket up from below, under an overhang.
+      const x0 = rng.integer(0, W - 3), width = rng.integer(1, 3), top = rng.integer(3, 9);
+      for (let y = top; y < H; y++) for (let x = x0; x < x0 + width; x++) b.set({ x, y }, EMPTY);
+    }
+  }
+  for (const p of b.grapesAfter(new Map())) b.set(p, EMPTY);
+}
+
+/** Every pair of touching scaffold balls either fist can connect with, at two or more aims the mouse can reach, graded. */
 export function gradeTargets(b: Board): Candidate[] {
   const candidates: Candidate[] = [];
   for (let fist = 0; fist < b.fists; fist++) {
     const [lo, hi] = b.ranges[fist];
-    const shots: Array<{ dir: number; shot: Shot }> = [];
+    // Shots by the cell each comes to rest in.
+    const resting = new Map<number, Array<{ dir: number; shot: Shot }>>();
     for (let dir = lo; dir <= hi; dir++) {
       const shot = b.shoot(b.path(fist, dir));
-      if (shot) shots.push({ dir, shot });
+      if (!shot) continue;
+      const k = key(shot.rest);
+      if (!resting.has(k)) resting.set(k, []);
+      resting.get(k)!.push({ dir, shot });
     }
     for (let y = 0; y < H; y++) for (let x = 0; x < b.width(y); x++) {
       const p = { x, y };
@@ -131,8 +207,12 @@ export function gradeTargets(b: Board): Candidate[] {
         const q = b.neighbour(p, d);
         if (!b.valid(q) || !isBall(b.get(q))) continue;
         const cells = [p, q];
-        const connected = shots.filter(({ shot }) => cells.some(c => b.adjacent(shot.rest, c)));
+        const beside = new Set<number>();
+        for (const c of cells) for (let n = 0; n < 6; n++) { const r = b.neighbour(c, n); if (b.valid(r)) beside.add(key(r)); }
+        const connected = [...beside].flatMap(k => resting.get(k) ?? []).sort((s, t) => s.dir - t.dir);
         if (connected.length < 2) continue;
+        const angles = connected.map(s => s.dir);
+        if (mouseArea(b, { fist, angles }) < MIN_MOUSE_AREA) continue;
         const runs: Array<{ bounces: number; lo: number; hi: number; shots: Shot[] }> = [];
         for (const { dir, shot } of connected) {
           const bounces = shot.flight.length - 2, last = runs[runs.length - 1];
@@ -147,7 +227,7 @@ export function gradeTargets(b: Board): Candidate[] {
           })) / STEP_X : 0;
           return { bounces, lo, hi, distance: Math.round(distance * 10) / 10 };
         }).sort((r, s) => rank(routeDifficulty(r)) - rank(routeDifficulty(s)) || (s.hi - s.lo) - (r.hi - r.lo));
-        candidates.push({ cells, fist, difficulty: routeDifficulty(routes[0]), routes, angles: connected.map(s => s.dir) });
+        candidates.push({ cells, fist, difficulty: routeDifficulty(routes[0]), routes, angles });
       }
     }
   }
@@ -161,37 +241,35 @@ export function gradeTargets(b: Board): Candidate[] {
 const carries = (c: Candidate, after: Layout) => after.candidates.some(next => sameTarget(c, next) &&
   c.routes.every(r => next.routes.some(n => n.bounces === r.bounces && n.lo <= r.lo && n.hi >= r.hi)));
 
-const layoutCache = new Map<string, Layout[]>();
-/**
- * The scaffolds with their graded targets, for a difficulty. They depend only on the board's shape,
- * so are worked out once. A fixed difficulty keeps the boards with plenty of its targets that can
- * change to another such board on one of them.
- */
-function layoutsFor(b: Board, difficulty: AimDifficulty): Layout[] {
-  const shape = JSON.stringify([b.topLarge, b.origins, b.ranges]);
-  const id = `${shape}|${difficulty}`;
-  const cached = layoutCache.get(id);
-  if (cached) return cached;
-  let layouts: Layout[];
-  if (difficulty === 'Mixed') {
-    layouts = PROFILES.map(profile => {
-      scaffold(b, profile);
-      const candidates = gradeTargets(b);
-      if (candidates.length < 4) throw new Error('Aim trainer needs more reachable targets');
-      return { cells: b.cells.slice(), candidates };
-    });
-  } else {
-    layouts = layoutsFor(b, 'Mixed').filter(l => l.candidates.filter(c => c.difficulty === difficulty).length >= MIN_TARGETS);
-    for (let before = -1; before !== layouts.length;) {
-      before = layouts.length;
-      const kept = layouts;
-      layouts = kept.filter(l => kept.some(other => other !== l &&
-        l.candidates.some(c => c.difficulty === difficulty && carries(c, other))));
+/** Whether a board has enough targets to deal from, away from the target it keeps. */
+function enough(layout: Layout, difficulty: AimDifficulty, keep?: Candidate): boolean {
+  const usable = layout.candidates.filter(c => !keep || !overlaps(c, keep));
+  return difficulty === 'Mixed' ? usable.length >= MIN_MIXED : usable.filter(c => c.difficulty === difficulty).length >= MIN_TARGETS;
+}
+
+/** The cells near any working flight of a target, which a board that keeps it leaves alone. */
+function corridor(b: Board, target: Candidate): Set<number> {
+  const near = new Set<number>();
+  const mark = (p: Point) => {
+    near.add(key(p));
+    for (let d = 0; d < 6; d++) { const q = b.neighbour(p, d); if (b.valid(q)) near.add(key(q)); }
+  };
+  for (const p of target.cells) mark(p);
+  for (const dir of target.angles) {
+    const shot = b.shoot(b.path(target.fist, dir));
+    if (!shot) continue;
+    mark(shot.rest);
+    for (let i = 1; i < shot.flight.length; i++) {
+      const from = shot.flight[i - 1], to = shot.flight[i];
+      const steps = Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / 8);
+      for (let s = 0; s <= steps; s++) {
+        const x = from.x + (to.x - from.x) * s / steps - 15, y = from.y + (to.y - from.y) * s / steps - 15;
+        const cell = b.cellAt(x + 15, y + 15);
+        if (b.valid(cell)) mark(cell);
+      }
     }
-    if (!layouts.length) throw new Error(`Aim trainer has no ${difficulty} boards`);
   }
-  layoutCache.set(id, layouts);
-  return layouts;
+  return near;
 }
 
 export class AimTrainer {
@@ -212,9 +290,7 @@ export class AimTrainer {
   landing: { piece: number; cell: Point; hit: boolean; at: number; until: number } | null = null;
   private bounceIndex = 0;
   private flightHit = false;
-  private readonly layouts: Layout[];
-  private layoutIndex: number;
-  private pendingLayout: number | null = null;
+  private pendingLayout: Layout | null = null;
   /** The last few targets dealt, newest last, so the next ones go somewhere else. */
   private readonly recent: Candidate[] = [];
   /** Shots fired since the board last changed. */
@@ -225,18 +301,21 @@ export class AimTrainer {
     this.rng = new Random(seed ^ 0x41696d);
     this.feedbackAt = startedAt;
     Object.assign(fighter.sandbox, { endless: true, drops: false, shotTimer: false });
-    this.layouts = layoutsFor(fighter.board, difficulty);
-    this.layoutIndex = this.rng.integer(0, this.layouts.length - 1);
-    this.applyLayout();
+    let first: Layout | null = null;
+    for (let round = 0; !first; round++) {
+      if (round === 20) throw new Error(`Aim trainer found no ${difficulty} board`);
+      first = this.newBoard();
+    }
+    this.applyLayout(first);
     this.current = this.pick();
     this.next = this.pick(this.current);
     this.showTargets();
   }
 
-  /** Replay fingerprints skip the layouts: they are fixed by the board's shape, and layoutIndex says which is up. */
+  /** Replay fingerprints skip the planned board's targets: they follow from its cells. */
   toJSON(): object {
-    const { layouts: _layouts, ...state } = this;
-    return state;
+    const { pendingLayout, ...state } = this;
+    return { ...state, pendingLayout: pendingLayout?.cells ?? null };
   }
 
   remaining(now: number): number {
@@ -301,10 +380,12 @@ export class AimTrainer {
       // Keep the original target visible during the landing pause, then promote the preview.
       const previous = this.current;
       this.current = this.next;
-      if (this.pendingLayout !== null) {
-        this.layoutIndex = this.pendingLayout;
+      if (this.pendingLayout) {
+        this.applyLayout(this.pendingLayout);
         this.pendingLayout = null;
-        this.applyLayout();
+        // The kept target's entry on the new board: the same grade, perhaps with more aims that work.
+        const kept = this.candidates.find(c => sameTarget(c, this.current));
+        if (kept) this.current = { ...kept, colour: this.current.colour };
         this.boardShots = 0;
         this.boardNumber++;
         this.feedback = 'New board!';
@@ -369,37 +450,45 @@ export class AimTrainer {
     return { ...chosen, colour: this.rng.choice(colours) };
   }
 
-  private applyLayout(): void {
-    const layout = this.layouts[this.layoutIndex];
+  private applyLayout(layout: Layout): void {
     this.fighter.board.cells.splice(0, this.fighter.board.cells.length, ...layout.cells);
     this.candidates.splice(0, this.candidates.length, ...layout.candidates);
   }
 
+  /**
+   * A fresh board with enough targets for the round. One that follows the board on screen must
+   * keep `keep`, the target already shown as next: the same cells and grade, with every aim that
+   * works now still working along the same bounces. Its flights' corridor is left as it was, and
+   * the rest of the board is made anew. Null if none of a few tries works out.
+   */
+  private newBoard(keep?: Candidate): Layout | null {
+    const b = this.fighter.board;
+    const saved = b.cells.slice();
+    const lock = keep ? corridor(b, keep) : null;
+    let found: Layout | null = null;
+    for (let i = 0; i < TRIES && !found; i++) {
+      randomBoard(b, this.rng);
+      if (lock) {
+        for (const k of lock) b.cells[k] = isBall(saved[k]) ? dark(ball(0)) : EMPTY;
+        for (const p of b.grapesAfter(new Map())) b.set(p, EMPTY);
+      }
+      const layout = { cells: b.cells.slice(), candidates: gradeTargets(b) };
+      if (enough(layout, this.difficulty, keep) && (!keep || carries(keep, layout))) found = layout;
+    }
+    b.cells.splice(0, b.cells.length, ...saved);
+    return found;
+  }
+
   private queueNext(previous: AimTarget): AimTarget {
     const want = this.want();
+    const chosen = this.pick(this.current, previous, this.candidates, want);
     if (this.boardShots + 1 >= AIM_BOARD_SHOTS) {
-      // Plan the change one turn ahead. The preview target must work on both boards, at the same
-      // grade, with every previously valid aim still valid, so preparing that shot is never wasted.
-      // A fixed difficulty waits up to another board's worth of shots for a target of its grade.
-      let fallback: { index: number; shared: Candidate[] } | null = null;
-      let ready: { index: number; shared: Candidate[] } | null = null;
-      for (const index of this.rng.shuffle(this.layouts.map((_, i) => i).filter(i => i !== this.layoutIndex))) {
-        const after = this.layouts[index].candidates;
-        const shared = this.candidates.filter(c => !overlaps(c, this.current) && carries(c, this.layouts[index]));
-        if (!shared.length) continue;
-        fallback ??= { index, shared };
-        // The new board also needs a target of the grade to follow this one.
-        const graded = shared.filter(c => c.difficulty === want && after.some(n => n.difficulty === want && !overlaps(n, c)));
-        if (graded.length) { ready = { index, shared: graded }; break; }
-      }
-      const waiting = this.difficulty !== 'Mixed' && this.boardShots + 1 < 2 * AIM_BOARD_SHOTS;
-      const change = ready ?? (waiting ? null : fallback);
-      if (change) {
-        this.pendingLayout = change.index;
-        return this.pick(this.current, previous, change.shared, want);
-      }
+      // Plan the change one turn ahead, around the target about to be shown as next, so preparing
+      // that shot is never wasted. If no board keeps it, the change waits for the next shot.
+      const base = this.candidates.find(c => sameTarget(c, chosen))!;
+      this.pendingLayout = this.newBoard(base);
     }
-    return this.pick(this.current, previous, this.candidates, want);
+    return chosen;
   }
 
   private showTargets(): void {

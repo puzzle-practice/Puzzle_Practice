@@ -55,7 +55,6 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   let message='', messageUntil=0, lastScene:unknown=null, lastMoves=0, lastBoards=0, lastBooches=0;
   const ctx=screen.ctx;
   const duty=dutyDesk(panel,store,'sailing','Sailing',[]);
-  const busy=()=>running||(replays?.isPlaying??false);
   const elapsed=()=>Math.min(!game.sandbox&&liveSettings.timerMs||Infinity,Math.max(0,(running?ticks():endAt)-startAt));
   const hold=new EndHold(ticks);
   const save=()=>store.set('settings',settings);
@@ -252,7 +251,7 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
 
   panel.clock(()=>!game.sandbox&&(running||finished)?{label:liveSettings.timerMs?'Time left':'Time',ms:liveSettings.timerMs?Math.max(0,liveSettings.timerMs-elapsed()):elapsed(),countdown:!!liveSettings.timerMs}:null);
   const session=panel.session();
-  session.select('Mode',[{value:'Normal',label:'Normal'},{value:'Create',label:'Freeplay'}],()=>mode,value=>{mode=value;store.set('mode',mode);preview();},{disabled:busy});
+  session.select('Mode',[{value:'Normal',label:'Normal'},{value:'Create',label:'Freeplay'}],()=>mode,value=>{mode=value;store.set('mode',mode);preview();});
   session.button('Start',()=>{if(replays.isPlaying)replays.stop();if(running)end('Stopped');else start();},{variant:'primary',label:()=>running&&!replays.isPlaying?'Stop':'Start'});
   panel.group(undefined,{hidden:()=>creating()&&editing}).button('Pause',()=>{if(running&&!replays.isPlaying&&!editing)pause.toggle();},{label:()=>pause.paused?'Resume':'Pause',disabled:()=>!running||replays.isPlaying||editing});
   const create=panel.group('Freeplay board',{hidden:()=>!creating()});
@@ -279,14 +278,14 @@ export default (async ({screen,input,panel,store,ticks:rawTicks,setReplayTime:ra
   panel.controlSettings.group('Rotate',moveOptions).button('↻ Clockwise',()=>queue('cw'),{disabled}).button('↺ Counterclockwise',()=>queue('ccw'),{disabled});
   panel.controlSettings.group(undefined,moveOptions).button('Fall faster',()=>queue('drop'),{disabled});
   const options=panel.settings.group('Game');
-  options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();},{disabled:busy});
-  options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();},{disabled:busy});
-  options.select('Timer',TIMER,()=>settings.timerMs,value=>{settings.timerMs=value;save();},{disabled:busy});
-  options.select('Requested shape',[{value:-1,label:'No request'},...[1,2,3,4,7].map(value=>({value,label:BONUS_NAMES[value]}))],()=>settings.desired,value=>{settings.desired=value;save();preview();},{disabled:busy});
+  options.select('Difficulty',DIFFICULTIES,()=>settings.difficulty,value=>{settings.difficulty=value;save();preview();});
+  options.select('Tokens',TOKENS,()=>settings.tokens,value=>{settings.tokens=value;save();preview();});
+  options.select('Timer',TIMER,()=>settings.timerMs,value=>{settings.timerMs=value;save();});
+  options.select('Requested shape',[{value:-1,label:'No request'},...[1,2,3,4,7].map(value=>({value,label:BONUS_NAMES[value]}))],()=>settings.desired,value=>{settings.desired=value;save();preview();});
   options.toggle('Landing preview',()=>showLanding,on=>{showLanding=on;store.set('landingPreview',on);});
   options.hint(()=>'Difficulty stays at your selected level across boards. Token practice puts one shape on every pair, using the game’s selected token pool.');
   const approximations=panel.settings.group('Approximations');
-  approximations.number('Top indicator threshold (approx.)',()=>settings.indicatorMax,value=>{settings.indicatorMax=value;save();preview();},{min:1,max:1000,step:0.01,disabled:busy});
+  approximations.number('Top indicator threshold (approx.)',()=>settings.indicatorMax,value=>{settings.indicatorMax=value;save();preview();},{min:1,max:1000,step:0.01});
   approximations.hint(()=>'The indicator uses the game’s default threshold curve (top 7.48 points/pair), which may differ from live play. Reports use Learning until live ratings are verified. Token availability is forced for practice; ship maneuver conversion is not simulated.');
   panel.controls('sailing',KEYS);
   historyGroup(panel,history,[{label:'Points / pair',value:g=>g.score.toFixed(2)},{label:'Chain',value:g=>String(g.chain)},{label:'Token units',value:g=>String(g.tokens)}],'Past games',{

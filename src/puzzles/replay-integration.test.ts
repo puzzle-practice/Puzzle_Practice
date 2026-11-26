@@ -6,7 +6,7 @@ import { Store, exportAll } from '../core/storage';
 import { replayWrites, listReplayFiles } from '../core/replay-storage';
 import type { PuzzleReplay, ReplayRecorder } from '../core/replay';
 import type { PuzzleContext, PuzzleFactory } from '../core/puzzle';
-import type { InputEvent } from '../core/input';
+import type { Input, InputEvent } from '../core/input';
 import { createDrill } from './treasure-haul/training';
 import { HaulBoard, isChestOrigin, RUBY, EMERALD } from './treasure-haul/logic';
 import { FOUR, IronBoard } from './blacksmithing/logic';
@@ -23,6 +23,7 @@ import { AIM_HISTORY, AIM_LANDING_MS, AIM_MS, AimTrainer } from './rumble/aim';
 import { Match as RumbleMatch } from './rumble/match';
 import { Glove as RumbleGlove } from './rumble/gloves';
 import type { Board, Point } from './rumble/board';
+import { ball, charged, EMPTY, FURBALL, ORANGE } from './rumble/pieces';
 import { GunningGame } from './gunning/game';
 import { LOOP, LOOP_SIDES, POWDER, SHOT, WAD } from './gunning/board';
 
@@ -60,6 +61,7 @@ function anyNode(own: Record<PropertyKey, unknown> = {}): any {
 function canvasContext() {
   return new Proxy({
     measureText: (text: string) => ({ width: text.length * 8 }),
+    createLinearGradient: () => ({ addColorStop() {} }),
     getImageData: (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
   }, { get: (target, key) => key in target ? target[key as keyof typeof target] : () => {} });
 }
@@ -86,7 +88,7 @@ function panelHarness(syncTableActions = false) {
       return group(page, title);
     };
     if (method === 'number' || method === 'range') return (name: string, _get: unknown, set: (value: number) => void) => { setters.set(page + ':' + title + ':' + name, set); return group(page, title); };
-    if (method === 'select') return (name: string, _options: unknown, _get: unknown, set: (value: string | number) => void) => { selections.set(page + ':' + title + ':' + name, set); return group(page, title); };
+    if (method === 'select' || method === 'segmented') return (name: string, _options: unknown, _get: unknown, set: (value: string | number) => void) => { selections.set(page + ':' + title + ':' + name, set); return group(page, title); };
     if (method === 'text') return (name: string, _get: unknown, set: (value: string) => void) => { texts.set(page + ':' + title + ':' + name, set); return group(page, title); };
     if (method === 'toggle') return (name: string, get: () => boolean, set: (value: boolean) => void) => {
       toggles.set(page + ':' + title + ':' + name, set);
@@ -112,6 +114,7 @@ function panelHarness(syncTableActions = false) {
   } });
   const panel = new Proxy({}, { get: (_target, method) => {
     if (method === 'group') return (title = '') => group('Play', title);
+    if (method === 'subtabs') return (_label: string, names: string[]) => names.map(() => ({ group: (title: string) => group('Play', title) }));
     if (method === 'settings' || method === 'seedSettings') return group('Settings');
     if (method === 'controlSettings') return group('Controls');
     if (method === 'tab') return (page: string) => group(page);
@@ -154,20 +157,32 @@ function misses(b: Board, fist: number, dir: number, cells: Point[]): boolean {
   return !!shot && !cells.some(p => b.adjacent(shot.rest, p));
 }
 
-describe('Rumble fire inputs', () => {
-  async function setup() {
+describe('Rumble inputs', () => {
+  async function setup(werewolf = false, rumless = false) {
     const updates = vi.spyOn(RumbleMatch.prototype, 'update');
     const store = new Store('rumble'); store.set('mode', 'Create');
     const harness = panelHarness();
     let now = 100;
+    const paletteClicks: (() => void)[] = [];
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const element = createElement(tag);
+      if (tag === 'button') element.addEventListener = ((type: string, callback: () => void) => {
+        if (type === 'click') paletteClicks.push(callback);
+      }) as typeof element.addEventListener;
+      return element;
+    }) as typeof document.createElement);
     const factory = (await import('./rumble/index')).default;
     const ctx = canvasContext() as unknown as CanvasRenderingContext2D;
     const draws = vi.fn();
     ctx.drawImage = draws;
     const screen = new Proxy({ ctx }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
-    const instance = await factory({ screen, input: { mouse: [-1, -1] },
+    const input = { mouse: [-1, -1] } as Input;
+    const instance = await factory({ screen, input,
       panel: harness.panel, store, ticks: () => now,
     } as unknown as PuzzleContext);
+    harness.toggles.get('Play:Board:Furball')!(werewolf);
+    harness.toggles.get('Settings:Fight:Rumless')!(rumless);
     harness.buttons.get('Play::Start')!();
     instance.frame([]);
     const f = (updates.mock.contexts.at(-1)! as RumbleMatch).player;
@@ -175,8 +190,69 @@ describe('Rumble fire inputs', () => {
     f.board.cells.fill(0);
     f.board.sparks = [];
     const frame = (at: number, events: InputEvent[] = []) => { now = at; instance.frame(events); };
-    return { instance, f, frame, draws };
+    return { instance, f, frame, draws, input, paletteClicks, current: () => (updates.mock.contexts.at(-1)! as RumbleMatch).player, ...harness };
   }
+
+  it.each([false, true])('paints charged balls with Control using keys and palette strokes (werewolf=%s)', async werewolf => {
+    const h = await setup(werewolf), b = h.f.board;
+    const first: [number, number] = [140, 90], second: [number, number] = [170, 90];
+    const cell = (pos: [number, number]) => b.cellAt(pos[0] - 93, pos[1] - 41);
+    const piece = ball(werewolf ? FURBALL : ORANGE);
+    expect(h.input.allowControlKey?.('3')).toBe(true);
+    expect(h.input.allowControlKey?.('c')).toBe(false);
+    h.input.mouse = first;
+    h.frame(110, [{ type: 'keydown', key: 'control' }, { type: 'keydown', key: '3' }]);
+    expect(b.get(cell(first))).toBe(charged(piece));
+    h.input.mouse = second; h.frame(120);
+    expect(b.get(cell(second))).toBe(charged(piece));
+    // Releasing the modifier over the same cell paints a normal ball there.
+    h.frame(130, [{ type: 'keyup', key: 'control' }]);
+    expect(b.get(cell(second))).toBe(piece);
+    h.frame(140, [{ type: 'keyup', key: '3' }]);
+    h.buttons.get('Play:Board:Clear')!(); h.frame(150);
+    h.paletteClicks[2](); h.frame(160);
+    h.input.mouse = first;
+    h.frame(170, [{ type: 'keydown', key: 'control' }, { type: 'mousedown', button: 1, pos: first }]);
+    h.input.mouse = second; h.frame(180);
+    h.frame(190, [{ type: 'mouseup', button: 1, pos: second }]);
+    expect(b.get(cell(first))).toBe(charged(piece));
+    expect(b.get(cell(second))).toBe(charged(piece));
+    h.buttons.get('Play:Board:Undo (U)')!(); h.frame(200);
+    expect(b.get(cell(first))).toBe(EMPTY);
+    expect(b.get(cell(second))).toBe(EMPTY);
+    h.frame(210, [{ type: 'mousedown', button: 1, pos: second }, { type: 'mouseup', button: 1, pos: second }]);
+    h.frame(220, [{ type: 'mousedown', button: 3, pos: second }, { type: 'mouseup', button: 3, pos: second }]);
+    expect(b.get(cell(second))).toBe(EMPTY);
+    h.instance.dispose();
+    expect(h.input.allowControlKey).toBeUndefined();
+  });
+
+  it('switches Werewolf on the same Freeplay board without ringing the match-start bell', async () => {
+    const h = await setup();
+    expect(h.f.sandbox.dropFloating).toBe(true);
+    h.f.board.set({ x: 0, y: 0 }, ball(ORANGE));
+    const starts = captured.sounds.filter(sound => sound === 'game_start').length;
+    expect(starts).toBe(1);
+    h.toggles.get('Play:Board:Furball')!(true);
+    h.frame(200);
+    expect(h.current().board.get({ x: 0, y: 0 })).toBe(ball(FURBALL));
+    h.toggles.get('Play:Board:Furball')!(false);
+    h.frame(300);
+    expect(h.current().board.get({ x: 0, y: 0 })).toBe(ball(ORANGE));
+    expect(captured.sounds.filter(sound => sound === 'game_start')).toHaveLength(starts);
+    h.instance.dispose();
+  });
+
+  it('draws the rumless symbol behind the player fists', async () => {
+    const h = await setup(false, true);
+    h.draws.mockClear(); h.frame(200);
+    const names: string[] = h.draws.mock.calls.map(args => args[0]?.name ?? 'canvas');
+    const skull = names.indexOf('rumless_icon');
+    const fist = names.findIndex(name => name.startsWith('longfist_'));
+    expect(skull).toBeGreaterThanOrEqual(0);
+    expect(fist).toBeGreaterThan(skull);
+    h.instance.dispose();
+  });
 
   it('draws a full board before the punch reaches balls it will destroy', async () => {
     const h = await setup(), b = h.f.board;
@@ -278,7 +354,7 @@ describe('Rumble aim trainer sessions', () => {
     h.advance(3000);
     expect(h.aim().score).toBe(1);
     for (let i = 0; i < 7; i++) { h.fire(true); h.advance(3000); }
-    expect(h.aim().boardNumber).toBe(2);
+    expect(h.aim().boardNumber).toBeGreaterThanOrEqual(3);
     h.fire(false); h.advance(3000);
     h.advance(AIM_MS - 27000);
     expect(h.aim().result).toBe('Time up');
@@ -2358,8 +2434,9 @@ describe('Navigation sessions and replay', () => {
     ['Normal', { mode: 'normal' as const, extraRing: false }, 3],
     ['WW with the extra ring', { mode: 'ww' as const, extraRing: true }, 4],
     ['Freeplay', { mode: 'ww' as const, extraRing: true, create: true }, 4],
-  ])('%s: the first click on a new board only focuses it', async (_name, overrides, rings) => {
-    const { DEFAULT_SETTINGS } = await import('./navigation/game');
+  ])('%s: clicks select a ring immediately without rotating it', async (_name, overrides, rings) => {
+    const { DEFAULT_SETTINGS, NavigationGame } = await import('./navigation/game');
+    const rotate = vi.spyOn(NavigationGame.prototype, 'rotate');
     const settings = { ...DEFAULT_SETTINGS, ...overrides, timerMs: 120000, dismissDelayMs: 0 };
     const store = new Store('navigation');
     store.set('settings', settings);
@@ -2377,10 +2454,56 @@ describe('Navigation sessions and replay', () => {
     const click = () => { now += 100; frame = -1; instance.frame([outer, { ...outer, type: 'mouseup' } as InputEvent]); return frame; };
     for (const restart of [() => buttons.get('Play::Start')!(), () => buttons.get('Play::Dismiss')!()]) {
       restart();
-      expect(click()).toBe(0);
       expect(click()).toBe(rings - 1);
+      expect(click()).toBe(rings - 1);
+      instance.frame([{ ...outer, button: 3 } as InputEvent]);
+      expect(rotate).not.toHaveBeenCalled();
     }
     instance.dispose?.();
+  });
+
+  it('preserves click-to-turn in historical replays while new clicks only select', async () => {
+    const { DEFAULT_SETTINGS, NavigationGame } = await import('./navigation/game');
+    const { readReplayFile, saveReplayFile } = await import('../core/replay-storage');
+    const { decodeReplayBlob, encodeReplayBlob, replayMetadata } = await import('../core/replay');
+    const rotate = vi.spyOn(NavigationGame.prototype, 'rotate');
+    const store = new Store('navigation');
+    store.set('settings', { ...DEFAULT_SETTINGS, timerMs: 0, slowDrop: true, extraRing: true });
+    store.set('wwTimerDefault', true);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    for (const [at, button] of [[100, 1], [200, 1], [300, 1], [10000, 3]]) {
+      now = at; instance.frame([{ type: 'mousedown', button, pos: [225, 104] }]);
+    }
+    expect(rotate).not.toHaveBeenCalled();
+    now = 20000; instance.frame([]);
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    const [file] = await listReplayFiles('navigation');
+    const tape = (await decodeReplayBlob((await readReplayFile(file))!))!;
+    expect(tape.simulatorVersion).toBe(5);
+    // The same raw click sequence in rules 3: focus, select, turn right, turn left.
+    tape.simulatorVersion = 3;
+    tape.at++;
+    delete tape.checks;
+    const blob = await encodeReplayBlob(tape);
+    await saveReplayFile({ blob, metadata: replayMetadata(tape, blob.size) });
+    instance.dispose?.();
+    const reloaded = await factory({ screen, input: { mouse: [-1, -1] }, panel: panelHarness().panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders.at(-1)!;
+    await vi.waitFor(() => expect(recorder.hasPlayableAt(tape.at, tape.runId)).toBe(true));
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration); reloaded.frame([]);
+    expect(rotate.mock.calls).toEqual([[0, true], [0, false]]);
+    perf.mockRestore();
+    reloaded.dispose?.();
   });
 
   it.each(['normal', 'ww', 'ww-test'] as const)('Freeplay under %s rules keeps the 5-minute timer, and a booch deals a fresh board', async (mode) => {
@@ -3124,11 +3247,17 @@ describe('taking over a replay', () => {
 });
 
 describe('changing a setting mid-game', () => {
-  it.each(['forage', 'treasure-haul', 'blacksmithing', 'swordfight'] as const)('%s abandons the game with nothing saved', async (puzzle) => {
+  it.each(['forage', 'treasure-haul', 'blacksmithing', 'swordfight', 'rumble', 'distilling', 'navigation', 'bilging', 'gunning', 'rigging',
+    'sailing', 'patching', 'weaving', 'alchemistry', 'shipwrightery', 'vampire-carp'] as const)('%s abandons the game with nothing saved', async (puzzle) => {
     vi.spyOn(Math, 'random').mockImplementation(((rng) => () => rng.random())(new Random(5)));
     const store = new Store(puzzle);
     if (puzzle === 'forage') store.set('settings', { mode: 'ci', roundSeconds: 5 });
     if (puzzle === 'treasure-haul') store.set('round', 30);
+    // A timed game: one with no timer keeps its replay when abandoned (tested below).
+    if (puzzle === 'bilging') store.set('settings', { mode: 'normal', difficulty: 3, tokens: 0, water: 3, timerMs: 120000, indicatorMax: 4.5 });
+    if (puzzle === 'gunning') store.set('settings', { mode: 'normal', timerMs: 120000 });
+    if (puzzle === 'rigging') store.set('settings', { mode: 'normal', difficulty: 6, tokens: 1, timerMs: 120000, indicatorMax: 7.48 });
+    if (puzzle === 'sailing') store.set('settings', { difficulty: 5, tokens: 1, desired: 3, timerMs: 120000, indicatorMax: 7.48 });
     const { panel, buttons, buttonStates } = panelHarness();
     let now = 0;
     const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
@@ -3146,7 +3275,7 @@ describe('changing a setting mid-game', () => {
     await replayWrites.idle();
     expect(await listReplayFiles(puzzle)).toHaveLength(0);
     expect(Object.keys(JSON.parse(exportAll()).data).filter((key) => key.includes(':history:'))).toEqual([]);
-    expect(buttonStates.get('Play::Start')!.label!()).toMatch(/Start|Play again|Fight again|New sword/);
+    expect(buttonStates.get('Play::Start')!.label!()).toMatch(/Start|Play again|Fight again|Rumble again|New sword/);
     instance.dispose?.();
   });
 
@@ -3671,7 +3800,46 @@ describe('untimed and Freeplay sessions keep their replays', () => {
     for (let shot = 0; shot < 4; shot++) advance(3000, [{ type: 'mousedown', button: shot % 2 ? 3 : 1, pos: [200, 300] }, { type: 'mouseup', button: shot % 2 ? 3 : 1, pos: [200, 300] }]);
     harness.toggles.get('Settings:Freeplay:Board drops a row every 8 shots')!(false);
     advance(500, [{ type: 'keydown', key: 'g' }, { type: 'keyup', key: 'g' }]);
-    const played = { cells: [...match().player.board.cells], shots: match().player.stats.shots };
+    input.mouse = [140, 90];
+    advance(50, [{ type: 'keydown', key: 'control' }, { type: 'keydown', key: '1' }]);
+    advance(50, [{ type: 'keyup', key: '1' }, { type: 'keyup', key: 'control' }]);
+    expect(match().player.board.get(match().player.board.cellAt(140 - 93, 90 - 41))).toBe(charged(ball(0)));
+    // Charged generation keeps its chosen spark order, matching hand, and opening through undo and replay.
+    const beforeCharged = [...match().player.board.cells];
+    harness.setters.get('Play:Charged board:Average group size')!(3);
+    harness.setters.get('Play:Charged board:Drop-off balls')!(12);
+    harness.setters.get('Play:Charged board:Density %')!(65);
+    harness.buttons.get('Play:Charged board:Generate charged board')!(); advance(100);
+    const f = match().player;
+    expect(f.board.sparks.length).toBeGreaterThan(0);
+    expect(f.board.groupOf(f.board.sparks[0]).size).toBe(3);
+    expect(f.board.sparks.every(p => p.y >= 6 && f.board.groupOf(p).size >= 3)).toBe(true);
+    harness.buttons.get('Play:Board:Undo (U)')!(); advance(100);
+    expect(f.board.cells).toEqual(beforeCharged);
+    harness.buttons.get('Play:Charged board:Generate charged board')!(); advance(100);
+    const chainLength = f.board.sparks.length;
+    const fist = f.hand.findIndex((piece, i) => {
+      const shot = f.board.shoot(f.board.path(i, f.dir[i]));
+      if (!shot) return false;
+      const copy = f.board.clone(); copy.set(shot.rest, piece);
+      return copy.place(shot.rest)?.groups.length === chainLength;
+    });
+    expect(fist).toBeGreaterThanOrEqual(0);
+    const fire = fist === 0 ? 'z' : 'x';
+    advance(6000, [{ type: 'keydown', key: fire }, { type: 'keyup', key: fire }]);
+    expect(f.stats.bestChain).toBe(chainLength);
+    // The alternative punch controls use the live game's sizing rules.
+    harness.selections.get('Play:Punch:Primary colour')!(5);
+    harness.selections.get('Play:Punch:Secondary colour')!(2);
+    harness.selections.get('Play:Punch:Size from')!('clear');
+    harness.setters.get('Play:Punch:Time (minutes)')!(5);
+    harness.setters.get('Play:Punch:Groups')!(4);
+    harness.setters.get('Play:Punch:Drop-off balls')!(3);
+    harness.setters.get('Play:Punch:Extra balls')!(6);
+    harness.setters.get('Play:Punch:Bruises %')!(75);
+    harness.buttons.get('Play:Punch:Punch! (P)')!(); advance(5000);
+    harness.buttons.get('Play:Charged board:Generate charged board')!(); advance(100);
+    const played = { cells: [...f.board.cells], shots: f.stats.shots, sparks: structuredClone(f.board.sparks), hand: [...f.hand], dir: [...f.dir] };
     harness.buttons.get('Play::Start')!();
     await replayWrites.idle();
     const files = await listReplayFiles('rumble');
@@ -3680,7 +3848,8 @@ describe('untimed and Freeplay sessions keep their replays', () => {
     const rows = store.get<{ rows: number }>('create', { rows: 0 }).rows;
     expect(await replaysCleanly('rumble', () => {
       instance.frame([]);
-      expect({ cells: [...match().player.board.cells], shots: match().player.stats.shots }).toEqual(played);
+      const f = match().player;
+      expect({ cells: [...f.board.cells], shots: f.stats.shots, sparks: f.board.sparks, hand: f.hand, dir: f.dir }).toEqual(played);
     })).toBe(true);
     expect(store.get<{ rows: number }>('create', { rows: 0 }).rows).toBe(rows);
     instance.dispose?.();
