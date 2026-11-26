@@ -1,5 +1,5 @@
 // The player's pirate face, put together the way the game builds its 58x58 face icons: a head
-// with the rating's expression, then beard, eyepatch, hair and hat (the face classes' render
+// with the rating's expression, then beard, eyepatch, starfish, hair and hat (the face classes' render
 // order), each layer at its offset in the frame and recoloured with the game's colourisations.
 import { coloursOf, paintLayer, type Zation } from './paint';
 import { MOODS, type Mood } from './ratings';
@@ -14,6 +14,9 @@ export interface FaceSpec {
   hairColour: string;
   beard: string;
   eyepatch: boolean;
+  eyepatchColour: string;
+  starfish: boolean;
+  starfishColour: string;
   hat: string;
   hatColour: string;
   trimColour: string;
@@ -21,7 +24,7 @@ export interface FaceSpec {
 
 /** Where each exported layer sits in the 58x58 frame (its trimmed tile's offset). */
 const AT: Record<string, [number, number]> = {
-  'fmale-head': [14, 19], 'fmale-eyepatch': [17, 25],
+  'fmale-head': [14, 19], 'fmale-eyepatch': [17, 25], 'fmale-starfish': [33, 29],
   'fmale-hair-dreadlocks': [14, 17], 'fmale-hair-messy_short': [15, 15], 'fmale-hair-ponytail': [16, 16],
   'fmale-hair-princevaliant': [13, 16], 'fmale-hair-spiky': [13, 10], 'fmale-hair-swept_forward': [15, 14],
   'fmale-facialhair-beard_long': [15, 29], 'fmale-facialhair-beard_short': [16, 32], 'fmale-facialhair-braided_goatee': [23, 33],
@@ -32,7 +35,7 @@ const AT: Record<string, [number, number]> = {
   'fmale-hat-turban': [13, 0], 'fmale-hat-top_hat': [11, 1], 'fmale-hat-picaroon_hat': [1, 2], 'fmale-hat-wizard_hat': [7, 0],
   'fmale-hat-santa': [14, 13], 'fmale-hat-buccaneer': [9, 5], 'fmale-hat-cockade': [0, 9], 'fmale-hat-brigand': [1, 1],
   'fmale-hat-musketeer': [8, 6], 'fmale-hat-crown': [12, 0], 'fmale-hat-rogue_hat': [1, 5],
-  'ffemale-head': [16, 18], 'ffemale-eyepatch': [17, 22],
+  'ffemale-head': [16, 18], 'ffemale-eyepatch': [17, 22], 'ffemale-starfish': [32, 29],
   'ffemale-hair-bob': [14, 14], 'ffemale-hair-curls_medium': [11, 14], 'ffemale-hair-curly_long': [11, 16],
   'ffemale-hair-messy_short': [15, 15], 'ffemale-hair-pigtails': [9, 16], 'ffemale-hair-ponytail': [9, 14],
   'ffemale-hair-princessleia': [11, 17], 'ffemale-hair-spiky': [13, 9], 'ffemale-hair-straight_long': [10, 15],
@@ -60,11 +63,13 @@ export function faceOptions(female: boolean) {
     hairColour: coloursOf('hair'),
     cloth: coloursOf('textile_p'),
     trimCloth: coloursOf('textile_s'),
+    starfishColour: coloursOf('starfish'),
   };
 }
 
 export const DEFAULT_FACE: FaceSpec = {
   female: false, skin: 'medium', hair: 'messy_short', hairColour: 'darkBrown', beard: 'handlebar_moustache', eyepatch: true,
+  eyepatchColour: 'black', starfish: false, starfishColour: '',
   hat: '', hatColour: 'red', trimColour: 'gold',
 };
 
@@ -83,6 +88,10 @@ export function sanitizeFace(value: unknown): FaceSpec {
     hairColour: one(v.hairColour, options.hairColour, DEFAULT_FACE.hairColour),
     beard: one(v.beard, options.beard, options.beard.includes(DEFAULT_FACE.beard) ? DEFAULT_FACE.beard : '', true),
     eyepatch: typeof v.eyepatch === 'boolean' ? v.eyepatch : DEFAULT_FACE.eyepatch,
+    // Older profiles and reports have a black patch and no starfish.
+    eyepatchColour: one(v.eyepatchColour, options.cloth, DEFAULT_FACE.eyepatchColour),
+    starfish: typeof v.starfish === 'boolean' ? v.starfish : DEFAULT_FACE.starfish,
+    starfishColour: one(v.starfishColour, options.starfishColour, DEFAULT_FACE.starfishColour, true),
     hat: one(v.hat, options.hat, options.hat.includes(DEFAULT_FACE.hat) ? DEFAULT_FACE.hat : '', true),
     hatColour: one(v.hatColour, options.cloth, DEFAULT_FACE.hatColour),
     trimColour: one(v.trimColour, options.trimCloth, DEFAULT_FACE.trimColour),
@@ -90,17 +99,25 @@ export function sanitizeFace(value: unknown): FaceSpec {
 }
 
 /** The layers a face is drawn from, bottom to top, with the colour classes each one takes. */
-export function faceLayers(face: FaceSpec, mood: Mood): Array<{ image: string; at: [number, number]; classes: Zation[] }> {
+interface FaceLayer {
+  image: string;
+  at: [number, number];
+  classes: Zation[];
+  colours?: Partial<Record<Zation, string>>;
+}
+
+export function faceLayers(face: FaceSpec, mood: Mood): FaceLayer[] {
   const g = prefix(face.female);
-  const layers: Array<{ image: string; key: string; classes: Zation[] }> = [
+  const layers: Array<Omit<FaceLayer, 'at'> & { key: string }> = [
     { image: `${g}-head-${mood}`, key: `${g}-head`, classes: face.female ? ['skin'] : ['skin', 'hair'] },
   ];
   // Facial hair is coloured with the head's colours, as the game does.
   if (face.beard) layers.push({ image: `${g}-facialhair-${face.beard}`, key: `${g}-facialhair-${face.beard}`, classes: ['skin', 'hair'] });
-  if (face.eyepatch) layers.push({ image: `${g}-eyepatch`, key: `${g}-eyepatch`, classes: ['textile_p'] });
+  if (face.eyepatch) layers.push({ image: `${g}-eyepatch`, key: `${g}-eyepatch`, classes: ['textile_p'], colours: { textile_p: face.eyepatchColour } });
+  if (face.starfish) layers.push({ image: `${g}-starfish`, key: `${g}-starfish`, classes: ['starfish'] });
   if (face.hair) layers.push({ image: `${g}-hair-${face.hair}`, key: `${g}-hair-${face.hair}`, classes: ['hair'] });
   if (face.hat) layers.push({ image: `${g}-hat-${face.hat}`, key: `${g}-hat-${face.hat}`, classes: ['textile_p', 'textile_s'] });
-  return layers.filter((l) => AT[l.key]).map((l) => ({ image: l.image, at: AT[l.key], classes: l.classes }));
+  return layers.filter((l) => AT[l.key]).map(({ key, ...layer }) => ({ ...layer, at: AT[key] }));
 }
 
 const urls = import.meta.glob<string>('./media/faces/*.png', { eager: true, query: '?url', import: 'default' });
@@ -131,9 +148,10 @@ export async function drawFaceInto(canvas: HTMLCanvasElement, face: FaceSpec, mo
   ctx.clearRect(0, 0, FACE, FACE);
   const colours: Partial<Record<Zation, string>> = {
     skin: face.skin, hair: face.hairColour, textile_p: face.hatColour, textile_s: face.trimColour,
+    starfish: face.starfishColour,
   };
   layers.forEach((layer, i) => {
     const img = loaded[i];
-    if (img) ctx.drawImage(paintLayer(img, layer.classes, colours), layer.at[0], layer.at[1]);
+    if (img) ctx.drawImage(paintLayer(img, layer.classes, { ...colours, ...layer.colours }), layer.at[0], layer.at[1]);
   });
 }

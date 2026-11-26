@@ -184,6 +184,44 @@ describe('extended ratings', () => {
 });
 
 describe('face colours', () => {
+  it('keeps legacy faces black-patched and adds no starfish', () => {
+    const { eyepatchColour: _, starfish: __, starfishColour: ___, ...legacy } = DEFAULT_FACE;
+    expect(sanitizeFace({ ...legacy, hatColour: 'electricBlue' })).toMatchObject({
+      eyepatchColour: 'black', starfish: false, starfishColour: '', hatColour: 'electricBlue',
+    });
+    expect(sanitizeFace({ ...DEFAULT_FACE, eyepatchColour: 'nope', starfish: 'yes', starfishColour: 5 })).toEqual(DEFAULT_FACE);
+  });
+
+  it('supports standard and chroma colours for each injury independently', () => {
+    for (const female of [false, true]) {
+      const options = faceOptions(female);
+      expect(options.starfishColour).toEqual(expect.arrayContaining(['red', 'black', 'electricBlue', 'neonGreen', 'cream']));
+      expect(sanitizeFace({ ...DEFAULT_FACE, female, eyepatchColour: 'electricBlue', starfish: true, starfishColour: 'cream' }))
+        .toMatchObject({ eyepatchColour: 'electricBlue', starfish: true, starfishColour: 'cream' });
+      const layers = faceLayers({ ...DEFAULT_FACE, female, hair: '', beard: '', hat: '',
+        eyepatchColour: 'neonGreen', hatColour: 'red', starfish: true }, 'normal');
+      const g = female ? 'ffemale' : 'fmale';
+      expect(layers.map((l) => l.image)).toEqual([`${g}-head-normal`, `${g}-eyepatch`, `${g}-starfish`]);
+      expect(layers[1].colours).toEqual({ textile_p: 'neonGreen' });
+      expect(layers[2]).toMatchObject({ classes: ['starfish'], at: [female ? 32 : 33, 29] });
+      expect(faceLayers({ ...DEFAULT_FACE, female, eyepatch: false, starfish: false }, 'normal')
+        .some((l) => /eyepatch|starfish/.test(l.image))).toBe(false);
+    }
+  });
+
+  it('preserves injuries in saved profiles, duty reports and replays', () => {
+    const pirate = saveProfile({ name: 'Anne', face: { ...DEFAULT_FACE,
+      eyepatchColour: 'electricBlue', starfish: true, starfishColour: 'neonGreen' } });
+    expect(loadProfile()).toEqual(pirate);
+    const report = makeReport({ puzzle: 'forage', station: 'Foraging', performance: 4, score: { label: 'Points', value: '10' } });
+    expect(decodeReport(encodeReport(report))?.pirate).toEqual(pirate);
+    const tape: PuzzleReplay = {
+      format: 'puzzle-practice-replay', version: 1, puzzle: 'forage', at: 42, duration: 100,
+      result: 'Score 10', settings: {}, seed: {}, frames: [{ t: 10, mouse: [4, 5], events: [] }], report,
+    };
+    expect(unpackReplay(packReplay(tape))?.report?.pirate).toEqual(pirate);
+  });
+
   it('offers hair dye colours for both pirate looks and preserves selected dyes', () => {
     for (const female of [false, true]) {
       expect(faceOptions(female).hairColour).toEqual(expect.arrayContaining(['indigo', 'lightBanshee', 'emerald', 'hotPink']));
