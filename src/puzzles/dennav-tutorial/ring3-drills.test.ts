@@ -3,7 +3,7 @@ import { Random } from '../../core/random';
 import { NavigationGame } from '../navigation/game';
 import { EMPTY, type Target } from '../navigation/logic';
 import { INNER, MIDDLE, SETTINGS, TOP, generate, play, positionOf, settled, type Position } from './engine';
-import { LESSONS } from './lessons';
+import { LESSONS, noStrayStacks } from './lessons';
 import { dealFilled, judgeCombo, judgeFill, judgeStack, stackedColumns, verticalColumns } from './ring3-drills';
 
 const lesson = (id: string) => LESSONS.find((l) => l.id === id)!;
@@ -90,6 +90,17 @@ describe('Build the combo', () => {
       expect(v).not.toBeNull();
       expect(stackedColumns(v!.cells).some((o) => verticalColumns(fresh.targets).includes(o))).toBe(true);
       expect([0, 1, 2, 3, 4, 5, 6, 7].every((o) => v!.cells[TOP * 8 + o] === EMPTY)).toBe(true);
+    }
+  });
+
+  it('deals Ring 3 double boards with no pair stacked in rings 1 and 2 unless the targets force it', () => {
+    const rng = new Random(11);
+    for (const opening of [false, true]) for (let seed = 1; seed <= 15; seed++) {
+      const fresh = positionOf(new NavigationGame(SETTINGS, seed, undefined, opening));
+      const p = dealFilled(rng, fresh, false, true)!;
+      expect(p).not.toBeNull();
+      expect(noStrayStacks(p)).toBe(true);
+      expect(judgeFill(p).kind).toBe('pass');
     }
   });
 

@@ -1089,7 +1089,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
       // Ring 3 into a vertical needs a column beside the ring 3 target with no target in it.
       if (lesson().id === 'drop-in-vertical' && !verticalColumns(fresh.targets).length) continue;
       // Build the combo starts from rings 1 and 2 already built; the others from an empty board.
-      const position = mode === 'r3build' ? dealFilled(rng, fresh, lesson().id === 'drop-in-vertical') : fresh;
+      const position = mode === 'r3build' ? dealFilled(rng, fresh, lesson().id === 'drop-in-vertical', lesson().id === 'top-double') : fresh;
       if (!position) continue;
       r3Deal = { position, seed };
       r3Board++;

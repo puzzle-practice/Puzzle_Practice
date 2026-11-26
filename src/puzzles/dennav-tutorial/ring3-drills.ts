@@ -81,9 +81,9 @@ export function judgeCombo(o: Outcome, accepts: (o: Outcome) => boolean, title: 
  * A board for Build the combo: rings 1 and 2 full, every ring 1 and ring 2 target holding its colour,
  * nothing that would clear, and nothing above. With `stack`, a column beside the ring 3 target also has a
  * pair of one colour in rings 1 and 2 (for Ring 3 into a vertical), and no other column does unless its
- * targets force it.
+ * targets force it. With `clean`, no column has such a pair unless its targets force it (for Ring 3 double).
  */
-export function dealFilled(rng: Random, p: Position, stack = false): Position | null {
+export function dealFilled(rng: Random, p: Position, stack = false, clean = false): Position | null {
   for (let tries = 0; tries < 200; tries++) {
     const cells = Array<number>(32).fill(EMPTY);
     for (const t of preFilled(p.targets)) cells[key(t)] = t.colour;
@@ -100,6 +100,7 @@ export function dealFilled(rng: Random, p: Position, stack = false): Position | 
     // Other stacks only where the targets force them (a ring 1 and a ring 2 target of one colour in a column).
     const forced = OCTANTS.filter((o) => preFilled(p.targets).some((t) => t.ring === INNER && t.octant === o && preFilled(p.targets).some((u) => u.ring === MIDDLE && u.octant === o && u.colour === t.colour)));
     if (stack && (!stacks.includes(column) || stacks.some((o) => o !== column && !forced.includes(o)))) continue;
+    if (clean && stacks.some((o) => !forced.includes(o))) continue;
     const position: Position = { cells, targets: p.targets.map((t) => ({ ...t })), entry: { ...p.entry } };
     // No runs already on the board, and the constellation not charted.
     if (settled(position)) return position;

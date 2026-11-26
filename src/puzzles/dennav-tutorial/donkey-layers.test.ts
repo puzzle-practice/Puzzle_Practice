@@ -73,6 +73,17 @@ describe('lesson 3: position the base', () => {
     }
   });
 
+  it('deals ring 2’s D and E one apart, so E sits over A1 when the combo goes off', () => {
+    const rng = new Random(9);
+    for (let i = 0; i < 30; i++) {
+      const dealt = dealBase(rng, TARGETS);
+      if (!dealt) continue;
+      const { roles, d2, e2 } = dealt.base;
+      expect(d2).toBe(roles.E);
+      expect((e2 + roles.step + 8) % 8).toBe(roles.A1);
+    }
+  });
+
   it('deals bases in position and scrambles them out of it', () => {
     const rng = new Random(5);
     for (let i = 0; i < 30; i++) {

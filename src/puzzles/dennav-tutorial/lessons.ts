@@ -1,6 +1,7 @@
 // The Dennav tutorial's lessons: what each kind of clear is, how to recognise it from what a move
 // sets off, and the boards it starts from (most of them from real sessions).
-import { INNER, TOP, freeEntry, dealtConstellation, horizontalIn, innerFromBag, verticalThroughInner, readPosition, type Action, type Example, type Outcome, type Position } from './engine';
+import { EMPTY } from '../navigation/logic';
+import { INNER, MIDDLE, TOP, freeEntry, dealtConstellation, horizontalIn, innerFromBag, verticalThroughInner, readPosition, type Action, type Example, type Outcome, type Position } from './engine';
 
 export interface Moment extends Example { label: string }
 
@@ -25,6 +26,19 @@ export interface Lesson {
 
 const rotate = (ring: number, clockwise: boolean): Action => ({ kind: 'rotate', ring, clockwise });
 const moment = (label: string, code: string, action: Action): Moment => ({ label, position: freeEntry(readPosition(code)), action });
+
+/**
+ * No column with one colour in both rings 1 and 2, unless both cells are targets of that colour: such a
+ * pair is one star away from a vertical clear.
+ */
+export function noStrayStacks(p: Position): boolean {
+  const target = (ring: number, octant: number, colour: number) => p.targets.some((t) => t.ring === ring && t.octant === octant && !t.wild && t.colour === colour);
+  return [0, 1, 2, 3, 4, 5, 6, 7].every((o) => {
+    const colour = p.cells[INNER * 8 + o];
+    if (colour === EMPTY || colour !== p.cells[MIDDLE * 8 + o]) return true;
+    return target(INNER, o, colour) && target(MIDDLE, o, colour);
+  });
+}
 
 const first = (o: Outcome) => o.links.find((l) => l.kind === 'target');
 const before = (o: Outcome) => o.links.filter((l) => l.kind === 'run' && !l.afterChart);
@@ -71,10 +85,11 @@ export const LESSONS: Lesson[] = [
       'Every other target is filled or wild.',
     ],
     accepts: (o) => o.charted === 2 && before(o).length === 1 && horizontalIn(before(o)[0], TOP) && !first(o)!.scene.targets.some((t) => t.ring === TOP && t.wild),
+    keep: noStrayStacks,
     success: 'Ring 3 cleared through the target and the right colour dropped in: a double.',
     moments: [
-      moment('Example 1', 'N4:.301.....33220144011342021144112:31*,30*,36*,270,210,121:44', rotate(0, true)),
-      moment('Example 2', 'N4:.20......224....4041134140144122:30*,35*,32*,231,204,110:26', rotate(0, true)),
+      moment('Example 1', 'N4:.301.....33220144011342021044112:31*,30*,36*,270,210,121:44', rotate(0, true)),
+      moment('Example 2', 'N4:.20......224....4041134101144122:30*,35*,32*,231,204,110:26', rotate(0, true)),
       moment('Example 3', 'N4:...420..11.441440132100333032211:30*,31*,32*,273,241,142,33*:35', rotate(1, false)),
     ],
   },

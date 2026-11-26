@@ -176,15 +176,16 @@ export function layer2Warnings(cells: number[], base: DealtBase, turns: Turns): 
 
 /**
  * A base under `targets`: ring 1 as a donkey base turned so a target waits for the last clear, and
- * ring 2's D and E one turn before the trigger (D over ring 1's E, E one to three places on, the same
- * way round). Null if no turn of this base suits these targets.
+ * ring 2's D and E one turn before the trigger: D over ring 1's E, and E two places on, the same way
+ * round, so at trigger time it sits over A1 rather than over ring 1's E. Null if no turn of this
+ * base suits these targets.
  */
 export function dealBase(rng: Random, targets: Target[]): { cells: number[]; base: DealtBase } | null {
   const colours = [0, 1, 2, 3, 4];
   for (let i = 4; i > 0; i--) { const j = rng.integer(0, i); [colours[i], colours[j]] = [colours[j], colours[i]]; }
   const [A, B, C, D, E] = colours;
   const step: 1 | -1 = rng.integer(0, 1) ? 1 : -1;
-  const gap = rng.integer(1, 3);
+  const gap = 2;
   const turns = OCTANTS.filter(() => true);
   for (let i = 7; i > 0; i--) { const j = rng.integer(0, i); [turns[i], turns[j]] = [turns[j], turns[i]]; }
   for (const d of turns) {
