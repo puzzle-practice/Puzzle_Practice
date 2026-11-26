@@ -547,6 +547,13 @@ export class Board {
 
   // ---- Aiming ----
 
+  /** The aim, in half degrees, that the mouse at (x, y) in the view gives a fist. */
+  mouseDir(fist: number, x: number, y: number): number {
+    const o = this.origins[fist], [lo, hi] = this.ranges[fist];
+    if (y > o.y) return x < o.x ? hi : lo;
+    return Math.min(hi, Math.max(lo, Math.trunc(DIR_PREC * (Math.atan2(o.y - y, x - o.x) * 180 / Math.PI))));
+  }
+
   /** The line a fist's shot flies, bouncing off the walls until it reaches the ceiling. */
   path(fist: number, dir: number): Point[] {
     const origin = this.origins[fist];

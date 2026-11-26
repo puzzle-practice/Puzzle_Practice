@@ -44,7 +44,7 @@ import {
   applyBoardCode, boardCode, readBoardCode, generateChargedBoard, punchFromClear,
 } from './create';
 import type { Board } from './board';
-import { AIM_BOARD_SHOTS, AIM_DIFFICULTIES, AIM_HISTORY, AIM_LIVES, AIM_MS, AIM_REPLAY_VERSION, AimTrainer, type AimDifficulty, type AimTarget } from './aim';
+import { AIM_BOARD_SHOTS, AIM_DIFFICULTIES, AIM_HISTORY, AIM_LIVES, AIM_MS, AIM_REPLAY_VERSION, AimTrainer, mouseDirs, type AimDifficulty, type AimTarget } from './aim';
 import { END_HOLD_MS } from '../../core/end-hold';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
@@ -326,6 +326,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let showBruiseChance = store.get<boolean>('showBruiseChance', false);
   /** Aim trainer: each target's bounces and window of working angles. */
   let aimHints = store.get<boolean>('aimHints', true);
+  /** Aim trainer: rings every mouse position over the board that makes target 1's shot. */
+  let aimMouseArea = store.get<boolean>('aimMouseArea', false);
   const listOffsets: [number, number] = [0, 0];
   /** Aim keys held, repeating 20 times a second after 300ms. */
   const held = { left: 0, right: 0, leftNext: 0, rightNext: 0, fine: false };
@@ -1125,6 +1127,48 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
   }
 
+  /** Ring colours for a mouse area's routes: direct, one bounce, and two or more. */
+  const ROUTE_RGB = [[120, 255, 120], [255, 220, 60], [255, 140, 40]];
+  let mouseAreaFor: AimTarget | null = null;
+  let mouseAreaImage: HTMLCanvasElement | null = null;
+
+  /**
+   * Shades every board pixel where the mouse aims the target's fist at an angle that connects, with
+   * a ring round each region, coloured by its route's bounces. Worked out once per target.
+   */
+  function drawMouseArea(target: AimTarget, b: Board): void {
+    if (mouseAreaFor !== target || !mouseAreaImage) {
+      const dirs = mouseDirs(b, target.fist);
+      const route = new Map<number, number>();
+      for (const r of target.routes) for (let dir = r.lo; dir <= r.hi; dir++) route.set(dir, Math.min(2, r.bounces));
+      const region = new Int8Array(VIEW_W * VIEW_H).fill(-1);
+      for (let i = 0; i < dirs.length; i++) region[i] = route.get(dirs[i]) ?? -1;
+      const canvas = mouseAreaImage ?? document.createElement('canvas');
+      canvas.width = VIEW_W;
+      canvas.height = VIEW_H;
+      const c = canvas.getContext('2d')!;
+      const image = c.createImageData(VIEW_W, VIEW_H);
+      const at = (x: number, y: number) => x < 0 || y < 0 || x >= VIEW_W || y >= VIEW_H ? -2 : region[y * VIEW_W + x];
+      for (let y = 0; y < VIEW_H; y++) for (let x = 0; x < VIEW_W; x++) {
+        const r = region[y * VIEW_W + x];
+        if (r < 0) continue;
+        // The ring: two pixels in from the region's edge; the board's own edge doesn't count.
+        let edge = false;
+        for (let dy = -2; dy <= 2 && !edge; dy++) for (let dx = -2; dx <= 2 && !edge; dx++) {
+          const n = at(x + dx, y + dy);
+          if (n !== r && n !== -2) edge = true;
+        }
+        const [red, green, blue] = ROUTE_RGB[r], o = 4 * (y * VIEW_W + x);
+        image.data[o] = red; image.data[o + 1] = green; image.data[o + 2] = blue;
+        image.data[o + 3] = edge ? 235 : 70;
+      }
+      c.putImageData(image, 0, 0);
+      mouseAreaImage = canvas;
+      mouseAreaFor = target;
+    }
+    ctx.drawImage(mouseAreaImage, 0, 0);
+  }
+
   /** Landing spots, worked out again only when the aim or board changes. */
   let landingKey = '';
   let landing: Array<Point | null> = [];
@@ -1172,6 +1216,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       }
     }
     if (creating()) drawPainting();
+    if (aiming() && aim && aimMouseArea && !aim.result && !aim.landing) drawMouseArea(aim.current, b);
     if (aiming() && aim) drawAimTargets();
     if (punch) drawPunch(f, now);
     if (sprinkle) {
@@ -1692,7 +1737,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       'Left click or Z fires the left hand. Right click or X fires the right. Grey hands are inactive.',
       '',
       'Target 2 and the next ball stay visible so you can prepare. Pick a difficulty from Easy (straight in) to Very hard (two bounces, a tiny window or a far bank), or Mixed.',
-      `The board changes every ${AIM_BOARD_SHOTS} shots. Your previewed target stays ready.`,
+      `Every board is new, and it changes about every ${AIM_BOARD_SHOTS} shots. Your previewed target stays ready.`,
       '',
       'Each connection scores 1. Each miss costs a life. The round ends at 0 lives or when time runs out.',
     ] : mode === 'Create' ? [
@@ -1795,6 +1840,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     hidden: () => mode !== 'Aim trainer',
     title: 'Shows how many bounces each target\'s easiest route takes, and how wide its window of working angles is.',
   });
+  session.toggle('Mouse area', () => aimMouseArea, (on) => { aimMouseArea = on; store.set('aimMouseArea', on); }, {
+    hidden: () => mode !== 'Aim trainer',
+    title: 'Rings every mouse position over the board that makes target 1\'s shot: green goes straight in, yellow takes one bounce, orange two or more.',
+  });
   session.button('Start', () => {
     if (replays.isPlaying) {
       replays.stop();
@@ -1827,7 +1876,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     ['Lives', String(aim?.lives ?? AIM_LIVES), ''],
   ]);
   panel.group('Aim trainer', { hidden: () => mode !== 'Aim trainer' }).note(() =>
-    `Shoot target 1 with the matching active hand. Target 2 and its ball preview your next shot. Grey hands are disabled. Each hit scores 1; each miss costs a life. The board changes every ${AIM_BOARD_SHOTS} shots.`);
+    `Shoot target 1 with the matching active hand. Target 2 and its ball preview your next shot. Grey hands are disabled. Each hit scores 1; each miss costs a life. Every board is new, and it changes about every ${AIM_BOARD_SHOTS} shots. Mouse area rings where the mouse makes the shot.`);
   panel.score('Rumble', { hidden: () => mode !== 'Fight' }).stats(['', 'Now', 'Best'], () => [
     ['Damage sent', match ? String(damageSent(match.player)) : '0', String(recordNow().best || '—')],
     ...(settings.enemyRoster.length ? [['Wins', String(recordNow().wins), `of ${recordNow().wins + recordNow().losses}`]] : []),
