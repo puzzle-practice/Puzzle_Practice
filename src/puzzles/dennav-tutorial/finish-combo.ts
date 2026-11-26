@@ -134,8 +134,7 @@ function turnRing1(p: Position, turns: number): Position {
 
 /**
  * Judge a move. Success: it set off the vertical triple (`accepts`). Failure: any other clear
- * or charting, a booch, or the board now failing Build Ring 1's checks at `level` (ring 1 may
- * still be a turn away from its plan, since the last move can be a ring 1 turn).
+ * or charting, a booch, or a broken ring 1 plan. Target colours can still be aligned during play.
  */
 export function judgeFinish(o: Outcome, after: Position, booched: boolean, options: PlanningOption[], level: Strictness, accepts: (o: Outcome) => boolean): FinishCheck {
   if (o.links.length && accepts(o)) return { kind: 'success' };
@@ -145,13 +144,23 @@ export function judgeFinish(o: Outcome, after: Position, booched: boolean, optio
     const cells = o.links[0].runs.flatMap((r) => Array.from({ length: r.length }, (_, k) => r.direction === 0 ? r.ring * 8 + (r.octant + k) % 8 : (r.ring - k) * 8 + r.octant));
     return { kind: 'failed', issue: { message: 'That cleared before the combo was ready.', cells } };
   }
+  return checkFinishPosition(after, options, level);
+}
+
+/** Check the unfinished setup, allowing stars to be rotated onto their targets later. */
+export function checkFinishPosition(after: Position, options: PlanningOption[], level: Strictness): FinishCheck {
+  let firstIssue: BuildIssue | null = null;
+  // Ring 1 may still be one turn away from its plan: that turn can set off the combo.
   for (const turns of [0, 1, -1]) {
-    const check = checkBuildPosition(turns ? turnRing1(after, turns) : after, options, true, level);
+    const check = checkBuildPosition(turns ? turnRing1(after, turns) : after, options, true, level, 'movable');
     if (check.kind === 'building') continue;
-    if (check.kind === 'failed') return turns ? { kind: 'failed', issue: { message: check.issue.message, cells: [] } } : check;
+    if (check.kind === 'failed') {
+      firstIssue ??= turns ? { message: check.issue.message, cells: [] } : check.issue;
+      continue;
+    }
     return { kind: 'playing', warnings: turns ? [] : check.warnings ?? [] };
   }
-  return { kind: 'failed', issue: { message: 'Ring 1 no longer holds an accepted plan.', cells: Array.from({ length: 8 }, (_, o) => INNER * 8 + o) } };
+  return { kind: 'failed', issue: firstIssue ?? { message: 'Ring 1 no longer holds an accepted plan.', cells: Array.from({ length: 8 }, (_, o) => INNER * 8 + o) } };
 }
 
 /** The faint finished-board hint: the vertical through rings 1–3, the ring 4 star of the pair's

@@ -58,7 +58,7 @@ export const LESSONS: Lesson[] = [
   },
   {
     id: 'top-double',
-    title: 'Top ring double',
+    title: 'Ring 3 double',
     intro: [
       'Make a horizontal clear in ring 3 that runs through the ring 3 target. The stars above it in ring 4 drop into the gap, and the one that lands on the target is the colour the target wants.',
       'The ring 3 clear is the first link and charting is the second, so the constellation goes as a double. A double charges the next constellation on its own, with no cascade needed.',
@@ -80,7 +80,7 @@ export const LESSONS: Lesson[] = [
   },
   {
     id: 'top-triple',
-    title: 'Top ring triple',
+    title: 'Ring 3 triple',
     intro: [
       'The same ring 3 idea, but this time the ring 3 clear turns the target next to it wild instead of filling it.',
       'A clear only turns targets wild if it is the second link or later in a move: the first clear after a move never does. So the ring 3 clear has to be set off by something else, here a first ring 3 clear whose drop-in completes a second one beside the target.',
@@ -141,7 +141,7 @@ export const LESSONS: Lesson[] = [
   },
   {
     id: 'donkey',
-    title: 'Donkey+ (bag pairs)',
+    title: 'Fresh Donkey',
     intro: [
       'Stars drop in bags of two of each of the five colours, so ring 1 is built as three pairs side by side, with the two leftover colours next to each other: A A B B C C D E.',
       'The other D and E go in ring 2, in the same order but one apart, so one turn of ring 2 lines its D up over ring 1\'s D without putting its E over ring 1\'s E. D is the colour you break; E is the one you don\'t, and it must not clear by accident.',
@@ -168,7 +168,7 @@ export const LESSONS: Lesson[] = [
   },
   {
     id: 'vegas',
-    title: 'Vegas',
+    title: 'Fresh Vegas',
     intro: [
       'A vegas is the donkey idea taken one link further: the constellation has to wait until the sixth link to chart.',
       'That means no target may complete early. In the example board, suppose the ring 2 star that turns into the orange target were orange: that target would be filled correctly before the chain began, so the constellation would chart at link 5 as a donkey, with the yellow ring 1 clear coming after it.',
@@ -190,3 +190,22 @@ export const LESSONS: Lesson[] = [
 
 /** The vegas example with the orange target filled correctly, so it charts a link early, as a donkey. */
 export const VEGAS_AS_PLAYED = moment('Vegas example, one link short', 'N4:..34...1100203243042114144033221:353,272,201,134:26', rotate(2, false));
+
+/**
+ * After a triple: a standalone lesson, not a strategy. It deals a board a turn away from a vertical triple,
+ * plays the break, then the player plays on from the board it leaves as normal until they ask for a new
+ * board (see after-triple.ts), so it has no example boards.
+ */
+export const AFTER_TRIPLE: Lesson = {
+  id: 'after-triple',
+  title: 'After a triple',
+  intro: [],
+  goal: '',
+  lookFor: [],
+  accepts: LESSONS.find((l) => l.id === 'vertical-triple')!.accepts,
+  success: '',
+  moments: [],
+};
+
+/** The tutorial's topic list: the strategies, then the standalone lessons. */
+export const TOPICS: Lesson[] = [...LESSONS, AFTER_TRIPLE];

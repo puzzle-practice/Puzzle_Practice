@@ -15,6 +15,7 @@ import { W as SWORD_COLUMNS } from './swordfight/board';
 import { COL_PX as SWORD_COLUMN_PX } from './swordfight/fighter';
 import { setWarningTimer } from '../core/audio';
 import { END_HOLD_MS } from '../core/end-hold';
+import { playableSettings } from './navigation/game';
 import { SailingGame } from './sailing/game';
 import { PatchingBoard, movable as patchingMovable } from './patching/logic';
 import { CELL as CARP_CELL, COLS as CARP_COLS, Game as CarpentryGame, ROWS as CARP_ROWS, VIEW_X as CARP_X, VIEW_Y as CARP_Y } from './vampire-carp/game';
@@ -47,6 +48,15 @@ vi.mock('../core/audio', async (original) => ({
   },
 }));
 
+/** A stand-in for any DOM node: every property and call gives another, and it iterates as empty. */
+function anyNode(own: Record<PropertyKey, unknown> = {}): any {
+  const node: any = new Proxy(function () {}, {
+    get: (_target, key) => key in own ? own[key] : key === Symbol.iterator ? function* () {} : key === Symbol.toPrimitive ? () => '' : key === 'then' ? undefined : node,
+    set: () => true,
+    apply: () => node,
+  });
+  return node;
+}
 function canvasContext() {
   return new Proxy({
     measureText: (text: string) => ({ width: text.length * 8 }),
@@ -95,6 +105,9 @@ function panelHarness(syncTableActions = false) {
       tables.push(sync);
       return group(page, title);
     };
+    // A group's element holds its buttons, each showing its label.
+    if (method === 'element') return anyNode({ querySelectorAll: () => [...buttons.keys()].filter(id => id.startsWith(page + ':' + title + ':'))
+      .map(id => anyNode({ textContent: id.slice(page.length + title.length + 2), disabled: false })) });
     return () => group(page, title);
   } });
   const panel = new Proxy({}, { get: (_target, method) => {
@@ -1958,10 +1971,107 @@ describe('Swordfight knockout messages', () => {
   });
 });
 
+describe('Navigation input during a move', () => {
+  const key = (k: string): InputEvent => ({ type: 'keydown', key: k });
+  const click = (pos: [number, number]): InputEvent => ({ type: 'mousedown', button: 1, pos });
+
+  it.each(['keyboard', 'mouse'] as const)('drops a %s turn made while a turn plays out, rather than playing it afterwards', async device => {
+    const { DEFAULT_SETTINGS, NavigationGame } = await import('./navigation/game');
+    const rotate = vi.spyOn(NavigationGame.prototype, 'rotate');
+    const store = new Store('navigation');
+    store.set('settings', playableSettings({ ...DEFAULT_SETTINGS, mode: 'normal', timerMs: 0, slowDrop: true }));
+    store.set('wwTimerDefault', true);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    instance.frame([]);
+    // Drop a star (it falls to the inner ring) so the inner ring, selected at the start, has something to turn.
+    now += 10; instance.frame([key('space')]);
+    for (let i = 0; i < 40; i++) { now += 50; instance.frame([]); }
+    // A first click on a new board only focuses it.
+    const turn = device === 'keyboard' ? [key('arrowright')] : [click([225, 300 - 55])];
+    if (device === 'mouse') { now += 10; instance.frame([click([225, 300 - 55])]); }
+    now += 10; instance.frame(turn);
+    const turns = rotate.mock.calls.length;
+    expect(turns).toBe(1);
+    // Just before the turn finishes: dropped, and it never plays later.
+    now += 90; instance.frame(turn);
+    for (let i = 0; i < 40; i++) { now += 50; instance.frame([]); }
+    expect(rotate.mock.calls.length).toBe(turns);
+    // Once the board is still, the same input turns the ring again.
+    now += 10; instance.frame(turn);
+    expect(rotate.mock.calls.length).toBe(turns + 1);
+    rotate.mockRestore();
+    instance.dispose?.();
+  });
+
+  it.each(['keyboard', 'mouse'] as const)('After a triple drops a %s move made while one plays out', async device => {
+    const { AfterTriplePlay } = await import('./dennav-tutorial/after-triple');
+    const move = vi.spyOn(AfterTriplePlay.prototype, 'move');
+    const store = new Store('dennav-tutorial');
+    store.set('lesson', 'after-triple');
+    store.set('mode', 'aftertriple');
+    const { panel } = panelHarness();
+    let now = 0;
+    vi.stubGlobal('document', anyNode());
+    const canvas = { after() {}, addEventListener() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 600 }), width: 450, height: 600, style: {} };
+    const screen = new Proxy({ ctx: canvasContext(), canvas }, { get: (target, key) => key === 'ctx' || key === 'canvas' ? target[key] : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./dennav-tutorial/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1], drain() {} }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    // The triple breaks on its own; let it play out.
+    for (let i = 0; i < 200; i++) { now += 50; instance.frame([]); }
+    // Ring 1 (innermost) has the board's stars after the break.
+    instance.frame([key('1')]);
+    const turn = device === 'keyboard' ? [key('arrowright')] : [click([225, 300 - 55])];
+    now += 10; instance.frame(turn);
+    expect(move).toHaveBeenCalledTimes(1);
+    now += 40; instance.frame(turn);
+    for (let i = 0; i < 100; i++) { now += 50; instance.frame([]); }
+    expect(move).toHaveBeenCalledTimes(1);
+    now += 10; instance.frame(turn);
+    expect(move).toHaveBeenCalledTimes(2);
+    move.mockRestore();
+    instance.dispose?.();
+  });
+});
+
 describe('Navigation sessions and replay', () => {
+  it.each(['ww', 'ww-test'] as const)('keeps %s wild-target appearance out of game state and score settings', async mode => {
+    const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
+    const settings = playableSettings({ ...DEFAULT_SETTINGS, mode, timerMs: 0, slowDrop: true });
+    const store = new Store('navigation');
+    store.set('settings', settings);
+    store.set('wwTimerDefault', true);
+    const { panel, buttons, toggles } = panelHarness();
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => 0 } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    instance.frame([]);
+    const recorder = captured.recorders[0];
+    const before = recorder.fingerprint!();
+    const key = settingsKey(settings);
+    const history = store.history(key);
+    const toggle = toggles.get('Settings:Appearance:Match wild targets to pieces')!;
+    for (const on of [true, false]) {
+      toggle(on);
+      instance.frame([]);
+      expect(recorder.fingerprint!()).toBe(before);
+      expect(store.get('settings', null)).toEqual(settings);
+      expect(store.get('matchWildTargetColour', null)).toBe(on);
+      expect(store.history(key)).toEqual(history);
+      expect(settingsKey(settings)).toBe(key);
+    }
+    instance.dispose?.();
+  });
+
   it.each(['ww', 'ww-test'] as const)('keeps the %s score and countdown across repeated Dismiss, excludes pauses and replays the whole run', async mode => {
     const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
-    const settings = { ...DEFAULT_SETTINGS, mode, timerMs: 120000 };
+    const settings = playableSettings({ ...DEFAULT_SETTINGS, mode, timerMs: 120000 });
     const store = new Store('navigation');
     store.set('settings', settings);
     const { panel, buttons, buttonStates, clocks, results } = panelHarness();
@@ -2118,7 +2228,7 @@ describe('Navigation sessions and replay', () => {
 
   it.each(['normal', 'ww', 'ww-test'] as const)('%s Dismiss restarts a paused board and a finished board without duplicating history', async mode => {
     const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
-    const settings = { ...DEFAULT_SETTINGS, mode, timerMs: 120000, dismissDelayMs: 0 };
+    const settings = playableSettings({ ...DEFAULT_SETTINGS, mode, timerMs: 120000, dismissDelayMs: 0 });
     const store = new Store('navigation');
     store.set('settings', settings);
     const { panel, buttons, buttonStates, stats, results } = panelHarness();
@@ -2422,7 +2532,8 @@ describe('Navigation sessions and replay', () => {
     ['ww-test',false,false], ['ww-test',false,true], ['ww-test',true,false], ['ww-test',true,true],
   ] as const)('%s extraRing=%s wildTargets=%s preserves results through pause, playback, seeking and Stop', async (mode,extraRing,wildTargets) => {
     const store = new Store('navigation');
-    const settings = { mode,difficulty:4,extraRing,wildTargets,timerMs:120000 };
+    const { DEFAULT_SETTINGS } = await import('./navigation/game');
+    const settings = playableSettings({ ...DEFAULT_SETTINGS, mode,difficulty:4,extraRing,wildTargets,timerMs:120000 });
     store.set('settings',settings);
     const { panel,buttons,buttonStates,setters,stats,results } = panelHarness();
     let now=0;
@@ -2451,7 +2562,7 @@ describe('Navigation sessions and replay', () => {
     expect(expected.rows.some(([name])=>name==='Boards')).toBe(mode !== 'normal');
     // The report's brackets always run up to a triple, even with no chains.
     if (mode !== 'normal') expect(expected.report.cleared[0].items.length).toBeGreaterThanOrEqual(3);
-    expect(expected.report.mode).toBe(mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal');
+    expect(expected.report.mode).toBe(mode === 'normal' ? 'Normal' : 'Dennav');
     await replayWrites.idle();
     const data=JSON.parse(exportAll()).data;
     const files=await listReplayFiles('navigation');expect(files).toHaveLength(1);

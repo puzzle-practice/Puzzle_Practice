@@ -1,6 +1,8 @@
 import { clonePosition, positionCode, type Position, type Action } from './engine';
 import { COLOUR_NAMES, OCTANT_NAMES } from '../navigation/create';
 import type { BuildCheck } from './build-position';
+import type { FinishCheck } from './finish-combo';
+import type { CascadeSetupCheck } from './cascade-single';
 import type { PlanCheck } from './planning';
 
 export interface BoardExportContext {
@@ -13,7 +15,7 @@ export interface BoardExportContext {
   seed?: number;
   initialPosition?: Position;
   action?: Action;
-  validation?: BuildCheck | PlanCheck;
+  validation?: BuildCheck | FinishCheck | CascadeSetupCheck | PlanCheck;
 }
 
 /** Keep both the portable board code and exact colours of already-wild targets. */

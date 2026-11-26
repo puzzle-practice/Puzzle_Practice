@@ -7,10 +7,11 @@ import { EMPTY, type Target } from '../navigation/logic';
 import { INNER, RINGS, act, chainName, clonePosition, gameAt, innerCounts, linkStars, outcome, play, positionOf, settled, SETTINGS, type Action, type Outcome, type Position } from './engine';
 
 /**
- * A fresh board for Donkey from scratch. A donkey is built mid-game, so it skips the opening 1/2/1
- * constellation: every constellation, the first included, is 3/2/1.
+ * A fresh board for the donkey drills. A donkey is built mid-game, so by default it skips the opening
+ * 1/2/1 constellation and every constellation, the first included, is 3/2/1. opening deals the 1/2/1
+ * first, for the Starting board setting.
  */
-export const donkeyGame = (seed: number): NavigationGame => new NavigationGame(SETTINGS, seed, undefined, false);
+export const donkeyGame = (seed: number, opening = false): NavigationGame => new NavigationGame(SETTINGS, seed, undefined, opening);
 
 /** The link a donkey charts at; a vegas is one more. */
 export const DONKEY_CHAIN = 5;
@@ -192,7 +193,27 @@ export function analyseBreak(before: Position, action: Action, goal = DONKEY_CHA
     const after = result.after;
     const open = firstTargets.filter((t) => !matched(after.cells, after.targets.find((a) => key(a) === key(t)) ?? t));
     const firstRun = runsBefore[0];
-    if (firstRun && !inner && runsBefore.length === 1) {
+    // An outer run can steal the refill while ring 1 keeps chaining normally. Look for the
+    // supply above a target that did go wild, but was left empty when its star fell in.
+    const stolen = runsBefore.slice(1).flatMap((link) => link.runs
+      .filter((run) => run.direction === 0 && run.ring < INNER)
+      .map((run) => {
+        const cells = Array.from({ length: run.length }, (_, i) => run.ring * 8 + (run.octant + i) % 8);
+        const target = open.find((t) => after.targets.some((a) => key(a) === key(t) && a.wild)
+          && link.scene.cells[key(t)] !== EMPTY
+          && after.cells[key(t)] === EMPTY && cells.some((c) => c % 8 === t.octant && Math.floor(c / 8) < t.ring)
+          && scenes.slice(scenes.indexOf(link.scene) + 1).some((s) => s.falls?.some((f) => f.octant === t.octant && f.from === t.ring))
+          && link.scene.cells.every((c, i) => c === EMPTY || i % 8 !== t.octant || Math.floor(i / 8) >= t.ring || cells.includes(i))
+          && !after.cells.some((c, i) => c !== EMPTY && i % 8 === t.octant && Math.floor(i / 8) <= t.ring));
+        return { link, run, cells, target };
+      })).find((candidate) => candidate.target);
+    if (stolen) {
+      const { link, run, cells, target } = stolen;
+      analysis.stars = before.cells.flatMap((colour, cell) => colour !== EMPTY
+        && (trackStars(scenes, [cell]).get(link.scene) ?? []).some((at) => cells.includes(at)) ? [cell] : []);
+      analysis.targets = [key(target!)];
+      analysis.problem = `The ${colourName(link.scene.cells[cells[0]])} clear in ${ringLabel(run.ring)} at link ${link.chain} broke the combo: it removed the refill above the ${targetName(target!)}. When the star on that target fell inward, nothing was left above to refill it. The target turned wild, but was left empty.`;
+    } else if (firstRun && !inner && runsBefore.length === 1) {
       // A clear went off before the donkey was ready: ring the stars that lined up.
       analysis.stars = linkStars(before, action)[0]?.cells ?? [];
       const what = firstRun.runs.map((r) => r.direction === 0 ? `three in a row in ${ringLabel(r.ring)}` : `a column of ${r.length} through rings ${RINGS - r.ring}–${RINGS - (r.ring - r.length + 1)}`).join(' and ');
@@ -207,14 +228,17 @@ export function analyseBreak(before: Position, action: Action, goal = DONKEY_CHA
         ? `The ring 1 chain stopped after link ${runsBefore.length}${inner ? ` (${inner} ring 1 clear${inner === 1 ? '' : 's'})` : ', before ring 1 cleared at all'}. ${dropped ? `What dropped into the gap (${dropped}) didn't make three with the stars beside it.` : 'Nothing dropped into the gap to carry it on.'} A donkey needs each ring 1 clear to drop in the next pair's third star.`
         : 'Nothing cleared.';
     } else analysis.problem = `The chain went ${runsBefore.length} links, but it didn't chart.`;
-    if (open.length && !(firstRun && !inner && runsBefore.length === 1)) {
+    if (!stolen && open.length && !(firstRun && !inner && runsBefore.length === 1)) {
       analysis.targets = open.map(key);
-      analysis.problem += ` ${open.length === 1 ? `The ${targetName(open[0])} was` : `${open.length} targets were`} never filled or turned wild${open.length > 1 ? `: ${open.map(targetName).join(', ')}` : ''}.`;
+      analysis.problem += ` ${open.map((t) => {
+        const final = after.targets.find((a) => key(a) === key(t)) ?? t;
+        return `The ${targetName(t)} ${final.wild ? 'turned wild, but was left empty' : 'was left unfilled'} after the chain`;
+      }).join('. ')}.`;
     }
   }
 
   analysis.fix = findFix(before, action, goal);
-  if (analysis.fix?.cells.length) analysis.stars = analysis.fix.cells;
+  if (analysis.fix?.cells.length && !analysis.stars.length) analysis.stars = analysis.fix.cells;
   return analysis;
 }
 
@@ -237,6 +261,17 @@ export interface BreakFrame {
 
 const samePosition = (a: Position, b: Position) => a.cells.join() === b.cells.join() && JSON.stringify(a.targets) === JSON.stringify(b.targets);
 
+/** A clear's scene stores its resulting wilds. Show those only from the following scene. */
+export function targetsBeforeClears(scenes: Scene[], initial: Target[]): Map<Scene, Target[]> {
+  const targets = new Map<Scene, Target[]>();
+  let previous = initial;
+  for (const scene of scenes) {
+    targets.set(scene, scene.clear?.kind === 'run' ? previous : scene.targets);
+    previous = scene.targets;
+  }
+  return targets;
+}
+
 /**
  * Every still of a board that broke: the board before each build move, then the break itself (the
  * board before it, each turn, fall and clear, and the board it left). Stills that look the same as the
@@ -248,9 +283,10 @@ export function breakFrames(history: { before: Position; action: Action }[], bef
   frames.push({ kind: 'before', position: before, action, blame: analysis.stars, targets: analysis.targets, clearing: [] });
   const { scenes, result } = breakScenes(before, action);
   const tracked = trackStars(scenes, analysis.stars);
+  const targets = targetsBeforeClears(scenes, before.targets);
   let clears = 0;
   scenes.forEach((scene, i) => {
-    const position: Position = { cells: scene.cells, targets: scene.targets, entry: before.entry };
+    const position: Position = { cells: scene.cells, targets: targets.get(scene)!, entry: before.entry };
     // A fall's stars are drawn where they land, so its blamed stars are where the fall leaves them.
     const blame = (scene.falls?.length && !scene.clear ? tracked.get(scenes[i + 1]) : tracked.get(scene)) ?? [];
     if (scene.clear) {

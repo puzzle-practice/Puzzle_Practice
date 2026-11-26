@@ -9,6 +9,8 @@ import { EMPTY, NaviBoard, NaviTestBoard, WildTargets, TestWildTargets, LEVEL_TA
 export interface NavigationSettings { mode: 'normal' | 'ww' | 'ww-test'; difficulty: number; extraRing: boolean; wildTargets: boolean; timerMs: number; clears: boolean; dismissDelayMs: number; slowDrop: boolean;
   /** Freeplay mode paints the board, with the chosen timer but no quota or history, and each star waits for Drop. A booch deals a fresh board. */
   create: boolean;
+  /** Skip Dennav's opening 1/2/1 constellation and start on 3/2/1. Omitted in older replays. */
+  startDense?: boolean;
   /** Replays saved before a Dennav booch dealt a new board: the booch ends the run, as it did then. */
   boochEnds?: boolean;
   /** Replays saved while a Dennav booch dealt a board opening on 1/2/1 again: it still does. */
@@ -24,15 +26,19 @@ export function readSettings(value: unknown): NavigationSettings | null {
       (s.clears !== undefined && typeof s.clears !== 'boolean') || (s.clears && s.timerMs !== 0) ||
       (s.dismissDelayMs !== undefined && !DISMISS_DELAYS.includes(s.dismissDelayMs)) ||
       (s.slowDrop !== undefined && typeof s.slowDrop !== 'boolean') || (s.create !== undefined && typeof s.create !== 'boolean') ||
+      (s.startDense !== undefined && typeof s.startDense !== 'boolean') ||
       (s.boochEnds !== undefined && typeof s.boochEnds !== 'boolean') || (s.boochOpens !== undefined && typeof s.boochOpens !== 'boolean')) return null;
   return { mode: s.mode, difficulty: s.difficulty, extraRing: s.extraRing, wildTargets: s.wildTargets, timerMs: s.timerMs, clears: s.clears ?? false,
-    dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false, ...(s.boochEnds ? { boochEnds: true } : {}), ...(s.boochOpens ? { boochOpens: true } : {}) };
+    dismissDelayMs: s.dismissDelayMs ?? DEFAULT_SETTINGS.dismissDelayMs, slowDrop: s.slowDrop ?? false, create: s.create ?? false, ...(s.startDense ? { startDense: true } : {}), ...(s.boochEnds ? { boochEnds: true } : {}), ...(s.boochOpens ? { boochOpens: true } : {}) };
 }
+/** Saved Old Dennav choices use current Dennav rules, retaining their dense start. Replays use readSettings directly. */
+export const playableSettings = (settings: NavigationSettings): NavigationSettings => settings.mode === 'ww'
+  ? { ...settings, mode: 'ww-test', startDense: true } : settings;
 export const isWerewolf = (mode: NavigationSettings['mode']): boolean => mode === 'ww' || mode === 'ww-test';
 /** Only Normal scores run clears; in Dennav and Old Dennav a run of stars scores nothing, only constellations do. */
 export const runsScore = (mode: NavigationSettings['mode']): boolean => !isWerewolf(mode);
 export const modeLabel = (mode: NavigationSettings['mode']): string => mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal';
-export const settingsKey = (s: NavigationSettings): string => `${s.mode}:${s.difficulty}:${isWerewolf(s.mode) && s.extraRing ? 4 : 3}:${isWerewolf(s.mode) && s.wildTargets ? 1 : 0}:${s.timerMs}${s.clears ? ':c' : ''}${s.slowDrop ? ':s' : ''}`;
+export const settingsKey = (s: NavigationSettings): string => `${s.mode}:${s.difficulty}:${isWerewolf(s.mode) && s.extraRing ? 4 : 3}:${isWerewolf(s.mode) && s.wildTargets ? 1 : 0}:${s.timerMs}${s.clears ? ':c' : ''}${s.slowDrop ? ':s' : ''}${s.mode === 'ww-test' && s.startDense ? ':321' : ''}`;
 /** The constellations a run is played to: the quota, except with no timer or in Freeplay, which loop. */
 export const runGoal = (s: NavigationSettings): number => !s.create && (s.timerMs || s.clears) ? LEVEL_TARGETS[s.difficulty] : Infinity;
 export interface NavigationSeed { boardSeed: number; timerElapsedMs: number }
@@ -107,7 +113,7 @@ export class NavigationGame {
   constructor(readonly settings: NavigationSettings, readonly seed: number, readonly goal = runGoal(settings), opening = true, scoreRuns = runsScore(settings.mode)) {
     this.#scoreRuns = scoreRuns;
     const rings = isWerewolf(settings.mode) && settings.extraRing ? 4 : 3;
-    this.board = settings.mode === 'ww-test' ? new NaviTestBoard(rings, settings.difficulty, seed, opening) : new NaviBoard(rings, settings.difficulty, seed, isWerewolf(settings.mode));
+    this.board = settings.mode === 'ww-test' ? new NaviTestBoard(rings, settings.difficulty, seed, opening && !settings.startDense) : new NaviBoard(rings, settings.difficulty, seed, isWerewolf(settings.mode));
     this.wild = settings.mode === 'ww-test' ? new TestWildTargets(settings.wildTargets, rings) : new WildTargets(isWerewolf(settings.mode) && settings.wildTargets, rings);
     this.targets = this.board.nextConstellation();
     this.entry = this.board.nextEntry();

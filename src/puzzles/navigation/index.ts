@@ -19,7 +19,8 @@ const MOONS = ['moon-crescent', 'moon-half', 'moon-full', 'moon-bingo', 'moon-do
 import { keyMatches } from '../../core/controls';
 import type { PuzzleFactory } from '../../core/puzzle';
 import type { InputEvent } from '../../core/input';
-import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, runsScore, targetLit, type NavigationSettings, type RunTotals, type Scene } from './game';
+import { NavigationGame, DEFAULT_SETTINGS, DISMISS_DELAYS, NO_TOTALS, addBoard, boardSeed, playableSettings, readSettings, runGoal, readNavigationSeed, settingsKey, isWerewolf, modeLabel, runsScore, type NavigationSettings, type RunTotals, type Scene } from './game';
+import { drawTarget, targetAppearance } from './appearance';
 import { LEVEL_TARGETS } from './logic';
 import { copyText, pasteText } from '../../core/clipboard';
 import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, PAINT_KEYS, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
@@ -28,7 +29,7 @@ const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
 const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
 const CX = 225, CY = 300;
-const MODES = ['normal', 'ww-test', 'ww'] as const;
+const MODES = ['normal', 'ww-test'] as const;
 const RULE_OPTIONS = MODES.map(value => ({ value, label: modeLabel(value) }));
 const MODE_OPTIONS = [...RULE_OPTIONS, { value: 'create' as const, label: 'Freeplay' }];
 export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplayTime: rawReplayTime }) => {
@@ -39,7 +40,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const sounds = new SoundBank(soundUrls, () => replays?.isSeeking ?? false);
   const warning = new TimerWarning('gauntlet', () => replays?.isSeeking ?? false);
   const ctx = screen.ctx;
-  let settings = readSettings(store.get('settings', DEFAULT_SETTINGS)) ?? { ...DEFAULT_SETTINGS };
+  const matchWildColour = targetAppearance(panel);
+  const storedSettings = readSettings(store.get('settings', DEFAULT_SETTINGS)) ?? { ...DEFAULT_SETTINGS };
+  let settings = playableSettings(storedSettings);
+  if (settings !== storedSettings) store.set('settings', settings);
   // WW now defaults to the 2-minute timer; move saved WW settings with no timer over once.
   if (!store.get('wwTimerDefault', false)) {
     if (isWerewolf(settings.mode) && settings.timerMs === 0) { settings.timerMs = DEFAULT_SETTINGS.timerMs; store.set('settings', settings); }
@@ -110,7 +114,12 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   function start(seed?: number, timerElapsedMs = 0, tapeRules = RULES): void {
     pause.resume();
     rules = tapeRules;
-    if (seed === undefined) seed = seedMode.next(); seedMode.remember(seed);
+    if (seed === undefined) {
+      const nextSettings = playableSettings(settings);
+      if (nextSettings !== settings) { settings = nextSettings; saveSettings(); }
+      seed = seedMode.next();
+    }
+    seedMode.remember(seed);
     // An old replay's booch ends its run. The rule is kept apart from the game's settings, which replays check.
     const { boochEnds: oldBoochRule, ...played } = settings;
     boochEnds = !!oldBoochRule;
@@ -245,7 +254,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     else if (name === 'load' || name === 'reset') {
       const read = readBoardCode(name === 'load' ? command.slice(5) : setup);
       if (!read) return;
-      if (read.rings !== game.board.rings) { pasteNote = `That board has ${read.rings} rings. ${read.rings === 4 ? 'Choose Dennav or Old Dennav with the extra ring' : 'Choose Normal, or Dennav or Old Dennav without the extra ring'}, then Start.`; return; }
+      if (read.rings !== game.board.rings) { pasteNote = `That board has ${read.rings} rings. ${read.rings === 4 ? 'Choose Dennav with the extra ring' : 'Choose Normal, or Dennav without the extra ring'}, then Start.`; return; }
       loadBoard(game, read);
     } else if (name === 'generate') {
       board++;
@@ -278,12 +287,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     if (scene) {
       // Draw targets first so settled and moving stars stay in front of them.
       for (const t of scene.targets) {
-        const matches = targetLit(scene, t);
-        if (t.wild) {
-          // A wild target is ringed in every colour, lit once any star fills it.
-          const [x,y] = position(t.octant,radius(t.ring));
-          ctx.drawImage(images.get('star_wild'), ((matches ? 8 : 0) + (t.octant + 2) % 8)*56, 0, 56, 56, Math.trunc(x)-28, Math.trunc(y)-28, 56, 56);
-        } else star(t.colour, t.octant, radius(t.ring), matches, true);
+        const [x, y] = position(t.octant, radius(t.ring));
+        drawTarget(ctx, images, scene, t, x, y, matchWildColour());
       }
       for (let ring = 0; ring < rings; ring++) for (let o = 0; o < 8; o++) {
         const colour = scene.cells[ring*8+o];
@@ -493,7 +498,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   options.toggle('Slow drop', () => settings.slowDrop, on => { settings.slowDrop = on; saveSettings(); }, { disabled: busy, title: 'Each star waits at the top until you press Drop.' });
   options.toggle('Wild targets', () => settings.wildTargets, on => { settings.wildTargets = on; saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
   options.toggle('Extra ring', () => settings.extraRing, on => { settings.extraRing = on; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy, hidden: () => !isWerewolf(settings.mode) });
-  options.hint(() => settings.mode === 'ww-test' ? 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
+  options.toggle('Start with 3–2–1', () => !!settings.startDense, on => {
+    if (on) settings.startDense = true; else delete settings.startDense;
+    saveSettings();
+  }, { disabled: busy, hidden: () => settings.mode !== 'ww-test', title: 'Skip the opening 1–2–1 constellation.' });
+  options.hint(() => settings.mode === 'ww-test' ? (settings.startDense ? 'Each board starts on 3/2/1. ' : 'Each board starts with 1 inner, 2 middle and 1 outer target, then 3/2/1. ') + 'Charting counts toward wild-target charging: cascades after charting can make the new inner targets wild and add one extra wild target. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : isWerewolf(settings.mode) ? 'Every constellation has 3 inner, 2 middle and 1 outer target. Chain clears turn adjacent targets wild. Completing a constellation after a clear makes the next inner-ring targets wild. Only constellations score; clears of three or more stars score nothing but build the chain that multiplies the next constellation.' : 'Fill every target with its matching star colour. Three or more equal stars clear space.');
   options.button('Reset to defaults', () => { settings = { ...DEFAULT_SETTINGS }; selectInnerRing(settingsRings()); saveSettings(); }, { disabled: busy });
   panel.controls('navigation', [
     { id: 'ringOut', label: 'Select outer ring', defaultKey: 'arrowup' },
@@ -527,10 +536,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   // Before version 4 a booch ended every run, Dennav and Old Dennav included.
   // In version 4 the Dennav board a booch dealt opened on 1/2/1 again.
   // Before version 6 Freeplay had no timer (its replays saved none) and a booch ended it.
-  const codec: ReplaySettingsCodec = { currentVersion: 6, simulatorVersion: RULES, migrate: (version, value) => {
-    const read = version <= 6 ? readSettings(value) : null;
+  const codec: ReplaySettingsCodec = { currentVersion: 7, simulatorVersion: RULES, migrate: (version, value) => {
+    const read = version <= 7 ? readSettings(value) : null;
     if (read?.mode === 'ww-test' && version < 3) return null;
-    if (!read || version === 6) return read;
+    if (!read || version >= 6) return read;
     const freeplay = read.create ? { boochEnds: true } : {};
     if (version === 5) return { ...read, ...freeplay };
     if (version === 4) return { ...read, boochOpens: true, ...freeplay };

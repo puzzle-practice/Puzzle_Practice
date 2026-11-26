@@ -17,7 +17,7 @@ export type BuildCheck = { kind: 'building' } | { kind: 'complete'; plan: Planni
 export type Strictness = 'lenient' | 'standard' | 'strict';
 
 /** Every piece's issues against a plan, including supports and stars outside the planned combo, in order. */
-export function buildIssues(p: Position, plan: PlanningOption): GradedIssue[] {
+export function buildIssues(p: Position, plan: PlanningOption, targetPlacement: 'fixed' | 'movable' = 'fixed'): GradedIssue[] {
   const issues: GradedIssue[] = [];
   const wildCells = new Set(plan.site.wilded.map((t) => t.ring * 8 + t.octant));
   for (const t of p.targets) {
@@ -45,7 +45,7 @@ export function buildIssues(p: Position, plan: PlanningOption): GradedIssue[] {
     if (!intended) { issues.push({ soft: true, message: 'Unnecessary vertical pair.', cells: [a, b] }); break pairs; }
   }
   for (const t of p.targets) {
-    if (t.wild || wildCells.has(t.ring * 8 + t.octant)) continue;
+    if (targetPlacement === 'movable' || t.wild || wildCells.has(t.ring * 8 + t.octant)) continue;
     const cell = t.ring * 8 + t.octant;
     // Hard: a target that never turns wild can't be matched while it holds the wrong star.
     if (p.cells[cell] !== EMPTY && p.cells[cell] !== t.colour) { issues.push({ soft: false, message: 'Wrong colour on a target outside the wild area.', cells: [cell] }); break; }
@@ -169,8 +169,8 @@ export function builtComboIssue(p: Position, minStack = 1, options: PlanningOpti
 /** Any accepted layout may finish, but every other piece must pass too. `submitted` (Enter):
  * the build is final, so judge the player's own combo even if only ring 1 is built. `level`
  * decides whether suboptimal issues fail (strict) or only warn; `options` should come from
- * buildOptionsFor at the same level. */
-export function checkBuildPosition(p: Position, options: PlanningOption[], submitted = false, level: Strictness = 'strict'): BuildCheck {
+ * buildOptionsFor at the same level. During Finish the Combo, target placements remain movable. */
+export function checkBuildPosition(p: Position, options: PlanningOption[], submitted = false, level: Strictness = 'strict', targetPlacement: 'fixed' | 'movable' = 'fixed'): BuildCheck {
   const matches = (plan: PlanningOption) => plan.site.horizontal.every((cell) => p.cells[cell] ===
     (cell === plan.site.vertical[0] ? plan.verticalColour : plan.horizontalColour));
   const matching = options.filter(matches);
@@ -179,7 +179,7 @@ export function checkBuildPosition(p: Position, options: PlanningOption[], submi
   const candidates = matching.length ? matching : options;
   let viable = false, firstIssue: BuildIssue | null = null, best: { plan: PlanningOption; warnings: BuildIssue[] } | null = null;
   for (const plan of candidates) {
-    const issues = buildIssues(p, plan);
+    const issues = buildIssues(p, plan, targetPlacement);
     const failing = issues.find((issue) => level === 'strict' || !issue.soft);
     if (failing) { firstIssue ??= { message: failing.message, cells: failing.cells }; continue; }
     viable = true;

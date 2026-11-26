@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
 import { NavigationGame } from '../navigation/game';
 import { EMPTY } from '../navigation/logic';
-import { INNER, MIDDLE, SETTINGS, TOP, act, gameAt, outcome, positionOf, type Outcome } from './engine';
+import { INNER, MIDDLE, SETTINGS, TOP, act, gameAt, outcome, positionOf, readPosition, type Outcome } from './engine';
 import { LESSONS } from './lessons';
 import { buildOptionsFor, checkBuildPosition } from './build-position';
 import { OPENING_STARS, dealFinish, finishGame, judgeFinish, openingBag, type FinishDeal } from './finish-combo';
@@ -73,7 +73,21 @@ describe('Finish the Combo', () => {
     }
   }, 60000);
 
-  it('fails a wrong colour on a target that won’t turn wild, and an early clear', () => {
+  it('allows a temporary wrong colour on a target while finishing the combo', () => {
+    const p = readPosition('N4:........1.......1304...241022334:334,201,243,103:02');
+    const options = buildOptionsFor(p.targets, 'standard');
+    const quiet: Outcome = { links: [], charted: null, nextInnerWild: false, after: p };
+    // The exported board has orange on the white ring 3 target. It can still be turned away.
+    expect(checkBuildPosition(p, options, true, 'standard')).toMatchObject({ kind: 'failed' });
+    expect(judgeFinish(quiet, p, false, options, 'standard', lesson.accepts)).toMatchObject({ kind: 'playing' });
+    const game = gameAt(p);
+    const scenes = act(game, { kind: 'rotate', ring: TOP, clockwise: false });
+    const after = positionOf(game);
+    expect(after.cells[8]).toBe(EMPTY);
+    expect(judgeFinish(outcome(scenes, after), after, game.booched, options, 'standard', lesson.accepts)).toMatchObject({ kind: 'playing' });
+  });
+
+  it('allows target alignment during play, but fails an early clear or a booch', () => {
     const d = deal(2);
     const options = buildOptionsFor(d.position.targets, 'standard');
     const quiet: Outcome = { links: [], charted: null, nextInnerWild: false, after: d.position };
@@ -85,7 +99,7 @@ describe('Finish the Combo', () => {
       const cell = fixed.ring * 8 + fixed.octant;
       wrong.cells[cell] = (fixed.colour + 1) % 5;
       for (let r = fixed.ring + 1; r < INNER; r++) if (wrong.cells[r * 8 + fixed.octant] === EMPTY) wrong.cells[r * 8 + fixed.octant] = (fixed.colour + 2) % 5;
-      expect(judgeFinish(quiet, wrong, false, options, 'standard', lesson.accepts)).toMatchObject({ kind: 'failed', issue: { message: 'Wrong colour on a target outside the wild area.' } });
+      expect(judgeFinish(quiet, wrong, false, options, 'standard', lesson.accepts)).toMatchObject({ kind: 'playing' });
     }
     expect(judgeFinish({ ...quiet, links: [{ kind: 'run', chain: 1, runs: [], wilded: [], afterChart: false, scene: { cells: [], targets: [], duration: 0 } }] }, d.position, false, options, 'standard', lesson.accepts))
       .toMatchObject({ kind: 'failed', issue: { message: 'That cleared before the combo was ready.' } });

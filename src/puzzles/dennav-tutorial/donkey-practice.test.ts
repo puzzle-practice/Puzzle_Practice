@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
+import { EMPTY } from '../navigation/logic';
 import { gameAt, generate, innerCounts, makeMistake, positionOf, readPosition, type Action } from './engine';
 import { LESSONS, VEGAS_AS_PLAYED } from './lessons';
-import { DONKEY_CHAIN, analyseBreak, breakFrames, breakScenes, donkeyGame, findFix, setsOff, trackStars } from './donkey-practice';
+import { DONKEY_CHAIN, analyseBreak, breakFrames, breakScenes, donkeyGame, findFix, setsOff, targetsBeforeClears, trackStars } from './donkey-practice';
 
 const donkey = LESSONS.find((l) => l.id === 'donkey')!;
 const session = donkey.moments[0];
@@ -28,6 +29,23 @@ describe('donkey from a blank board', () => {
     expect(a.stars).toEqual([2 * 8 + 7]);
   });
 
+  it('blames the yellow refill clearing beside the inner chain, even after three inner clears', () => {
+    const before = readPosition('N4:2.33..4.100244014132141312443322:324,351,373,224,260,133:31');
+    const action: Action = { kind: 'rotate', ring: 2, clockwise: true };
+    const analysis = analyseBreak(before, action);
+    expect(analysis.success).toBe(false);
+    expect(analysis.problem).toMatch(/yellow clear in ring 3 at link 3 broke the combo/);
+    expect(analysis.problem).toMatch(/turned wild, but was left empty/);
+    expect(analysis.problem).not.toMatch(/never filled or turned wild/);
+    expect(analysis.stars.sort((a, b) => a - b)).toEqual([6, 12, 13]);
+    expect(analysis.targets).toEqual([22]);
+    const { frames } = breakFrames([], before, action, analysis);
+    const yellowClear = frames.find((f) => f.scene?.clear?.chain === 3)!;
+    expect(yellowClear.position.cells).toEqual(readPosition('N4:..33......02444..0214101.3443334:32*,35*,37*,224,26*,13*:31').cells);
+    expect(yellowClear.blame.sort((a, b) => a - b)).toEqual([12, 13, 14]);
+    expect(yellowClear.blame.every((cell) => yellowClear.clearing.includes(cell))).toBe(true);
+  });
+
   it('finds a fix for spoiled donkeys and blames a star', () => {
     const rng = new Random(7);
     let checked = 0;
@@ -42,6 +60,27 @@ describe('donkey from a blank board', () => {
       checked++;
     }
     expect(checked).toBeGreaterThan(0);
+  });
+
+  it('shows newly wild targets after their clear, in playback and when stepping either way', () => {
+    const before = readPosition('N4:2.33..4.100244014132141312443322:324,351,373,224,260,133:31');
+    const action: Action = { kind: 'rotate', ring: 2, clockwise: true };
+    const { scenes, result } = breakScenes(before, action);
+    const displayed = targetsBeforeClears(scenes, before.targets);
+    const { frames } = breakFrames([], before, action, analyseBreak(before, action));
+    const wild = (targets: typeof before.targets) => targets.filter((t) => t.wild).map((t) => t.ring * 8 + t.octant);
+    for (const link of result.links.filter((l) => l.wilded.length)) {
+      const index = scenes.indexOf(link.scene);
+      const previous = index ? scenes[index - 1].targets : before.targets;
+      expect(wild(displayed.get(link.scene)!)).toEqual(wild(previous));
+      expect(wild(displayed.get(scenes[index + 1])!)).toEqual(wild(link.scene.targets));
+      const frameAt = frames.findIndex((f) => f.scene?.clear?.kind === link.kind && f.scene.clear.chain === link.chain);
+      expect(wild(frames[frameAt].position.targets)).toEqual(wild(previous));
+      expect(wild(frames[frameAt + 1].position.targets)).toEqual(wild(link.scene.targets));
+      // Reviewing a later step must not mutate the previous step or the engine's result.
+      expect(wild(frames[frameAt].position.targets)).toEqual(wild(previous));
+      expect(link.wilded.every((t) => link.scene.targets.some((a) => a.ring === t.ring && a.octant === t.octant && a.wild))).toBe(true);
+    }
   });
 
   it('calls an accidental clear before ring 1 is ready an early clear', () => {
@@ -121,6 +160,28 @@ describe('donkey from a blank board', () => {
       const bad = makeMistake(generate(session, donkey.accepts, rng, donkey.keep), donkey.accepts, rng, donkey.keep);
       const fix = bad && findFix(bad.position, bad.action);
       if (fix) expect(Math.max(...innerCounts(fix.position.cells).values())).toBeLessThanOrEqual(2);
+    }
+  });
+});
+
+describe('carrying on a failed attempt', () => {
+  it('replaying the moves on the same seed gives the same board and the same stars to come', () => {
+    const rng = new Random(7);
+    for (const seed of [3, 41, 977]) {
+      const live = donkeyGame(seed);
+      const history: { before: string; action: Action }[] = [];
+      for (let i = 0; i < 30; i++) {
+        const action: Action = rng.integer(0, 2) === 0 ? { kind: 'drop' } : { kind: 'rotate', ring: rng.integer(0, 3), clockwise: rng.integer(0, 1) === 1 };
+        if (action.kind === 'drop' && live.board.get(live.entry.octant, 0) !== EMPTY) continue;
+        history.push({ before: JSON.stringify(positionOf(live)), action });
+        (action.kind === 'drop' ? live.drop() : live.rotate(action.ring, action.clockwise));
+        if (live.booched || live.finished) break;
+      }
+      for (let k = 0; k < history.length; k++) {
+        const again = donkeyGame(seed);
+        for (const h of history.slice(0, k)) (h.action.kind === 'drop' ? again.drop() : again.rotate(h.action.ring, h.action.clockwise));
+        expect(JSON.stringify(positionOf(again))).toBe(history[k].before);
+      }
     }
   });
 });
