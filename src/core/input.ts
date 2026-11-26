@@ -69,10 +69,7 @@ export class Input {
     listen(canvas, 'contextmenu', (event) => event.preventDefault());
     listen(window, 'keydown', (event) => {
       // Typing in the settings panel isn't game input.
-      // Ctrl, Alt or Cmd held with another key is a browser shortcut, not game input; Ctrl pressed
-      // on its own is a key a puzzle can use.
-      const ctrlAlone = event.key === 'Control' && !event.metaKey && !event.altKey;
-      if (((event.ctrlKey || event.metaKey || event.altKey) && !ctrlAlone) || isTyping(event.target)) return;
+      if (event.metaKey || event.altKey || isTyping(event.target)) return;
       unlockAudio();
       const key = keyName(event);
       if (event.ctrlKey && key !== 'control') {
