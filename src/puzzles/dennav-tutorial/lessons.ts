@@ -40,6 +40,17 @@ export function noStrayStacks(p: Position): boolean {
   });
 }
 
+/** The three ring 2 stars under the ring 3 target (under it and either side of that) hold at most two colours. */
+export function twoColoursUnderTop(p: Position): boolean {
+  const top = p.targets.find((t) => t.ring === TOP);
+  if (!top) return true;
+  const colours = [-1, 0, 1].map((d) => p.cells[MIDDLE * 8 + (top.octant + d + 8) % 8]).filter((c) => c !== EMPTY);
+  return new Set(colours).size <= 2;
+}
+
+/** What every Ring 3 double board keeps: no stray stacks, and two colours at most under the ring 3 target. */
+export const ring3DoubleBoard = (p: Position) => noStrayStacks(p) && twoColoursUnderTop(p);
+
 const first = (o: Outcome) => o.links.find((l) => l.kind === 'target');
 const before = (o: Outcome) => o.links.filter((l) => l.kind === 'run' && !l.afterChart);
 
@@ -85,12 +96,12 @@ export const LESSONS: Lesson[] = [
       'Every other target is filled or wild.',
     ],
     accepts: (o) => o.charted === 2 && before(o).length === 1 && horizontalIn(before(o)[0], TOP) && !first(o)!.scene.targets.some((t) => t.ring === TOP && t.wild),
-    keep: noStrayStacks,
+    keep: ring3DoubleBoard,
     success: 'Ring 3 cleared through the target and the right colour dropped in: a double.',
     moments: [
       moment('Example 1', 'N4:.301.....33220144011342021044112:31*,30*,36*,270,210,121:44', rotate(0, true)),
       moment('Example 2', 'N4:.20......224....4041134101144122:30*,35*,32*,231,204,110:26', rotate(0, true)),
-      moment('Example 3', 'N4:...420..11.441440132100333032211:30*,31*,32*,273,241,142,33*:35', rotate(1, false)),
+      moment('Example 3', 'N4:...420..11.441440130100333032211:30*,31*,32*,273,241,142,33*:35', rotate(1, false)),
     ],
   },
   {
