@@ -184,7 +184,9 @@ export function showDnavPlanner(app: HTMLElement): void {
         const most = mostWithin(w.time, times);
         options.append(most
           ? shortCard(most, w.total, w.need, w.time)
-          : el('p', 'dp-note', 'None of the moves you’ve timed fit in the time.'));
+          : el('p', 'dp-note', TIME_FIELDS.some(({ id }) => id !== 'booch' && times[id] > 0)
+            ? 'None of the moves you\u2019ve timed fit in the time.'
+            : 'Enter how long your moves take above to see the fastest lines.'));
       } else {
         lines.forEach((line, i) => {
           if (line.t > w.time) return;

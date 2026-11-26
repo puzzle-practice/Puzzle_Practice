@@ -11,15 +11,15 @@ export type TimeId = 'booch' | 'single' | 'cascade' | 'double' | 'triple' | 'bin
 /** Seconds each move takes; 0 or less means the move isn't used. */
 export type Times = Record<TimeId, number>;
 
-/** The moves the player times, with the same defaults as Gizmo's Dnav strategies. Blank means not used. */
+/** The moves the player times. Only the Booch has a default; the rest are the player's to fill in. Blank means not used. */
 export const TIME_FIELDS: { id: TimeId; label: string; def: number | '' }[] = [
   { id: 'booch', label: 'Booch', def: 9 },
   { id: 'cascade', label: 'Cascade single', def: '' },
-  { id: 'single', label: 'Finishing single', def: 12 },
+  { id: 'single', label: 'Finishing single', def: '' },
   { id: 'double', label: 'Double', def: '' },
-  { id: 'triple', label: 'Triple', def: 40 },
+  { id: 'triple', label: 'Triple', def: '' },
   { id: 'bingo', label: 'Bingo', def: '' },
-  { id: 'donkey', label: 'Donkey', def: 51 },
+  { id: 'donkey', label: 'Donkey', def: '' },
   { id: 'vegas', label: 'Vegas', def: '' },
 ];
 
