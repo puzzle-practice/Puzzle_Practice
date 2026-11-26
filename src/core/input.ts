@@ -16,6 +16,8 @@ export type InputEvent =
 export class Input {
   /** Latest mouse position in screen pixels. */
   mouse: Point = [-1, -1];
+  /** A puzzle may claim specific Control shortcuts while its editor is active. */
+  allowControlKey?: (key: string) => boolean;
   private queue: { at: number; event?: InputEvent; mouse: Point }[] = [];
   private pointer: Point = [-1, -1];
   private readonly cleanup: Array<() => void> = [];
@@ -67,9 +69,13 @@ export class Input {
     listen(canvas, 'contextmenu', (event) => event.preventDefault());
     listen(window, 'keydown', (event) => {
       // Typing in the settings panel isn't game input.
-      if (event.ctrlKey || event.metaKey || event.altKey || isTyping(event.target)) return;
-      unlockAudio();
+      if (event.metaKey || event.altKey || isTyping(event.target)) return;
       const key = keyName(event);
+      if (event.ctrlKey && key !== 'control') {
+        if (!this.allowControlKey?.(key)) return;
+        event.preventDefault();
+      }
+      unlockAudio();
       // Keep the page from scrolling while playing, including on held-key auto-repeats.
       if (SCROLL_KEYS.has(key)) event.preventDefault();
       if (event.repeat) return;

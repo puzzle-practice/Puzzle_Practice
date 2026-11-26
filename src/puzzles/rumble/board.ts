@@ -488,11 +488,16 @@ export class Board {
     }
     for (let x = 0; x < this.width(this.damage); x++) {
       let piece = this.randomBall(this.rng);
-      const chance = this.bruiseCounter > 0 ? Math.trunc((this.bruiseCounter * 4) / 10) : 0;
+      const chance = this.bruiseChance;
       if (nextInt(this.rng, 100) < chance) piece = dark(piece);
       this.set({ x, y: this.damage }, piece);
     }
     this.sparks = this.sparks.filter((p) => ++p.y < H);
+  }
+
+  /** Each ball in a new row rolls against this chance, derived from clear/attack efficiency. */
+  get bruiseChance(): number {
+    return this.bruiseCounter > 0 ? Math.trunc(this.bruiseCounter * 4 / 10) : 0;
   }
 
   /** At the start of a turn, sparks whose group is now under three turn to bruises. */
@@ -687,7 +692,7 @@ export class Board {
    * column without enough empty cells loses its topmost balls to make room. Nothing is pushed into
    * the bottom row.
    */
-  punch(shaft: Shaft, glove: Glove): PunchResult {
+  punch(shaft: Shaft, glove: Glove, allowExcessBruises = false): PunchResult {
     const result: PunchResult = { columns: [], bounces: [] };
     if (shaft.height <= 0 || shaft.width <= 0) return result;
     const bottom = H - 1;
@@ -705,7 +710,7 @@ export class Board {
     }
     if (length === 0) return result;
     const blacks = new Array<number>(length * width).fill(0);
-    const bruised = Math.min(shaft.blacks, Math.trunc((length * width) / 2));
+    const bruised = Math.min(shaft.blacks, allowExcessBruises ? length * width : Math.trunc((length * width) / 2));
     for (let i = 0; i < bruised; i++) blacks[i] = 1;
     shuffle(blacks, this.alt);
     let b = 0;

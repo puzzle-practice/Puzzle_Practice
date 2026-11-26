@@ -1,7 +1,7 @@
 // Freeplay mode's rules on top of Rumble's board: dealing a starting board, the werewolf swap of
 // orange for furballs, editing single cells, undo snapshots and rolling the next punch.
 import { Random as RandomImpl, type Random } from '../../core/random';
-import { Board, H, W, nextInt, type Point, type Shaft } from './board';
+import { Board, DIR_PREC, H, W, nextInt, shaftSent, type Point, type Shaft } from './board';
 import { BLUDGEONS, FISTS_TYPE, Glove, HOOK_TYPE, colourMapping } from './gloves';
 import { BLOCKED, EMPTY, FURBALL, ORANGE, ball, charged, colourOf, dark, isBall, isCharged, isDark, isLight, light } from './pieces';
 
@@ -86,6 +86,272 @@ export function dealInto(board: Board, rng: Random, rows: number, density: numbe
   board.sparks = [];
 }
 
+/** A verified opening into the first spark of a generated chain. */
+export interface ChargedOpening {
+  fist: number;
+  colour: number;
+  dir: number;
+  groups: number;
+  averageGroupSize: number;
+  dropOff: number;
+  availableSlots: number;
+  filledSlots: number;
+}
+
+/**
+ * Dense plain rows above a connected, partially filled charged area. Each spark belongs to a
+ * group of at least three; the first group touches the dense rows and has a real opening shot.
+ * Staging on a copy leaves the live board untouched if its damage leaves too little room.
+ */
+export function generateChargedBoard(board: Board, rng: Random, normalRows: number, chargedRows: number,
+  density: number, werewolf: boolean, hands: readonly number[], averageGroupSize = 3, dropOff = 0, spread = true): ChargedOpening | null {
+  const topRows = Math.max(1, Math.trunc(normalRows));
+  const depth = Math.min(Math.max(1, Math.trunc(chargedRows)), MAX_ROWS - board.damage - topRows);
+  if (depth < 1) return null;
+  const b = board.clone();
+  dealInto(b, rng, topRows, 100, werewolf);
+  const firstRow = b.damage + topRows, endRow = firstRow + depth;
+  const key = (p: Point) => p.y * W + p.x;
+  const neighbours = (p: Point) => Array.from({ length: 6 }, (_, d) => b.neighbour(p, d)).filter(p => b.valid(p));
+  const available = Array.from({ length: b.fists }, (_, fist) => fist)
+    .filter(fist => isBall(hands[fist]) && colourOf(hands[fist]) !== FURBALL);
+  const fist = available.length ? available[nextInt(rng, available.length)] : 0;
+  const colours = werewolf ? [0, 1, 3, 4] : [0, 1, 2, 3, 4];
+  const colour = available.length ? colourOf(hands[fist]) : colours[nextInt(rng, colours.length)];
+  const x = b.fists === 1 ? 3 : fist === 0 ? 0 : 6;
+  const root = [0, 1, 2].map(dx => ({ x: x + dx, y: firstRow }));
+  const trigger = root[0], rootKeys = new Set(root.map(key));
+  for (const p of root) b.set(p, ball(colour));
+  const [lo, hi] = b.ranges[fist];
+  const angles = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i)
+    .sort((a, c) => Math.abs(a - 90 * DIR_PREC) - Math.abs(c - 90 * DIR_PREC));
+  const openingDir = angles.find(dir => {
+    const shot = b.shoot(b.path(fist, dir));
+    return shot && b.valid(shot.rest) && neighbours(shot.rest).some(p => rootKeys.has(key(p)));
+  });
+  if (openingDir === undefined) return null;
+  const openingPath = b.path(fist, openingDir), rest = b.shoot(openingPath)!.rest;
+  const corridor = new Set<number>([key(rest)]);
+  // Reserve every slot that could block this actual opening ray, including below the charged area.
+  // These are unavailable slots, so increasing density never fills the required firing lane.
+  for (let y = firstRow; y < H - 1; y++) for (let x = 0; x < b.width(y); x++) {
+    const p = { x, y };
+    if (rootKeys.has(key(p))) continue;
+    b.set(p, ball(colour));
+    const shot = b.shoot(openingPath);
+    if (!shot || key(shot.rest) !== key(rest)) corridor.add(key(p));
+    b.set(p, EMPTY);
+  }
+  // Tiny pockets cut off by the lane cannot hold a legal group; leave them open as part of it.
+  const pockets = new Map<number, Point>();
+  for (let y = firstRow; y < endRow; y++) for (let x = 0; x < b.width(y); x++) {
+    const p = { x, y };
+    if (!corridor.has(key(p)) && !rootKeys.has(key(p))) pockets.set(key(p), p);
+  }
+  while (pockets.size) {
+    const queue = [pockets.values().next().value!]; pockets.delete(key(queue[0]));
+    for (let i = 0; i < queue.length; i++) for (const next of neighbours(queue[i])) if (pockets.has(key(next))) {
+      queue.push(next); pockets.delete(key(next));
+    }
+    if (queue.length < 3) for (const p of queue) corridor.add(key(p));
+  }
+  const cells: Point[] = [];
+  for (let y = firstRow; y < endRow; y++) for (let x = 0; x < b.width(y); x++) {
+    const p = { x, y };
+    if (!corridor.has(key(p))) cells.push(p);
+  }
+  const count = Math.max(3, Math.round(cells.length * Math.max(0, Math.min(100, density)) / 100));
+  if (spread) {
+    for (const p of cells) b.set(p, ball(colour));
+    const protectedCells = new Set(rootKeys), availableCells = new Map(cells.map(p => [key(p), p]));
+    // Keep a thin supported branch reaching as deep as this ball budget permits. At low density,
+    // the remaining balls should form sparse branches across the area rather than shorter solid rows.
+    if (count >= 6) {
+      const deepest = firstRow + Math.min(depth - 1, count - 4);
+      let support: Point[] | null = null;
+      for (let y = deepest; y >= firstRow && !support; y--) {
+        for (const start of rng.shuffle(cells.filter(p => p.y === y && !rootKeys.has(key(p))))) {
+          const queue = [start], parents = new Map<number, Point | null>([[key(start), null]]);
+          for (let i = 0; i < queue.length; i++) {
+            const p = queue[i];
+            if (p.y === firstRow || neighbours(p).some(p => rootKeys.has(key(p)))) {
+              const path: Point[] = [];
+              for (let at: Point | null = p; at; at = parents.get(key(at)) ?? null) path.push(at);
+              for (const part of path) for (const next of neighbours(part)) {
+                if (path.length >= 3) break;
+                if (availableCells.has(key(next)) && !rootKeys.has(key(next)) && !path.some(p => key(p) === key(next))) path.push(next);
+              }
+              if (path.length >= 3 && path.length + root.length <= count) { support = path; break; }
+            }
+            for (const next of neighbours(p)) {
+              if (!availableCells.has(key(next)) || rootKeys.has(key(next)) || parents.has(key(next))) continue;
+              parents.set(key(next), p); queue.push(next);
+            }
+          }
+          if (support) break;
+        }
+      }
+      for (const p of support ?? []) protectedCells.add(key(p));
+    }
+    const capacities = Array.from({ length: depth }, (_, row) => cells.filter(p => p.y === firstRow + row).length);
+    let remaining = cells.length;
+    while (remaining > count) {
+      const rowCounts = capacities.map((_, row) => cells.filter(p => p.y === firstRow + row && isBall(b.get(p))).length);
+      const candidates = rng.shuffle(cells.filter(p => !protectedCells.has(key(p)) && isBall(b.get(p))));
+      candidates.sort((a, c) => rowCounts[c.y - firstRow] / capacities[c.y - firstRow] - rowCounts[a.y - firstRow] / capacities[a.y - firstRow]);
+      let removed = false;
+      for (const p of candidates) {
+        b.set(p, EMPTY);
+        if (!b.grapesAfter(new Map()).length) { remaining--; removed = true; break; }
+        b.set(p, ball(colour));
+      }
+      if (!removed) break;
+    }
+  } else {
+    for (let n = 3; n < count; n++) {
+      const frontier = cells.filter(p => b.get(p) === EMPTY && neighbours(p).some(n => isBall(b.get(n))));
+      if (!frontier.length) break;
+      b.set(frontier[nextInt(rng, frontier.length)], ball(colour));
+    }
+  }
+  const occupied = cells.filter(p => isBall(b.get(p)));
+  const targetSize = Math.max(3, Math.round(averageGroupSize));
+  let groups: Point[][] = [];
+  let bestError = Infinity;
+  // Remove small connected chunks from the edges. Try several partitions to keep the requested
+  // average while keeping the three-ball opening group separate.
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const wantedGroups = Math.max(2, Math.round(occupied.length / targetSize));
+    const otherSize = (occupied.length - 3) / (wantedGroups - 1);
+    const chunkSize = Math.max(3, Math.round(otherSize + (attempt % 7) - 2));
+    const parts = [root.slice()], owner = new Map(root.map(p => [key(p), 0]));
+    const remaining = new Map(occupied.filter(p => !owner.has(key(p))).map(p => [key(p), p]));
+    while (remaining.size) {
+      const candidates = rng.shuffle([...remaining.values()]);
+      candidates.sort((a, c) => neighbours(a).filter(p => remaining.has(key(p))).length -
+        neighbours(c).filter(p => remaining.has(key(p))).length);
+      const queue = [candidates[0]], seen = new Set([key(candidates[0])]), part: Point[] = [];
+      for (let i = 0; i < queue.length && part.length < chunkSize; i++) {
+        const p = queue[i]; part.push(p);
+        for (const next of rng.shuffle(neighbours(p))) if (remaining.has(key(next)) && !seen.has(key(next))) {
+          queue.push(next); seen.add(key(next));
+        }
+      }
+      if (part.length < 3) {
+        const adjacent = part.flatMap(p => neighbours(p).map(p => owner.get(key(p))).filter((i): i is number => i !== undefined && i > 0));
+        const index = adjacent.sort((a, c) => parts[a].length - parts[c].length)[0];
+        if (index !== undefined) {
+          parts[index].push(...part);
+          for (const p of part) owner.set(key(p), index);
+        }
+      } else {
+        for (const p of part) owner.set(key(p), parts.length);
+        parts.push(part);
+      }
+      for (const p of part) remaining.delete(key(p));
+    }
+    const used = parts.reduce((sum, part) => sum + part.length, 0);
+    const error = (occupied.length - used) * 0.3 + Math.abs(used / parts.length - targetSize);
+    if (error < bestError) { groups = parts; bestError = error; }
+    if (error < 0.05) break;
+  }
+  const owner = new Map<number, number>();
+  const filledSlots = groups.reduce((sum, group) => sum + group.length, 0);
+  for (const p of occupied) b.set(p, EMPTY);
+  groups.forEach((group, i) => group.forEach(p => owner.set(key(p), i)));
+  const adjacent = groups.map((group, i) => new Set(group.flatMap(p => neighbours(p).map(p => owner.get(key(p)))
+    .filter((other): other is number => other !== undefined && other !== i))));
+  const assigned = groups.map(() => -1); assigned[0] = colour;
+  const palette = rng.shuffle(colours.slice());
+  const usage = new Map(colours.map(c => [c, c === colour ? root.length : 0]));
+  const colourGroups = (): boolean => {
+    let next = -1, score = -1;
+    for (let i = 0; i < groups.length; i++) if (assigned[i] < 0) {
+      const saturation = new Set([...adjacent[i]].map(i => assigned[i]).filter(c => c >= 0)).size;
+      const rank = saturation * 100 + adjacent[i].size;
+      if (rank > score) { next = i; score = rank; }
+    }
+    if (next < 0) return true;
+    const used = new Set([...adjacent[next]].map(i => assigned[i]));
+    const choices = palette.filter(c => !used.has(c)).sort((a, c) => usage.get(a)! - usage.get(c)!);
+    for (const c of choices) {
+      assigned[next] = c;
+      usage.set(c, usage.get(c)! + groups[next].length);
+      if (colourGroups()) return true;
+      usage.set(c, usage.get(c)! - groups[next].length);
+    }
+    assigned[next] = -1;
+    return false;
+  };
+  if (!colourGroups()) return null;
+  groups.forEach((group, i) => group.forEach(p => b.set(p, ball(assigned[i]))));
+  // Dense rows stay plain and do not accidentally merge into the deliberately sized groups.
+  for (let x = 0; x < b.width(firstRow - 1); x++) {
+    const p = { x, y: firstRow - 1 };
+    const used = new Set(neighbours(p).filter(p => p.y === firstRow && isBall(b.get(p))).map(p => colourOf(b.get(p))));
+    if (used.has(colourOf(b.get(p)))) {
+      const choices = [0, 1, 2, 3, 4].map(c => werewolf && c === ORANGE ? FURBALL : c).filter(c => !used.has(c));
+      b.set(p, ball(choices[nextInt(rng, choices.length)]));
+    }
+  }
+  const firstGroup = new Map(groups[0].map(p => [key(p), p]));
+  b.sparks = [trigger, ...rng.shuffle(groups.slice(1).map(group => group[nextInt(rng, group.length)]))];
+  for (const p of b.sparks) b.set(p, charged(b.get(p)));
+  const dropCount = Math.max(0, Math.trunc(dropOff));
+  const lowestGroupRow = Math.max(...groups.flat().map(p => p.y));
+  let furballs = 0;
+  for (let i = 0; i < dropCount; i++) {
+    const candidates: Array<{ cell: Point; choices: number[] }> = [];
+    for (let y = firstRow + 1; y < H - 1; y++) for (let x = 0; x < b.width(y); x++) {
+      const p = { x, y };
+      if (b.get(p) !== EMPTY || corridor.has(key(p))) continue;
+      const near = neighbours(p);
+      if (!near.some(p => isBall(b.get(p)))) continue;
+      const used = new Set(near.filter(p => owner.has(key(p))).map(p => colourOf(b.get(p))));
+      const choices = (werewolf ? [FURBALL, ...colours] : colours).filter(c => {
+        if (used.has(c)) return false;
+        const joined = new Set<number>();
+        for (const next of near) if (isBall(b.get(next)) && colourOf(b.get(next)) === c) {
+          for (const k of b.groupOf(next).keys()) joined.add(k);
+        }
+        return joined.size < (c === FURBALL ? 4 : 2);
+      });
+      if (choices.length) candidates.push({ cell: p, choices });
+    }
+    if (!candidates.length) return null;
+    // Hang drop-off below the chain, keeping the shooting corridor clear.
+    const wantFurball = werewolf && furballs < Math.ceil(dropCount * 0.85);
+    const preferred = candidates.filter(c => wantFurball ? c.choices.includes(FURBALL) : c.choices.some(c => c !== FURBALL));
+    const pool = preferred.length ? preferred : candidates;
+    const hanging = pool.filter(c => c.cell.y >= lowestGroupRow);
+    const row = hanging.length ? hanging : pool, chosen = row[nextInt(rng, row.length)];
+    const choices = wantFurball && chosen.choices.includes(FURBALL) ? [FURBALL]
+      : chosen.choices.filter(c => c !== FURBALL);
+    const c = choices.length ? choices[nextInt(rng, choices.length)] : chosen.choices[0];
+    if (c === FURBALL) furballs++;
+    b.set(chosen.cell, ball(c));
+  }
+  // Select the middle of the widest opening so it is practical to aim, not just a single ray.
+  let bestStart = lo, bestLength = 0, runStart = lo, runLength = 0;
+  for (let dir = lo; dir <= hi; dir++) {
+    const shot = b.shoot(b.path(fist, dir));
+    const hits = shot && neighbours(shot.rest).some(p => firstGroup.has(key(p)));
+    if (hits) {
+      if (!runLength) runStart = dir;
+      if (++runLength > bestLength) { bestStart = runStart; bestLength = runLength; }
+    } else runLength = 0;
+  }
+  if (!bestLength) return null;
+  const dir = bestStart + Math.floor((bestLength - 1) / 2);
+  const shot = b.shoot(b.path(fist, dir))!;
+  const check = b.clone();
+  check.set(shot.rest, ball(colour));
+  const clear = check.place(shot.rest);
+  if (!clear || clear.groups.length !== b.sparks.length || clear.grapes.length !== dropCount) return null;
+  restoreBoard(board, snapshotBoard(b));
+  return { fist, colour, dir, groups: b.sparks.length, averageGroupSize: filledSlots / groups.length, dropOff: dropCount, availableSlots: cells.length, filledSlots };
+}
+
 /** What undo puts back: the cells, which rows are long, the sparks and the shot count. */
 export interface BoardSnapshot {
   cells: number[];
@@ -144,6 +410,8 @@ export interface PunchSpec {
   /** 1: from the left wall, 0: from the right. */
   side: number;
   bruises: number;
+  sprinkle?: number;
+  allowExcessBruises?: boolean;
 }
 
 export interface PunchChoices {
@@ -172,8 +440,15 @@ export function rollPunch(rng: Random, choices: PunchChoices): PunchSpec {
   return { bludgeon, colours, length, width, side, bruises: clamp(choices.bruises, 0, Math.trunc((length * width) / 2)) };
 }
 
+/** A clear has three balls per group, plus any extra matched balls and drop-off. */
+export function punchFromClear(groups: number, extraBalls: number, dropOff: number, minutes: number) {
+  const count = Math.max(1, Math.trunc(groups));
+  return shaftSent(count, count * 3 + Math.max(0, Math.trunc(extraBalls)),
+    Math.max(0, Math.trunc(dropOff)), Math.max(0, minutes)).sent;
+}
+
 export function shaftOf(spec: PunchSpec): Shaft {
-  return { from: 0, id: 1, count: 0, side: spec.side, width: spec.width, height: spec.length, blacks: spec.bruises, next: 0 };
+  return { from: 0, id: 1, count: spec.sprinkle ?? 0, side: spec.side, width: spec.width, height: spec.length, blacks: spec.bruises, next: 0 };
 }
 
 const clamp = (value: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, Math.trunc(value)));
