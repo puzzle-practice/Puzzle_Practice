@@ -32,7 +32,7 @@ const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
 const CX = 225, CY = 300;
 const MODES = ['normal', 'ww-test'] as const;
 const RULE_OPTIONS = MODES.map(value => ({ value, label: modeLabel(value) }));
-const MODE_OPTIONS = [...RULE_OPTIONS, { value: 'create' as const, label: 'Freeplay' }];
+const MODE_OPTIONS = [...RULE_OPTIONS, { value: 'create' as const, label: 'Freeplay' }, { value: 'tutorial' as const, label: 'Tutorial' }];
 export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplayTime: rawReplayTime }) => {
   const pause = new SessionPause(rawTicks, rawReplayTime);
   const { ticks, setReplayTime } = pause;
@@ -442,6 +442,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const session = panel.session();
   // Freeplay keeps the last rule set chosen; the Rules setting changes it.
   session.select('Mode', MODE_OPTIONS, () => settings.create ? 'create' : settings.mode, value => {
+    // The Dennav tutorial is its own page; its Mode setting comes back here.
+    if (value === 'tutorial') { location.hash = '#/dennav-tutorial'; return; }
     settings.create = value === 'create'; if (value !== 'create') settings.mode = value; saveSettings(); selectInnerRing(settingsRings());
   }, { title: 'Freeplay lets you paint the stars, targets and incoming star' });
   session.button('Start', () => {

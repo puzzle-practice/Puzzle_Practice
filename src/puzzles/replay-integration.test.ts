@@ -2089,7 +2089,8 @@ describe('Navigation input during a move', () => {
     instance.dispose?.();
   });
 
-  it.each(['keyboard', 'mouse'] as const)('After a triple drops a %s move made while one plays out', async device => {
+  it('After a triple drops a keyboard move made while one plays out', async () => {
+    const device = 'keyboard' as const;
     const { AfterTriplePlay } = await import('./dennav-tutorial/after-triple');
     const move = vi.spyOn(AfterTriplePlay.prototype, 'move');
     const store = new Store('dennav-tutorial');
@@ -2114,6 +2115,36 @@ describe('Navigation input during a move', () => {
     expect(move).toHaveBeenCalledTimes(1);
     now += 10; instance.frame(turn);
     expect(move).toHaveBeenCalledTimes(2);
+    move.mockRestore();
+    instance.dispose?.();
+  });
+
+  it('After a triple turns a ring by dragging it, as in Dennav', async () => {
+    const { AfterTriplePlay } = await import('./dennav-tutorial/after-triple');
+    const move = vi.spyOn(AfterTriplePlay.prototype, 'move');
+    const store = new Store('dennav-tutorial');
+    store.set('lesson', 'after-triple');
+    store.set('mode', 'aftertriple');
+    const { panel: basePanel } = panelHarness();
+    const syncs: Array<() => void> = [];
+    const panel = new Proxy({}, { get: (_target, method) => method === 'addSync' ? (sync: () => void) => { syncs.push(sync); } : (basePanel as any)[method] });
+    let now = 0;
+    vi.stubGlobal('document', anyNode());
+    const listeners = new Map<string, (event: unknown) => void>();
+    const canvas = { after() {}, insertAdjacentElement() {}, parentElement: anyNode(), focus() {}, hasPointerCapture: () => false, setPointerCapture() {}, releasePointerCapture() {},
+      addEventListener(type: string, handler: (event: unknown) => void) { listeners.set(type, handler); },
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 600 }), width: 450, height: 600, style: {} };
+    const screen = new Proxy({ ctx: canvasContext(), canvas, width: 450, height: 600 }, { get: (target, key) => key === 'ctx' || key === 'canvas' || key === 'width' || key === 'height' ? target[key] : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./dennav-tutorial/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1], drain() {} }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    for (let i = 0; i < 200; i++) { now += 50; instance.frame([]); }
+    const pointer = (type: string, x: number, y: number) => listeners.get(type)!({ button: 0, isPrimary: true, pointerId: 1, pointerType: 'mouse', clientX: x, clientY: y, preventDefault() {} });
+    // Press on ring 1 (the innermost) straight above the centre, then drag a sixth of the way round clockwise.
+    pointer('pointerdown', 225, 300 - 55);
+    pointer('pointermove', 225 + 55 * Math.cos(-Math.PI / 6), 300 + 55 * Math.sin(-Math.PI / 6));
+    pointer('pointerup', 225 + 55 * Math.cos(-Math.PI / 6), 300 + 55 * Math.sin(-Math.PI / 6));
+    for (let i = 0; i < 3; i++) { syncs.forEach(sync => sync()); now += 10; instance.frame([]); }
+    expect(move).toHaveBeenCalledTimes(1);
     move.mockRestore();
     instance.dispose?.();
   });

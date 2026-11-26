@@ -8,7 +8,9 @@ import { Random } from '../../core/random';
 import { keyFor, keyLabel, keyMatches } from '../../core/controls';
 import { copyText } from '../../core/clipboard';
 import type { PuzzleFactory } from '../../core/puzzle';
-import { NavigationGame, type Scene } from '../navigation/game';
+import { NavigationGame, DEFAULT_SETTINGS, modeLabel, readSettings, type Scene } from '../navigation/game';
+import { mobileControls } from '../navigation/mobile-controls';
+import { Store } from '../../core/storage';
 import { drawTarget, targetAppearance } from '../navigation/appearance';
 import { COLOUR_NAMES, OCTANT_NAMES, PAINT_KEYS, WILD } from '../navigation/create';
 import { EMPTY, type Run, type Target } from '../navigation/logic';
@@ -117,6 +119,20 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   const sounds = new SoundBank(soundUrls);
   window.addEventListener('pointerdown', unlockAudio);
   const ctx = screen.ctx;
+  // The tutorial is a mode of Navigation: picking another mode goes back there with it chosen.
+  const navigationStore = new Store('navigation');
+  const NAV_MODES = [
+    { value: 'normal', label: modeLabel('normal') }, { value: 'ww-test', label: modeLabel('ww-test') },
+    { value: 'create', label: 'Freeplay' }, { value: 'tutorial', label: 'Tutorial' },
+  ] as const;
+  panel.settings.group().select('Mode', NAV_MODES, () => 'tutorial', (value) => {
+    if (value === 'tutorial') return;
+    const settings = readSettings(navigationStore.get('settings', DEFAULT_SETTINGS)) ?? { ...DEFAULT_SETTINGS };
+    settings.create = value === 'create';
+    if (value !== 'create') settings.mode = value;
+    navigationStore.set('settings', settings);
+    location.hash = '#/navigation';
+  });
   const matchWildColour = targetAppearance(panel);
   const rng = new Random();
   let lessonIndex = Math.max(0, TOPICS.findIndex((l) => l.id === store.get('lesson', TOPICS[0].id)));
@@ -169,7 +185,8 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   /** Practice in the topics without a flow of their own: build the whole combo on a fresh board. */
   const fromScratchPractice = () => mode === 'practise';
   const isTraining = () => isCascade() || fromScratchPractice();
-  const isSlow = () => mode !== 'donkey' && mode !== 'aftertriple' && !isTraining() && (replaying || (slow && mode !== 'build' && mode !== 'finish'));
+  // Normal Dennav speed whenever the player moves the rings; Slow is only for watching.
+  const isSlow = () => mode !== 'donkey' && mode !== 'aftertriple' && !isTraining() && (replaying || (slow && !playing()));
   const speed = () => (isSlow() ? 2 : 1);
   const busy = () => scenes.length > 0;
   /** Modes where the player moves the rings. */
@@ -2032,6 +2049,29 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   }
   renderText();
 
+
+  // Rings are selected and turned by pointer exactly as in Dennav: a click selects, a drag turns.
+  const pointerCommands: string[] = [];
+  let pointerFrame = 0;
+  const disposePointer = mobileControls(screen, panel, navigationStore, () => ({
+    active: playing() && !(mode === 'donkey' && donkeyStopped()),
+    settling: busy(), painting: false, rings: RINGS, selected, board: game, frame: pointerFrame,
+  }), (command) => pointerCommands.push(command));
+  function pointerCommand(command: string): void {
+    if (!playing() || (mode === 'donkey' && donkeyStopped())) return;
+    if (command === 'ccw' || command === 'cw') practiceMove({ kind: 'rotate', ring: selected, clockwise: command === 'cw' });
+    else if (command === 'drop') practiceMove({ kind: 'drop' });
+    else if (command === 'ringOut') selected = Math.max(0, selected - 1);
+    else if (command === 'ringIn') selected = Math.min(RINGS - 1, selected + 1);
+    else if (command.startsWith('ring:') || command.startsWith('turn:')) {
+      const [, ring, direction] = command.split(':');
+      const number = Number(ring);
+      if (!Number.isInteger(number) || number < 1 || number > RINGS) return;
+      selected = RINGS - number;
+      if (command.startsWith('turn:')) practiceMove({ kind: 'rotate', ring: selected, clockwise: direction === 'cw' });
+    }
+  }
+
   const lessonGroup = panel.group('Tutorial');
   lessonGroup.select('Topic', TOPICS.map((l, value) => ({ value, label: `${value + 1}. ${l.title}` })), () => lessonIndex, setLesson);
   lessonGroup.select('Lesson', () => modesFor(lesson().id), () => mode, setMode);
@@ -2098,7 +2138,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
       keys.textContent = building
         ? `${[1, 2, 3, 4].map((n) => keyLabel(keyFor('navigation', `selectRing${n}`, String(n)))).join('/')} Rings · ${keyLabel(keyFor('navigation', 'ccw', 'arrowleft'))}/${keyLabel(keyFor('navigation', 'cw', 'arrowright'))} Turn · ${keyLabel(keyFor('navigation', 'drop', 'space'))} Drop${submit ? ' · Enter Submit' : ''}`
         : PLAN_PAINT_KEYS.map(({ id, defaultKey, colour }) => `${keyLabel(keyFor('navigation', id, defaultKey))} ${colour === EMPTY ? 'Erase' : COLOUR_NAMES[colour]}`).join(' · ');
-      pointer.textContent = building ? 'Click to select, then turn; right-click turns left. After a fail: Space retries, Enter skips.' : 'Hold a key and move to paint. Click/drag also paints; right-click erases.';
+      pointer.textContent = building ? 'Click a ring to select it; drag it to turn. After a fail: Space retries, Enter skips.' : 'Hold a key and move to paint. Click/drag also paints; right-click erases.';
       controlsHelp.replaceChildren(keys, pointer);
     }
     screen.canvas.focus({ preventScroll: true });
@@ -2134,7 +2174,6 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   scratch.append(rowBreak());
   scratch.button('Replay last move slowly', replayLast, { disabled: () => !lastMove, title: 'Play your last move again, slowed down, to see what it set off' });
   scratch.append(rowBreak());
-  scratch.toggle('Slow', () => slow, (on) => { slow = on; store.set('slow', on); });
 
   const ringGroup = panel.group('Build Ring 1', { hidden: () => mode !== 'donkeyring' });
   ringGroup.button('New board', newDonkeyRing)
@@ -2288,7 +2327,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   }
   return {
     dispose() {
-      scrub.stop();
+      scrub.stop(); disposePointer();
       window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('pointerup', stopScrub);
       window.removeEventListener('pointercancel', stopScrub);
@@ -2297,6 +2336,8 @@ export default (async ({ screen, input, panel, store, ticks }) => {
       sounds.dispose(); planDetails.remove();
     },
     frame(events) {
+      pointerFrame++;
+      for (const command of pointerCommands.splice(0)) pointerCommand(command);
       for (const event of events) {
         if (event.type === 'mouseup') scrub.stop();
         if (mode === 'plan') {
@@ -2385,10 +2426,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
           if (!cell) continue;
           if (mode === 'spot' && event.button === 1) clickStar(cell.ring * 8 + cell.octant);
           else if (mode === 'steps' && event.button === 1) pickHorizontal(cell.ring * 8 + cell.octant);
-          else if (playing()) {
-            if (selected !== cell.ring) selected = cell.ring;
-            else practiceMove({ kind: 'rotate', ring: selected, clockwise: event.button === 1 });
-          }
+          // Selecting and turning rings by pointer goes through Navigation's controls (pointerControls).
         }
       }
       if (mode === 'plan') {

@@ -20,6 +20,8 @@ export interface PuzzleMeta {
   order?: number;
   /** Thumbnail URL for the landing page (import it with `?url`). */
   thumbnail?: string;
+  /** Left off the landing page: reached from another puzzle, as the Dennav tutorial is from Navigation's Mode. */
+  hidden?: boolean;
 }
 
 export interface PuzzleContext {
