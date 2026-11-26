@@ -4,7 +4,7 @@ import { RumbleAudio } from './audio';
 import type { Shaft } from './board';
 import { AUTO_FIRE_MS, CHARGE_MS, Fighter, type SoundName } from './fighter';
 import { Glove } from './gloves';
-import { isCharged } from './pieces';
+import { ball, EMPTY, isCharged } from './pieces';
 
 function setup() {
   const heard: Array<{ name: SoundName; at: number }> = [];
@@ -27,6 +27,28 @@ const attack = (over: Partial<Shaft> = {}): Shaft => ({
 });
 
 describe('Rumble fire timing', () => {
+  it.each([false, true])('drops edited floating balls after a non-matching shot only under the new Freeplay rule (%s)', enabled => {
+    const { f, heard } = setup();
+    if (enabled) f.sandbox.dropFloating = true;
+    const anchor = { x: 0, y: 0 }, loose = { x: 8, y: 5 };
+    f.board.set(anchor, ball(1));
+    f.board.set(loose, ball(2));
+    f.hand[0] = ball(0);
+    const landed = shoot(f, 0);
+    f.update(landed);
+    expect(f.board.get(anchor)).toBe(ball(1));
+    expect(f.board.get(loose)).toBe(enabled ? EMPTY : ball(2));
+    expect(f.stats.popped).toBe(0);
+    expect(f.stats.shots).toBe(1);
+    if (enabled) {
+      expect(f.stats.dropped).toBeGreaterThan(0);
+      expect(f.grapes.every(grape => grape.start === landed)).toBe(true);
+      expect(heard.some(sound => sound.name === 'grape_fall' && sound.at === landed)).toBe(true);
+      f.update(landed + 1000);
+      expect(f.canFire).toBe(true);
+    } else expect(heard.some(sound => sound.name === 'grape_fall')).toBe(false);
+  });
+
   it('ignores a complete click during flight', () => {
     const { f } = setup();
     const landed = shoot(f, 0);

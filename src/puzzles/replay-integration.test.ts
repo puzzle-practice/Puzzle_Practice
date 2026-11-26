@@ -100,6 +100,7 @@ function panelHarness(syncTableActions = false) {
   } });
   const panel = new Proxy({}, { get: (_target, method) => {
     if (method === 'group') return (title = '') => group('Play', title);
+    if (method === 'subtabs') return (_label: string, names: string[]) => names.map(() => ({ group: (title: string) => group('Play', title) }));
     if (method === 'settings' || method === 'seedSettings') return group('Settings');
     if (method === 'controlSettings') return group('Controls');
     if (method === 'tab') return (page: string) => group(page);
@@ -174,7 +175,7 @@ describe('Rumble inputs', () => {
     f.board.cells.fill(0);
     f.board.sparks = [];
     const frame = (at: number, events: InputEvent[] = []) => { now = at; instance.frame(events); };
-    return { instance, f, frame, draws, input, paletteClicks, ...harness };
+    return { instance, f, frame, draws, input, paletteClicks, current: () => (updates.mock.contexts.at(-1)! as RumbleMatch).player, ...harness };
   }
 
   it.each([false, true])('paints charged balls with Control using keys and palette strokes (werewolf=%s)', async werewolf => {
@@ -209,6 +210,22 @@ describe('Rumble inputs', () => {
     expect(b.get(cell(second))).toBe(EMPTY);
     h.instance.dispose();
     expect(h.input.allowControlKey).toBeUndefined();
+  });
+
+  it('switches Werewolf on the same Freeplay board without ringing the match-start bell', async () => {
+    const h = await setup();
+    expect(h.f.sandbox.dropFloating).toBe(true);
+    h.f.board.set({ x: 0, y: 0 }, ball(ORANGE));
+    const starts = captured.sounds.filter(sound => sound === 'game_start').length;
+    expect(starts).toBe(1);
+    h.toggles.get('Play:Board:Werewolf (orange is furball)')!(true);
+    h.frame(200);
+    expect(h.current().board.get({ x: 0, y: 0 })).toBe(ball(FURBALL));
+    h.toggles.get('Play:Board:Werewolf (orange is furball)')!(false);
+    h.frame(300);
+    expect(h.current().board.get({ x: 0, y: 0 })).toBe(ball(ORANGE));
+    expect(captured.sounds.filter(sound => sound === 'game_start')).toHaveLength(starts);
+    h.instance.dispose();
   });
 
   it('draws a full board before the punch reaches balls it will destroy', async () => {

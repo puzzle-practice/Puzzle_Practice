@@ -148,7 +148,7 @@ export class Fighter {
    * Freeplay mode's sandbox rules: an endless board isn't knocked out by its bottom row, without the
    * shot timer nothing warns or fires for you, and without drops the board never moves down.
    */
-  readonly sandbox = { endless: false, shotTimer: true, drops: true };
+  readonly sandbox: { endless: boolean; shotTimer: boolean; drops: boolean; dropFloating?: boolean } = { endless: false, shotTimer: true, drops: true };
   readonly stats: FighterStats = {
     shots: 0, popped: 0, dropped: 0, punchSquares: 0, sprinkleSent: 0, punches: 0, biggestPunch: 0,
     bestChain: 0, sparks: 0, received: 0, largestReceived: 0, drops: 0,
@@ -369,12 +369,19 @@ export class Fighter {
     this.flight = null;
     this.board.set(f.rest, f.piece);
     const sparksBefore = this.board.sparks.length;
-    const clear = this.board.place(f.rest);
+    let clear = this.board.place(f.rest);
     if (!clear) {
       if (this.board.sparks.length > sparksBefore) this.stats.sparks++;
       this.play(isCharged(this.board.get(f.rest)) ? 'ball_land_charged' : 'ball_land', t);
-      this.afterShot(t);
-      return;
+      if (this.sandbox.dropFloating) {
+        const grapes = this.board.grapesAfter(new Map());
+        if (grapes.length) clear = { popped: [], groups: [], grapes, lightened: [],
+          pieces: new Map(grapes.map(cell => [cell.y * 10 + cell.x, this.board.get(cell)])) };
+      }
+      if (!clear) {
+        this.afterShot(t);
+        return;
+      }
     }
     const groups = this.board.groupCount(clear);
     const sent = this.board.sent(groups, clear.popped.length, clear.grapes.length, this.hooks.minutes?.(t) ?? 0);
@@ -413,7 +420,7 @@ export class Fighter {
       this.later(at, sound);
     });
     // After the last group, what's left hanging falls off the bottom.
-    const fallAt = t + (n - 1) * POP_MS;
+    const fallAt = t + Math.max(0, n - 1) * POP_MS;
     let end = fallAt + EXPLODE_MS;
     for (const cell of clear.grapes) {
       const p = this.board.pixel(cell);

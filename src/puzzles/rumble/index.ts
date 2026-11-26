@@ -195,7 +195,6 @@ interface CreateSettings {
   randomSize: boolean;
   side: PunchChoices['side'];
   bruises: number;
-  showNumbers: boolean;
   /** Shows the next punch landed on the board. */
   previewOnBoard: boolean;
   /** The game's 5 second shot timer. Freeplay starts without it, as Distilling's does without its burn timer. */
@@ -206,7 +205,7 @@ interface CreateSettings {
 
 const CREATE_DEFAULTS: CreateSettings = {
   rows: 8, density: 85, bludgeon: 0, colours: 0, randomColours: false, length: 4, width: 6, randomSize: false,
-  side: 'random', bruises: 0, showNumbers: false, previewOnBoard: false, shotTimer: false, drops: true,
+  side: 'random', bruises: 0, previewOnBoard: false, shotTimer: false, drops: true,
 };
 
 /** Whether a replay's Freeplay settings have every value, each of the right type. */
@@ -322,7 +321,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   const seedMode = seedControls(panel, store, () => running || !!replays?.isPlaying);
 
-  function start(seed?: number, as: Mode = mode): void {
+  let simulationVersion = 6;
+
+  function start(seed?: number, as: Mode = mode, announce = true): void {
     rumbleAudio.sync(null);
     paintedGloves.clear();
     pause.resume();
@@ -356,7 +357,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     startedAt = now;
     aim = as === 'Aim trainer' ? new AimTrainer(match.player, s, now, play, aimDifficulty) : null;
     if (as === 'Create') startCreate(s);
-    play('game_start');
+    if (announce) play('game_start');
   }
 
   function outcome(): string {
@@ -483,6 +484,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     createRng.seed(seed);
     const f = match!.player;
     f.sandbox.endless = true;
+    if (simulationVersion >= 6) f.sandbox.dropFloating = true;
     f.sandbox.shotTimer = create.shotTimer;
     f.sandbox.drops = create.drops;
     const carried = carry ? structuredClone(carry) : null;
@@ -603,7 +605,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     for (const u of undo) convertSnapshot(u, on);
     if (strokeStart) convertSnapshot(strokeStart, on);
     carry = snapshot;
-    start(undefined, 'Create');
+    start(undefined, 'Create', false);
   }
 
   function land(): void {
@@ -743,11 +745,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     const kind = VIEWER_KINDS[viewer.kind];
     const slots = furballSlots(type);
     return [
-      `1. ${gloveName(type)} (${viewer.bludgeon + 1}/${SIM_BLUDGEONS.length})`,
-      `2. ${kind.label}${kind.bruised ? ` (${viewerBruises(kind.length, kind.width)} bruises)` : ''} (${viewer.kind + 1}/${VIEWER_KINDS.length})`,
+      `Bludgeon: ${gloveName(type)} (${viewer.bludgeon + 1}/${SIM_BLUDGEONS.length})`,
+      `Punch: ${kind.label}${kind.bruised ? ` (${viewerBruises(kind.length, kind.width)} bruises)` : ''} (${viewer.kind + 1}/${VIEWER_KINDS.length})`,
       slots > 1
-        ? `3. Furball in colour slot ${viewer.slot + 1} (${viewer.slot + 1}/${slots}), colours ${furballColours(type, viewer.slot)}`
-        : '3. Fixed colours (1/1)',
+        ? `Furball in colour slot ${viewer.slot + 1} (${viewer.slot + 1}/${slots}), colours ${furballColours(type, viewer.slot)}`
+        : 'Fixed colours (1/1)',
     ];
   }
 
@@ -1102,7 +1104,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         const at = shown.pixel(p);
         const nudge = shaking ? SHAKE[(shakeFrame + (x + 1) * y) % SHAKE.length] : SHAKE[0];
         drawBall(piece, at.x + nudge.x, at.y + nudge.y + slide, now, view && !view.landed.has(cellKey(p)) ? 0.4 : 1);
-        if (creating() && create.showNumbers) colourNumber(piece, at.x + nudge.x, at.y + nudge.y + slide);
       }
     }
     if (creating()) drawPainting();
@@ -1173,26 +1174,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
         if (piece === EMPTY || piece === BLOCKED) continue;
         const at = b.pixel({ x, y });
         drawBall(piece, at.x, at.y, now);
-        if (create.showNumbers) colourNumber(piece, at.x, at.y);
       }
     }
-  }
-
-  /** The colour's paint key over a ball: 1 red, 2 yellow, 3 orange or furball, 4 cyan, 5 blue. */
-  function colourNumber(piece: number, x: number, y: number): void {
-    if (!isBall(piece)) return;
-    const colour = colourOf(piece);
-    const digit = String((colour === FURBALL ? ORANGE : colour) + 1);
-    ctx.save();
-    ctx.font = 'bold 13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = '#000';
-    ctx.strokeText(digit, x + BALL / 2, y + BALL / 2 + 1);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(digit, x + BALL / 2, y + BALL / 2 + 1);
-    ctx.restore();
   }
 
   /** While painting, a ring marks the cell under the mouse. */
@@ -1711,8 +1694,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     drawPauseLabel(ctx, text, WIDTH / 2, y, WIDTH, BOARD_FONT_SMALL);
   }
 
-  pause.install(panel, () => running);
-
   // ---- Panel ----
 
   panel.clock(() => mode === 'Aim trainer'
@@ -1751,6 +1732,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     else start();
   }, {
     variant: 'primary', label: () => (replays?.isPlaying ? 'Start' : running ? 'Stop' : finished ? 'Rumble again' : 'Start'),
+  });
+  session.button('Pause', () => { if (running && !replays.isPlaying) pause.toggle(); }, {
+    label: () => pause.paused ? 'Resume' : 'Pause', disabled: () => !running || replays.isPlaying,
   });
   session.button('View stats', () => { showResults = !showResults; }, {
     hidden: () => !finished || (!match?.result && !aiming()), label: () => (showResults ? 'View board' : 'View stats'),
@@ -1839,7 +1823,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const createOff = () => !editable();
   /** Freeplay's rules wait while a replay plays: it makes its own changes. */
   const watching = () => !!replays?.isPlaying;
-  const boardGroup = panel.group('Board', { hidden: createHidden });
+  const [boardTab, punchTab, viewerTab] = panel.subtabs('Freeplay options', ['Board', 'Punch', 'Viewer'], {
+    hidden: createHidden, onSelect: (index) => { if (index !== 2 && viewer.on) freeplay('fp-viewer:0'); },
+  });
+  const boardGroup = boardTab.group('Board');
   let pasteNote = '';
   const copyBoard = () => { const b = createBoard(); if (b) copyText(boardCode(b), 'Copy this board:'); };
   boardGroup.button('Copy', copyBoard, { disabled: () => !running || !creating(), title: 'Copy the board as text, to paste back later or share' });
@@ -1900,9 +1887,6 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     // While a replay plays, the change closes it first; in the player's own Freeplay it applies at once.
     .toggle('Werewolf (orange is furball)', () => settings.werewolf, (on) => { if (replays?.isPlaying) replays.stop(); setWerewolf(on); }, {
       title: 'Werewolf rumbling: orange balls are brown furballs, on the board, in your fists and in punches. Freeplay starts again on the same board, its oranges swapped.' })
-    .toggle('Show colour numbers', () => create.showNumbers, (on) => { create.showNumbers = on; saveCreate(); })
-    .toggle('Preview on board (V)', () => create.previewOnBoard, (on) => { create.previewOnBoard = on; saveCreate(); }, {
-      title: 'Shows the next punch landed on the board, its balls bright and the rest dimmed. Punch! still lands it for real.' })
     .number('Starting rows', () => settings.startRows, (v) => { settings.startRows = Math.round(v); save(); }, { min: 0, max: 12, step: 1,
       stopsSession: true, title: 'Rows of balls on a fight’s starting board: Freeplay starts on one, and Generate deals one.' })
     .number('Rows', () => create.rows, (v) => { create.rows = Math.round(v); recordRules(); }, { min: 0, max: MAX_ROWS, step: 1, disabled: watching })
@@ -1947,7 +1931,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     c.fillText('Sprinkle, 2 layers', 0, 56);
     for (let j = 0; j < 2; j++) for (let i = 0; i < 9; i++) icon(g.piece(i, j, false), i * SPRINKLE_BALL + (j * SPRINKLE_BALL) / 2, 62 + j * SPRINKLE_BALL * 0.8);
   });
-  panel.group('Punch', { hidden: createHidden })
+  punchTab.group('Punch')
+    .toggle('Preview on board (V)', () => create.previewOnBoard, (on) => { create.previewOnBoard = on; saveCreate(); }, {
+      title: 'Shows the next punch landed on the board, its balls bright and the rest dimmed. Punch! still lands it for real.' })
     .hint(() => {
       const view = creating() ? preview(match!.player.board) : null;
       return `Next: ${describe(spec)}, colours ${spec.colours}${spec.bruises ? `, ${spec.bruises} bruises` : ''}.${view?.destroyed ? ` Destroys ${view.destroyed} ball${view.destroyed === 1 ? '' : 's'}.` : ''}`;
@@ -1959,8 +1945,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       title: 'The bludgeon colour number (0-255): it reorders the five colours, and odd numbers mirror the pattern. Bare fists and the hook ignore it.' })
     .hint(() => (fixedColours() ? `${gloveName(spec.bludgeon)} always use the same colours.` : `Colour order: ${colourMapping(spec.colours).map((c) => COLOUR_NAMES[c === ORANGE && settings.werewolf ? FURBALL : c]).join(', ')}${spec.colours % 2 ? ', mirrored' : ''}`))
     .toggle('Random size', () => create.randomSize, (on) => { create.randomSize = on; rechoose(); }, { disabled: watching })
-    .number('Length', () => create.length, (v) => { create.length = Math.round(v); rechoose(); }, { disabled: watching, min: 1, max: MAX_LENGTH, hidden: () => create.randomSize })
-    .number('Width', () => create.width, (v) => { create.width = Math.round(v); rechoose(); }, { disabled: watching, min: 1, max: MAX_WIDTH, hidden: () => create.randomSize })
+    .number('Length', () => create.length, (v) => { create.length = Math.round(v); rechoose(); }, { disabled: watching, min: 1, max: MAX_LENGTH, stepper: true, hidden: () => create.randomSize })
+    .number('Width', () => create.width, (v) => { create.width = Math.round(v); rechoose(); }, { disabled: watching, min: 1, max: MAX_WIDTH, stepper: true, hidden: () => create.randomSize })
     .select('Comes from', sideOptions, () => create.side, (v) => { create.side = v; rechoose(); }, { disabled: watching })
     .number('Bruises', () => create.bruises, (v) => { create.bruises = Math.round(v); rechoose(); }, { disabled: watching,
       min: 0, max: Math.trunc((MAX_LENGTH * MAX_WIDTH) / 2), title: 'Bruises scattered at random through the punch (at most half of it).' })
@@ -1968,29 +1954,21 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     .button('Roll again (R)', () => freeplay('fp-roll'), { disabled: watching, title: 'Re-rolls whatever is random, and the wall when it is random.' })
     .append(sprinkleCanvas);
 
-  const viewerGroup = panel.group('Bludgeon viewer (werewolf)', { hidden: createHidden });
+  const viewerGroup = viewerTab.group('Bludgeon viewer (werewolf)');
   const viewerHidden = () => !viewer.on;
   viewerGroup.toggle('Show viewer', () => viewer.on, (on) => freeplay(`fp-viewer:${on ? 1 : 0}`), {
     disabled: () => !creating() || watching(),
     title: 'Werewolf punches on an empty board, over your own: step through each bludgeon, punch type and furball colour slot. Left/right, up/down and A/S step them while it shows; R reshuffles the bruises.' });
-  viewerGroup.hint(() => viewerLines()[0], { hidden: viewerHidden })
-    .button('◀ Bludgeon', () => stepBludgeon(-1), { hidden: viewerHidden }).button('Bludgeon ▶', () => stepBludgeon(1), { hidden: viewerHidden })
-    .hint(() => viewerLines()[1], { hidden: viewerHidden })
-    .button('◀ Punch', () => stepKind(-1), { hidden: viewerHidden }).button('Punch ▶', () => stepKind(1), { hidden: viewerHidden })
-    .hint(() => viewerLines()[2], { hidden: viewerHidden })
-    .button('◀ Furball', () => stepSlot(-1), { hidden: viewerHidden }).button('Furball ▶', () => stepSlot(1), { hidden: viewerHidden })
-    .button('Reshuffle bruises (R)', reshuffle, { hidden: () => !viewer.on || !VIEWER_KINDS[viewer.kind].bruised });
-
-  panel.group('Freeplay stats', { hidden: createHidden }).stats(['', ''], () => {
-    const b = createBoard();
-    return [
-      ['Balls on board', b ? String(ballCount(b)) : '—'],
-      ['Lowest row', b ? String(b.lowest() + 1) : '—'],
-      ['Shots', creating() ? String(match!.player.stats.shots) : '0'],
-      ['Punches landed', String(punches)],
-      ['Balls destroyed', String(destroyed)],
-    ];
-  });
+  viewerGroup.button('Reshuffle bruises (R)', reshuffle, { hidden: () => !viewer.on || !VIEWER_KINDS[viewer.kind].bruised });
+  viewerGroup.note(() => viewerLines()[0], { hidden: viewerHidden })
+    .button('Previous', () => stepBludgeon(-1), { hidden: viewerHidden, title: 'Previous bludgeon' })
+    .button('Next', () => stepBludgeon(1), { hidden: viewerHidden, title: 'Next bludgeon' })
+    .note(() => viewerLines()[1], { hidden: viewerHidden })
+    .button('Previous', () => stepKind(-1), { hidden: viewerHidden, title: 'Previous punch type' })
+    .button('Next', () => stepKind(1), { hidden: viewerHidden, title: 'Next punch type' })
+    .note(() => viewerLines()[2], { hidden: viewerHidden })
+    .button('Previous', () => stepSlot(-1), { hidden: viewerHidden, title: 'Previous furball slot' })
+    .button('Next', () => stepSlot(1), { hidden: viewerHidden, title: 'Next furball slot' });
 
   const replayAction = {
     available: (game: GameRecord) => typeof game.replayAt === 'number' && (replays?.hasPlayableAt(game.replayAt, typeof game.replayId === 'string' ? game.replayId : undefined) ?? false),
@@ -2138,7 +2116,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 4,
-    simulatorVersion: 5,
+    simulatorVersion: 6,
     // Old fights selected attacks and handled held buttons differently. Aim drills are unchanged.
     migrate: (version, value) => (validSettings(value) && (version === 4 || (version === 3 && !!value.aimTrainer)) ? value : null),
   };
@@ -2169,9 +2147,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     delete settings.freeplay;
     const seed = (tape.seed as { seed?: unknown })?.seed;
     if (typeof seed !== 'number') throw new Error('Invalid Rumble replay seed');
+    simulationVersion = tape.simulatorVersion ?? 1;
     start(seed, mode);
   }, () => {
     if (running) stop();
+    simulationVersion = 6;
     if (savedSettings) {
       settings = savedSettings;
       savedSettings = null;

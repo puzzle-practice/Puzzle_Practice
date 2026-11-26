@@ -67,6 +67,8 @@ export interface NumberOptions extends ControlOptions {
   min?: number;
   max?: number;
   step?: number;
+  /** Large decrement and increment buttons around the value. */
+  stepper?: boolean;
 }
 export interface RangeOptions extends NumberOptions {
   maxValue?: Get<number>;
@@ -191,6 +193,8 @@ export class Page {
     return new Group(this.panel, card);
   }
 }
+
+let subtabId = 0;
 
 export class Panel {
   private readonly syncers: Array<() => void> = [];
@@ -396,6 +400,57 @@ export class Panel {
   session(title?: string, options: GroupOptions = {}): Group {
     const actions = this.sessionPage.group(undefined, options);
     return new Group(this, actions.element, this.settings.group(title, options));
+  }
+
+  /** Related Play controls, with one page visible at a time. */
+  subtabs(label: string, names: readonly string[], options: ControlOptions & { onSelect?: (index: number) => void } = {}): Page[] {
+    const container = el('section', 'panel-page');
+    const tabs = el('nav', 'panel-tabs');
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', label);
+    container.append(tabs);
+    this.play.element.append(container);
+    this.watch(container, options);
+    const prefix = `panel-subtabs-${++subtabId}`;
+    const pages = names.map((_, i) => {
+      const element = el('div', 'panel-page');
+      element.id = `${prefix}-page-${i}`;
+      element.setAttribute('role', 'tabpanel');
+      element.setAttribute('aria-labelledby', `${prefix}-tab-${i}`);
+      container.append(element);
+      return new Page(this, element);
+    });
+    const select = (index: number) => {
+      pages.forEach((page, i) => { page.element.hidden = i !== index; });
+      buttons.forEach((button, i) => {
+        button.classList.toggle('is-active', i === index);
+        button.setAttribute('aria-selected', String(i === index));
+        button.tabIndex = i === index ? 0 : -1;
+      });
+      options.onSelect?.(index);
+    };
+    const buttons = names.map((name, i) => {
+      const button = el('button', 'panel-tab', name);
+      button.type = 'button';
+      button.id = `${prefix}-tab-${i}`;
+      button.setAttribute('role', 'tab');
+      button.setAttribute('aria-controls', pages[i].element.id);
+      button.addEventListener('click', () => { select(i); this.used(); });
+      button.addEventListener('keydown', (event) => {
+        const index = event.key === 'ArrowRight' ? (i + 1) % names.length
+          : event.key === 'ArrowLeft' ? (i + names.length - 1) % names.length
+          : event.key === 'Home' ? 0 : event.key === 'End' ? names.length - 1 : -1;
+        if (index < 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        select(index);
+        buttons[index].focus();
+      });
+      tabs.append(button);
+      return button;
+    });
+    select(0);
+    return pages;
   }
 
   /** The main score, on the Play tab. */
@@ -646,7 +701,30 @@ export class Group {
       this.panel.used();
     });
     enterCommits(input);
-    this.field(label, input, opts, input);
+    if (opts.stepper) {
+      const control = el('div', 'panel-stepper');
+      input.setAttribute('aria-label', label);
+      const stepButton = (direction: number) => {
+        const button = el('button', 'panel-button', direction < 0 ? '\u2212' : '+');
+        button.type = 'button';
+        button.setAttribute('aria-label', `${direction < 0 ? 'Decrease' : 'Increase'} ${label.toLowerCase()}`);
+        button.addEventListener('click', () => {
+          this.panel.beforeChange(this.element, false, opts.stopsSession);
+          const value = get() + direction * (opts.step ?? 1);
+          set(Math.max(opts.min ?? -Infinity, Math.min(opts.max ?? Infinity, value)));
+          input.value = String(get());
+          this.panel.used();
+        });
+        this.panel.watch(button, { disabled: () => !!opts.disabled?.() ||
+          (direction < 0 ? get() <= (opts.min ?? -Infinity) : get() >= (opts.max ?? Infinity)) }, button);
+        return button;
+      };
+      control.append(stepButton(-1), input, stepButton(1));
+      const row = el('div', 'panel-field is-stepper');
+      row.append(el('span', 'panel-label', label), control);
+      this.element.append(row);
+      this.panel.watch(row, opts, input);
+    } else this.field(label, input, opts, input);
     this.panel.addSync(() => {
       const value = String(get());
       if (document.activeElement !== input && input.value !== value) input.value = value;
