@@ -326,7 +326,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let showBruiseChance = store.get<boolean>('showBruiseChance', false);
   /** Aim trainer: each target's bounces and window of working angles. */
   let aimHints = store.get<boolean>('aimHints', true);
-  /** Aim trainer: rings every mouse position over the board that makes target 1's shot. */
+  /** Aim trainer: shades the angles that connect with target 1, as the mouse positions that aim along them. */
   let aimMouseArea = store.get<boolean>('aimMouseArea', false);
   const listOffsets: [number, number] = [0, 0];
   /** Aim keys held, repeating 20 times a second after 300ms. */
@@ -1127,7 +1127,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     }
   }
 
-  /** Ring colours for a mouse area's routes: direct, one bounce, and two or more. */
+  /** Colours for the working angles' routes: direct, one bounce, and two or more. */
   const ROUTE_RGB = [[120, 255, 120], [255, 220, 60], [255, 140, 40]];
   let mouseAreaFor: AimTarget | null = null;
   let mouseAreaImage: HTMLCanvasElement | null = null;
@@ -1840,9 +1840,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     hidden: () => mode !== 'Aim trainer',
     title: 'Shows how many bounces each target\'s easiest route takes, and how wide its window of working angles is.',
   });
-  session.toggle('Mouse area', () => aimMouseArea, (on) => { aimMouseArea = on; store.set('aimMouseArea', on); }, {
+  session.toggle('Show working angles', () => aimMouseArea, (on) => { aimMouseArea = on; store.set('aimMouseArea', on); }, {
     hidden: () => mode !== 'Aim trainer',
-    title: 'Rings every mouse position over the board that makes target 1\'s shot: green goes straight in, yellow takes one bounce, orange two or more.',
+    title: 'Shades the angles that connect with target 1, as every mouse position on the board that aims along one, outlined. Green goes straight in, yellow takes one bounce, orange two or more.',
   });
   session.button('Start', () => {
     if (replays.isPlaying) {
@@ -1876,7 +1876,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     ['Lives', String(aim?.lives ?? AIM_LIVES), ''],
   ]);
   panel.group('Aim trainer', { hidden: () => mode !== 'Aim trainer' }).note(() =>
-    `Shoot target 1 with the matching active hand. Target 2 and its ball preview your next shot. Grey hands are disabled. Each hit scores 1; each miss costs a life. Every board is new, and it changes about every ${AIM_BOARD_SHOTS} shots. Mouse area rings where the mouse makes the shot.`);
+    `Shoot target 1 with the matching active hand. Target 2 and its ball preview your next shot. Grey hands are disabled. Each hit scores 1; each miss costs a life. Every board is new, and it changes about every ${AIM_BOARD_SHOTS} shots. Show working angles shades every aim that connects.`);
   panel.score('Rumble', { hidden: () => mode !== 'Fight' }).stats(['', 'Now', 'Best'], () => [
     ['Damage sent', match ? String(damageSent(match.player)) : '0', String(recordNow().best || '—')],
     ...(settings.enemyRoster.length ? [['Wins', String(recordNow().wins), `of ${recordNow().wins + recordNow().losses}`]] : []),
@@ -2326,14 +2326,15 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   const display = panel.settings.group('Display');
   display.toggle('Show live bruise chance', () => showBruiseChance, (on) => { showBruiseChance = on; store.set('showBruiseChance', on); }, {
-    keepsSession: true, title: 'Shows the live bruise chance for new-row balls as clears and drop-off change the board’s bruise counter.' });
+    keepsSession: true, hidden: () => mode === 'Aim trainer', title: 'Shows the live bruise chance for new-row balls as clears and drop-off change the board’s bruise counter.' });
   display.toggle('Colours on small boards', () => showColours, (on) => { showColours = on; store.set('showColours', on); }, {
+    hidden: () => mode !== 'Fight',
     title: 'The game shows only where each pirate has balls. This shows their colours too.',
   });
   display.toggle('Show where the ball lands', () => showLanding, (on) => { showLanding = on; store.set('showLanding', on); }, {
     title: 'A faded ball where each fist’s shot would come to rest.',
   });
-  panel.settings.group('Reset').button('Reset to defaults', () => { settings = structuredClone(DEFAULTS); save(); }, off);
+  panel.settings.group('Reset', { hidden: () => mode === 'Aim trainer' }).button('Reset to defaults', () => { settings = structuredClone(DEFAULTS); save(); }, off);
 
   const replaySettingsCodec: ReplaySettingsCodec = {
     currentVersion: 4,
