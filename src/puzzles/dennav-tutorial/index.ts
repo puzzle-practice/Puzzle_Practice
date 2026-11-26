@@ -728,6 +728,8 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   function toggleFinishHint(): void { finishHintShown = !finishHintShown; draw(ticks()); }
 
   // --- Build from scratch ---
+  /** Off for now: the red marks and buzz for stacked line-ups while building from scratch, to come back once they're reliable. */
+  const LINEUP_WARNINGS = false;
   /** What the board looks like it's building, and the line-ups already buzzed for. */
   let guess: BuildGuess | null = null, buzzed = new Set<string>();
   /** The last move with the board before it, to replay slowly. */
@@ -751,7 +753,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     shown = positionOf(game);
     scenes = []; afterScenes = null; waiting = false; replaying = false; replayWanted = false; settleAt = 0; stable = 0; judged = null; lastMove = null; marks = []; arrowRing = null; moves = 0; selected = RINGS - 1; guess = null; buzzed = new Set();
     captionText = '';
-    status = 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked, and a buzz sounds if two of a colour are stacked in rings 1 and 2 or rings 2 and 3 (as the rings sit, or after the turn you’re saving), since one more of that colour would clear them early.';
+    status = LINEUP_WARNINGS ? 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked, and a buzz sounds if two of a colour are stacked in rings 1 and 2 or rings 2 and 3 (as the rings sit, or after the turn you’re saving), since one more of that colour would clear them early.' : 'Build vertical triples from scratch. When the board looks like one is being built, its stars are marked.';
   }
   /** When the board has sat still long enough to judge (ms), and how many judgements in a row saw the same build. */
   let settleAt = 0, stable = 0, judged: BuildGuess | null = null;
@@ -764,6 +766,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     settleAt = ticks() + SETTLE_MS;
     if (!guess) { status = 'No vertical triple in sight yet.'; return; }
     for (const c of [...guess.vertical, ...guess.pair]) marks.push({ cell: c, colour: '#7fd8ff' });
+    if (!LINEUP_WARNINGS) { status = buildText(guess); return; }
     for (const [a, b] of guess.lineups) marks.push({ cell: a, colour: '#ff4040' }, { cell: b, colour: '#ff4040' });
     status = `${buildText(guess)} ${guess.lineups.length ? 'Two of a colour are stacked (marked red).' : 'Nothing is stacked that could clear early.'}`;
   }
@@ -781,7 +784,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     stable = same ? stable + 1 : 1; judged = guess;
     const sure = stable >= 2 || guess.vertical.length === 3;
     const keys = new Set(guess.lineups.map(([a, b]) => `${a}-${b}-${game!.board.cells[a]}`));
-    if (!sure) return;
+    if (!sure || !LINEUP_WARNINGS) return;
     if ([...keys].some((k) => !buzzed.has(k))) {
       sounds.play('buzz', 0.6);
       status = `${buildText(guess)} Two of a colour are stacked (marked red): one more of that colour on them clears early and can spoil the chain.`;
