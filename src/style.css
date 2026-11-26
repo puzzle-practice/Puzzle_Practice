@@ -208,6 +208,40 @@ a {
   display: none;
 }
 
+.panel-group.panel-pirate-group { padding: 0; border-color: var(--border-strong); }
+.panel-pirate-group > .panel-title { text-transform: none; letter-spacing: normal; }
+.panel-pirate-editor { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+.panel-pirate {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.panel-pirate:hover { background: var(--surface-hover); }
+.panel-pirate:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.panel-pirate-face {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: #98adb6;
+  image-rendering: pixelated;
+}
+.panel-pirate-text { display: flex; flex-direction: column; min-width: 0; }
+.panel-pirate-text strong { font-size: 0.92rem; }
+.panel-pirate-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.8rem; color: var(--muted); }
+.panel-pirate-chevron { margin-left: auto; font-size: 1.2rem; color: var(--accent); transition: transform 0.15s; }
+.panel-pirate-group.is-collapsed .panel-pirate-chevron { transform: rotate(-90deg); }
+
 .panel-range-control { display: flex; align-items: center; gap: 10px; }
 .panel-range { width: 100%; accent-color: var(--accent); }
 .panel-range-control output { min-width: 3ch; font-variant-numeric: tabular-nums; }
@@ -751,6 +785,7 @@ a {
 .panel-settings-part:empty { display: none; }
 .duty-preview { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px; border-radius: var(--radius-sm); background: #98adb6; }
 .duty-preview canvas { image-rendering: pixelated; }
+.duty-pirate-note { margin: 0; color: var(--muted); font-size: 0.82rem; }
 .duty-moods { display: grid; grid-template-columns: repeat(2, 58px); gap: 0; }
 
 /* Empty groups and explanation-only cards do not take panel space. */

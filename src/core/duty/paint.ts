@@ -2,12 +2,13 @@
 // A layer is painted in source colours; each colour near a class's source colour is shifted by the
 // chosen colour's HSV offsets, the way Colorization.recolorColor does it.
 
-import { hairDyes, primaryChromas, secondaryChromas } from './palette';
+import { hairDyes, primaryChromas, secondaryChromas, starfishColours } from './palette';
 
 type Hsv = [number, number, number];
 
 /** The game's colourisation classes: the source colour they replace, how near a colour must be, and each colour's HSV offsets. */
 export const ZATIONS = {
+  starfish: { source: '#157CA8', range: [0.16, 0.55, 1], colours: starfishColours },
   skin: { source: '#C550D7', range: [0.08, 0.4, 1], colours: { darkest: [-0.75, -0.2, -0.45], dark: [-0.75, 0.16, -0.26], medium: [-0.75, -0.05, -0.01], tan: [-0.73, -0.08, -0.03], white: [-0.74, -0.28, -0.02], pale: [-0.72, -0.42, 0], pasty: [-0.72, -0.48, 0] } },
   hair: { source: '#922226', range: [0.05, 0.8, 1], colours: { red: [0.02, -0.1, 0], silver: [0.13, -0.9, -0.15], white: [0.13, -0.9, 0.15], black: [0.6, -0.7, -0.6], darkBrown: [0.1, 0, -0.4], lightBrown: [0.11, -0.2, -0.2], strawberryBlonde: [0.1, -0.1, 0], sandy: [0.13, -0.4, -0.1], blonde: [0.15, -0.4, 0.05], ...hairDyes } },
   textile_p: { source: '#922226', range: [0.07, 0.7, 1], colours: { red: [0, 0.05, 0], brown: [-0.91, -0.2, -0.2], white: [0, -1, 0.1], black: [0, -1, -0.6], grey: [0, -1, -0.2], yellow: [-0.83, -0.2, 0.1], pink: [0.95, -0.2, 0.15], violet: [0.83, -0.1, -0.15], purple: [0.76, 0.05, -0.11], navyBlue: [0.65, -0.2, -0.2], blue: [-0.4, 0, 0], aqua: [0.5, 0, -0.1], lime: [0.32, -0.1, -0.1], green: [0.3, -0.2, -0.4], orange: [0.08, 0, 0.05], maroon: [0, 0.1, -0.3], darkBrown: [-0.91, -0.2, -0.4], gold: [0.125, 0.4, 0.1], ...primaryChromas } },
