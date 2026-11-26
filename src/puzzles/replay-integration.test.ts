@@ -342,7 +342,7 @@ describe('Rumble aim trainer sessions', () => {
     h.advance(3000);
     expect(h.aim().score).toBe(1);
     for (let i = 0; i < 7; i++) { h.fire(true); h.advance(3000); }
-    expect(h.aim().boardNumber).toBe(2);
+    expect(h.aim().boardNumber).toBeGreaterThanOrEqual(3);
     h.fire(false); h.advance(3000);
     h.advance(AIM_MS - 27000);
     expect(h.aim().result).toBe('Time up');

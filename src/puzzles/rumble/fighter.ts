@@ -185,11 +185,7 @@ export class Fighter {
 
   /** Aims every fist at a point of the board view, each clamped to its range. */
   aimAt(x: number, y: number): void {
-    this.board.origins.forEach((o, f) => {
-      const [lo, hi] = this.board.ranges[f];
-      if (y > o.y) this.dir[f] = x < o.x ? hi : lo;
-      else this.dir[f] = clamp(Math.trunc(DIR_PREC * (Math.atan2(o.y - y, x - o.x) * 180 / Math.PI)), lo, hi);
-    });
+    this.board.origins.forEach((_, f) => { this.dir[f] = this.board.mouseDir(f, x, y); });
   }
 
   /** Turns every fist together (positive is anticlockwise). */

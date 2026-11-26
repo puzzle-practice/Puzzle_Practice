@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
-import { AIM_BOARD_SHOTS, AIM_LANDING_MS, AIM_MS, AimTrainer, DIFFICULTIES, routeDifficulty, type AimDifficulty, type AimTarget } from './aim';
-import type { Board, Point } from './board';
+import { AIM_BOARD_SHOTS, AIM_LANDING_MS, AIM_MS, AimTrainer, DIFFICULTIES, MIN_MOUSE_AREA, mouseArea, mouseDirs, routeDifficulty, type AimDifficulty, type AimTarget } from './aim';
+import { VIEW_H, VIEW_W, type Board, type Point } from './board';
 import { Fighter } from './fighter';
 import { Glove } from './gloves';
 import { colourOf, isDark } from './pieces';
@@ -84,22 +84,83 @@ describe('Rumble aim trainer', () => {
   });
 
   it('generates reachable targets of every difficulty for both hands, graded by their easiest route', () => {
-    const t = trainer(), b = t.fighter.board;
-    const layouts = (t as unknown as { layouts: Array<{ cells: number[]; candidates: AimTarget[] }> }).layouts;
-    for (const d of DIFFICULTIES) for (const fist of [0, 1]) {
-      expect(layouts.flatMap(l => l.candidates).filter(c => c.difficulty === d && c.fist === fist).length, `${d}, fist ${fist}`).toBeGreaterThan(20);
-    }
-    for (const layout of layouts) {
-      b.cells.splice(0, b.cells.length, ...layout.cells);
-      expect(b.grapesAfter(new Map())).toEqual([]);
-      for (const c of layout.candidates) {
-        expectRoutes(b, c);
-        expect(c.routes.reduce((n, r) => n + r.hi - r.lo + 1, 0)).toBe(c.angles.length);
-        expect(c.difficulty).toBe(routeDifficulty(c.routes[0]));
-        for (const r of c.routes) expect(DIFFICULTIES.indexOf(routeDifficulty(r))).toBeGreaterThanOrEqual(DIFFICULTIES.indexOf(c.difficulty));
+    const seen = new Map<string, number>();
+    for (let seed = 0; seed < 6; seed++) {
+      const t = trainer(seed), b = t.fighter.board;
+      let now = 0, board = 0;
+      for (let shot = 0; shot < AIM_BOARD_SHOTS * 4; shot++) {
+        if (t.boardNumber !== board) {
+          board = t.boardNumber;
+          expect(b.grapesAfter(new Map())).toEqual([]);
+          for (const c of t.candidates) {
+            expectRoutes(b, c);
+            expect(c.routes.reduce((n, r) => n + r.hi - r.lo + 1, 0)).toBe(c.angles.length);
+            expect(c.difficulty).toBe(routeDifficulty(c.routes[0]));
+            expect(mouseArea(b, c)).toBeGreaterThanOrEqual(MIN_MOUSE_AREA);
+            for (const r of c.routes) expect(DIFFICULTIES.indexOf(routeDifficulty(r))).toBeGreaterThanOrEqual(DIFFICULTIES.indexOf(c.difficulty));
+            seen.set(`${c.difficulty}, fist ${c.fist}`, (seen.get(`${c.difficulty}, fist ${c.fist}`) ?? 0) + 1);
+          }
+        }
+        now = shoot(t, true, now);
       }
     }
+    for (const d of DIFFICULTIES) for (const fist of [0, 1]) expect(seen.get(`${d}, fist ${fist}`) ?? 0, `${d}, fist ${fist}`).toBeGreaterThan(20);
   }, 60000);
+
+  it('aims the trainer\'s mouse map the same way the fighter aims at the mouse', () => {
+    const t = trainer(), f = t.fighter, b = f.board;
+    for (let y = 0; y < VIEW_H; y += 7) for (let x = 0; x < VIEW_W; x += 5) {
+      f.aimAt(x, y);
+      for (const fist of [0, 1]) expect(mouseDirs(b, fist)[y * VIEW_W + x]).toBe(f.dir[fist]);
+    }
+    // Some steep aims beside a fist come from no pixel at all, so the mouse alone can't make them.
+    const reached = (fist: number) => new Set(mouseDirs(b, fist));
+    expect(reached(0).has(269)).toBe(false);
+    expect(reached(1).has(89)).toBe(false);
+  });
+
+  it.each(['Mixed', ...DIFFICULTIES] as AimDifficulty[])('every %s target dealt can be hit by aiming with the mouse', difficulty => {
+    const pixels = new Random(99);
+    for (let seed = 0; seed < 4; seed++) {
+      const t = trainer(seed, 0, difficulty), f = t.fighter, b = f.board;
+      let now = 0;
+      for (let shot = 0; shot < 20; shot++) {
+        const target = t.current, dirs = mouseDirs(b, target.fist), angles = new Set(target.angles);
+        const spots: number[] = [];
+        for (let i = 0; i < dirs.length; i++) if (angles.has(dirs[i])) spots.push(i);
+        expect(spots.length).toBeGreaterThanOrEqual(MIN_MOUSE_AREA);
+        // A few spots in the area, and the mouse there connects every time.
+        for (let k = 0; k < 3; k++) {
+          const spot = pixels.choice(spots);
+          f.aimAt(spot % VIEW_W, Math.floor(spot / VIEW_W));
+          const shot = b.shoot(b.path(target.fist, f.dir[target.fist]))!;
+          expect(target.cells.some(p => b.adjacent(shot.rest, p)), `seed ${seed}, shot ${shot}`).toBe(true);
+        }
+        expect(t.fire(target.fist, now)).toBe(true);
+        const end = f.flight!.end;
+        t.update(end);
+        expect(t.landing?.hit).toBe(true);
+        t.update(end + AIM_LANDING_MS);
+        now = end + AIM_LANDING_MS + 1;
+      }
+      expect(t.score).toBe(20);
+    }
+  }, 60000);
+
+  it('makes a fresh board for every seed and every change', () => {
+    const boards = new Set<string>();
+    let dealt = 0;
+    for (let seed = 0; seed < 8; seed++) {
+      const t = trainer(seed);
+      let now = 0, board = 0;
+      for (let shot = 0; shot < 15; shot++) {
+        if (t.boardNumber !== board) { board = t.boardNumber; dealt++; boards.add(t.fighter.board.cells.map(c => c ? 1 : 0).join('')); }
+        now = shoot(t, true, now);
+      }
+    }
+    expect(dealt).toBeGreaterThan(30);
+    expect(boards.size).toBe(dealt);
+  });
 
   it.each(DIFFICULTIES)('deals only %s targets when that difficulty is chosen', difficulty => {
     for (let seed = 0; seed < 6; seed++) {
@@ -109,8 +170,7 @@ describe('Rumble aim trainer', () => {
         expect(t.current.difficulty, `seed ${seed}, shot ${shot}`).toBe(difficulty);
         now = shoot(t, true, now);
       }
-      // A fixed difficulty can wait up to another eight shots for a board change that keeps its grade.
-      expect(t.boardNumber).toBeGreaterThanOrEqual(2);
+      expect(t.boardNumber).toBeGreaterThanOrEqual(3);
     }
   });
 
@@ -134,26 +194,26 @@ describe('Rumble aim trainer', () => {
     expect([...seen].sort()).toEqual([...DIFFICULTIES].sort());
   });
 
-  it('scores one per connection, preserves the preview, and changes the board every eight shots', () => {
+  it('scores one per connection, preserves the preview, and changes the board every few shots', () => {
     const t = trainer(), b = t.fighter.board;
     let occupied = b.cells.map(c => c !== 0);
-    let now = 0;
+    let now = 0, changes = 0;
     for (let i = 0; i < 30; i++) {
-      const next = structuredClone(t.next);
+      const next = structuredClone(t.next), board = t.boardNumber;
       expect(t.current.colour).not.toBe(next.colour);
       expect(t.current.cells.some(p => next.cells.some(q => q.x === p.x && q.y === p.y))).toBe(false);
       now = shoot(t, true, now);
-      expect(t.current).toEqual(next);
+      expect(t.current).toMatchObject({ cells: next.cells, fist: next.fist, colour: next.colour, difficulty: next.difficulty });
       expect(t.score).toBe(i + 1);
       expect(t.lives).toBe(3);
       const after = b.cells.map(c => c !== 0);
-      if ((i + 1) % AIM_BOARD_SHOTS === 0) expect(after).not.toEqual(occupied);
+      if (t.boardNumber !== board) { changes++; expect(after).not.toEqual(occupied); }
       else expect(after).toEqual(occupied);
       occupied = after;
-      expect(t.boardNumber).toBe(1 + Math.floor((i + 1) / AIM_BOARD_SHOTS));
       expect(colourOf(t.fighter.hand[t.current.fist])).toBe(t.current.colour);
       expect(isDark(t.fighter.hand[1 - t.current.fist])).toBe(true);
     }
+    expect(changes).toBeGreaterThanOrEqual(8);
     expect(b.shots).toBe(0);
   });
 
@@ -175,19 +235,20 @@ describe('Rumble aim trainer', () => {
     for (let seed = 0; seed < 12; seed++) {
       const t = trainer(seed), b = t.fighter.board;
       let now = 0;
-      for (let shot = 1; shot <= AIM_BOARD_SHOTS * 3; shot++) {
-        const next = t.next;
+      for (let shot = 1; shot <= AIM_BOARD_SHOTS * 4; shot++) {
+        const next = t.next, board = t.boardNumber;
         const before = b.cells.map(c => c !== 0);
         now = shoot(t, true, now);
-        expect(t.current).toBe(next);
-        expect(t.boardNumber, `seed ${seed}, shot ${shot}`).toBe(1 + Math.floor(shot / AIM_BOARD_SHOTS));
-        if (shot % AIM_BOARD_SHOTS !== 0) continue;
+        expect(t.current.cells).toEqual(next.cells);
+        if (t.boardNumber === board) { expect(t.current).toBe(next); continue; }
         expect(b.cells.map(c => c !== 0)).not.toEqual(before);
         expect(b.grapesAfter(new Map())).toEqual([]);
         // A player could have prepared any valid angle while target 2 was on the old board.
         expectRoutes(b, next);
+        expect(t.current.difficulty).toBe(next.difficulty);
       }
-      expect(t.score).toBe(AIM_BOARD_SHOTS * 3);
+      expect(t.boardNumber, `seed ${seed}`).toBeGreaterThanOrEqual(4);
+      expect(t.score).toBe(AIM_BOARD_SHOTS * 4);
       expect(t.lives).toBe(3);
     }
   });
