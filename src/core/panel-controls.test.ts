@@ -43,6 +43,15 @@ describe('settings edited during a session', () => {
     expect(on).toBe(true);
   });
 
+  it('can change a display toggle without abandoning the running session', () => {
+    const { group, panel, elements } = setup(); let on = false;
+    group.toggle('Show live bruise chance', () => on, v => { on = v; }, { keepsSession: true });
+    const input = elements.find(e => e.type === 'checkbox')!;
+    input.checked = true; input.dispatchEvent(new Event('change'));
+    expect(on).toBe(true);
+    expect(panel.beforeChange).not.toHaveBeenCalled();
+  });
+
   it.each(['number', 'range', 'text'] as const)('retains the new %s value through the session lock', kind => {
     const { group, elements } = setup(); let value: number | string = kind === 'text' ? 'old' : 0;
     if (kind === 'text') group.text('Value', () => String(value), v => { value = v; });

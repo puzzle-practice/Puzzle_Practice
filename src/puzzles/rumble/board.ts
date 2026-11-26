@@ -488,11 +488,16 @@ export class Board {
     }
     for (let x = 0; x < this.width(this.damage); x++) {
       let piece = this.randomBall(this.rng);
-      const chance = this.bruiseCounter > 0 ? Math.trunc((this.bruiseCounter * 4) / 10) : 0;
+      const chance = this.bruiseChance;
       if (nextInt(this.rng, 100) < chance) piece = dark(piece);
       this.set({ x, y: this.damage }, piece);
     }
     this.sparks = this.sparks.filter((p) => ++p.y < H);
+  }
+
+  /** Each ball in a new row rolls against this chance, derived from clear/attack efficiency. */
+  get bruiseChance(): number {
+    return this.bruiseCounter > 0 ? Math.trunc(this.bruiseCounter * 4 / 10) : 0;
   }
 
   /** At the start of a turn, sparks whose group is now under three turn to bruises. */

@@ -663,13 +663,13 @@ export class Group {
   }
 
   /** An on/off switch. Consecutive toggles in a group flow into columns. */
-  toggle(label: string, get: Get<boolean>, set: (on: boolean) => void, opts: ControlOptions = {}): this {
+  toggle(label: string, get: Get<boolean>, set: (on: boolean) => void, opts: ControlOptions & { keepsSession?: boolean } = {}): this {
     if (this.choices) { this.choices.toggle(label, get, set, opts); return this; }
     const input = el('input', 'panel-switch');
     input.type = 'checkbox';
     input.addEventListener('change', () => {
       const checked = input.checked;
-      this.panel.beforeChange(this.element, false, opts.stopsSession);
+      if (!opts.keepsSession) this.panel.beforeChange(this.element, false, opts.stopsSession);
       set(checked);
       this.panel.used();
     });

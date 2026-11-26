@@ -104,7 +104,7 @@ export interface ChargedOpening {
  * Staging on a copy leaves the live board untouched if its damage leaves too little room.
  */
 export function generateChargedBoard(board: Board, rng: Random, normalRows: number, chargedRows: number,
-  density: number, werewolf: boolean, hands: readonly number[], averageGroupSize = 3, dropOff = 0): ChargedOpening | null {
+  density: number, werewolf: boolean, hands: readonly number[], averageGroupSize = 3, dropOff = 0, spread = true): ChargedOpening | null {
   const topRows = Math.max(1, Math.trunc(normalRows));
   const depth = Math.min(Math.max(1, Math.trunc(chargedRows)), MAX_ROWS - board.damage - topRows);
   if (depth < 1) return null;
@@ -161,10 +161,58 @@ export function generateChargedBoard(board: Board, rng: Random, normalRows: numb
     if (!corridor.has(key(p))) cells.push(p);
   }
   const count = Math.max(3, Math.round(cells.length * Math.max(0, Math.min(100, density)) / 100));
-  for (let n = 3; n < count; n++) {
-    const frontier = cells.filter(p => b.get(p) === EMPTY && neighbours(p).some(n => isBall(b.get(n))));
-    if (!frontier.length) break;
-    b.set(frontier[nextInt(rng, frontier.length)], ball(colour));
+  if (spread) {
+    for (const p of cells) b.set(p, ball(colour));
+    const protectedCells = new Set(rootKeys), availableCells = new Map(cells.map(p => [key(p), p]));
+    // Keep a thin supported branch reaching as deep as this ball budget permits. At low density,
+    // the remaining balls should form sparse branches across the area rather than shorter solid rows.
+    if (count >= 6) {
+      const deepest = firstRow + Math.min(depth - 1, count - 4);
+      let support: Point[] | null = null;
+      for (let y = deepest; y >= firstRow && !support; y--) {
+        for (const start of rng.shuffle(cells.filter(p => p.y === y && !rootKeys.has(key(p))))) {
+          const queue = [start], parents = new Map<number, Point | null>([[key(start), null]]);
+          for (let i = 0; i < queue.length; i++) {
+            const p = queue[i];
+            if (p.y === firstRow || neighbours(p).some(p => rootKeys.has(key(p)))) {
+              const path: Point[] = [];
+              for (let at: Point | null = p; at; at = parents.get(key(at)) ?? null) path.push(at);
+              for (const part of path) for (const next of neighbours(part)) {
+                if (path.length >= 3) break;
+                if (availableCells.has(key(next)) && !rootKeys.has(key(next)) && !path.some(p => key(p) === key(next))) path.push(next);
+              }
+              if (path.length >= 3 && path.length + root.length <= count) { support = path; break; }
+            }
+            for (const next of neighbours(p)) {
+              if (!availableCells.has(key(next)) || rootKeys.has(key(next)) || parents.has(key(next))) continue;
+              parents.set(key(next), p); queue.push(next);
+            }
+          }
+          if (support) break;
+        }
+      }
+      for (const p of support ?? []) protectedCells.add(key(p));
+    }
+    const capacities = Array.from({ length: depth }, (_, row) => cells.filter(p => p.y === firstRow + row).length);
+    let remaining = cells.length;
+    while (remaining > count) {
+      const rowCounts = capacities.map((_, row) => cells.filter(p => p.y === firstRow + row && isBall(b.get(p))).length);
+      const candidates = rng.shuffle(cells.filter(p => !protectedCells.has(key(p)) && isBall(b.get(p))));
+      candidates.sort((a, c) => rowCounts[c.y - firstRow] / capacities[c.y - firstRow] - rowCounts[a.y - firstRow] / capacities[a.y - firstRow]);
+      let removed = false;
+      for (const p of candidates) {
+        b.set(p, EMPTY);
+        if (!b.grapesAfter(new Map()).length) { remaining--; removed = true; break; }
+        b.set(p, ball(colour));
+      }
+      if (!removed) break;
+    }
+  } else {
+    for (let n = 3; n < count; n++) {
+      const frontier = cells.filter(p => b.get(p) === EMPTY && neighbours(p).some(n => isBall(b.get(n))));
+      if (!frontier.length) break;
+      b.set(frontier[nextInt(rng, frontier.length)], ball(colour));
+    }
   }
   const occupied = cells.filter(p => isBall(b.get(p)));
   const targetSize = Math.max(3, Math.round(averageGroupSize));

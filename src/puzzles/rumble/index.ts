@@ -323,6 +323,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let messages: Message[] = [];
   let showColours = store.get<boolean>('showColours', false);
   let showLanding = store.get<boolean>('showLanding', false);
+  let showBruiseChance = store.get<boolean>('showBruiseChance', false);
   /** Aim trainer: each target's bounces and window of working angles. */
   let aimHints = store.get<boolean>('aimHints', true);
   const listOffsets: [number, number] = [0, 0];
@@ -569,11 +570,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return { available, normal, charged: Math.max(1, Math.min(available - normal, create.chargedRows)) };
   };
   let chargedMessage = '';
-  function generateCharged(): void {
+  function generateCharged(spread = true): void {
     if (!settled()) return;
     const f = match!.player, before = snapshotBoard(f.board);
     const opening = generateChargedBoard(f.board, createRng, chargedDepth().normal, chargedDepth().charged,
-      create.chargedDensity, settings.werewolf, f.hand, create.averageGroupSize, create.generatedDropOff);
+      create.chargedDensity, settings.werewolf, f.hand, create.averageGroupSize, create.generatedDropOff, spread);
     if (!opening) {
       chargedMessage = 'Could not fit a playable state. Reduce rows, density or drop-off.';
       return;
@@ -716,7 +717,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     else if (name === 'fp-viewer') viewer.on = value === '1';
     else if (name === 'fp-deal') deal();
     else if (name === 'fp-generate') generate();
-    else if (name === 'fp-charged') generateCharged();
+    // Older recordings retain the original growth order. New boards spread gaps across the full height.
+    else if (name === 'fp-charged') generateCharged(value === 'spread');
     else if (name === 'fp-droprow') dropRow();
     else if (name === 'fp-load') load(value);
     else if (name === 'fp-clear') clearBoard();
@@ -1816,6 +1818,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     return `${verb} ${match.names[t]}: press A / S or click an enemy to change, or click a teammate to defend them.`;
   });
 
+  panel.score('Live bruise chance', { hidden: () => !showBruiseChance || mode === 'Aim trainer' })
+    .note(() => `${match?.player.board.bruiseChance ?? 0}% for each ball in the next row`);
+
   const recordNow = () => record[settingsKey()] ?? { wins: 0, losses: 0, best: 0 };
   panel.score('Aim trainer', { hidden: () => mode !== 'Aim trainer' }).stats(['', 'Now', 'Best'], () => [
     ['Connections', String(aim?.score ?? 0), String(Math.max(0, ...store.history(aimHistory()).map(g => g.score)))],
@@ -2024,7 +2029,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     .range('Density %', () => create.chargedDensity, (v) => { create.chargedDensity = v; recordRules(); }, {
       min: 5, max: 100, outputWidth: 4, disabled: watching,
       title: 'Density of charged groups, excluding the reserved firing lane. Drop-off balls are added separately. Furballs never receive a charge.' })
-    .button('Generate charged board', () => freeplay('fp-charged'), { disabled: createOff, variant: 'primary',
+    .button('Generate charged board', () => freeplay('fp-charged:spread'), { disabled: createOff, variant: 'primary',
       title: 'A dense uncharged top with charged groups beneath. A matching hand has a verified shot into the first group.' })
     .note(() => chargedMessage);
 
@@ -2104,8 +2109,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       min: 0, max: 200, outputWidth: 4, step: 1, disabled: watching, hidden: () => create.sizeMode !== 'clear',
       title: 'Matched balls beyond the minimum three per group.' })
     .toggle('Random size', () => create.randomSize, (on) => { create.randomSize = on; rechoose(); }, { disabled: watching, hidden: () => create.sizeMode !== 'manual' })
-    .number('Length', () => create.length, (v) => { create.length = Math.round(v); rechoose(); }, { disabled: watching, min: 1, max: MAX_LENGTH, stepper: true, hidden: () => create.sizeMode !== 'manual' || create.randomSize })
-    .number('Width', () => create.width, (v) => { create.width = Math.round(v); rechoose(); }, { disabled: watching, min: 1, max: MAX_WIDTH, stepper: true, hidden: () => create.sizeMode !== 'manual' || create.randomSize })
+    .range('Length', () => create.length, (v) => { create.length = Math.round(v); rechoose(); }, { disabled: watching, min: 1, max: MAX_LENGTH, step: 1, outputWidth: 3, hidden: () => create.sizeMode !== 'manual' || create.randomSize })
+    .range('Width', () => create.width, (v) => { create.width = Math.round(v); rechoose(); }, { disabled: watching, min: 1, max: MAX_WIDTH, step: 1, outputWidth: 3, hidden: () => create.sizeMode !== 'manual' || create.randomSize })
     .segmented('Comes from', sideOptions, () => create.side, (v) => { create.side = v; rechoose(); }, { disabled: watching })
     .range('Bruises %', () => create.bruisePercent >= 0 ? create.bruisePercent :
       Math.round(create.bruises / Math.max(1, spec.length * spec.width) * 100),
@@ -2271,6 +2276,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   });
 
   const display = panel.settings.group('Display');
+  display.toggle('Show live bruise chance', () => showBruiseChance, (on) => { showBruiseChance = on; store.set('showBruiseChance', on); }, {
+    keepsSession: true, title: 'Shows the live bruise chance for new-row balls as clears and drop-off change the board’s bruise counter.' });
   display.toggle('Colours on small boards', () => showColours, (on) => { showColours = on; store.set('showColours', on); }, {
     title: 'The game shows only where each pirate has balls. This shows their colours too.',
   });

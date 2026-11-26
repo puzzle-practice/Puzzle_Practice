@@ -60,6 +60,45 @@ describe('Create mode', () => {
     }
   });
 
+  it.each([35, 65])('spreads density %s across the charged height rather than shortening it', density => {
+    for (let seed = 0; seed < 20; seed++) {
+      const b = emptyBoard(new Random(1));
+      const opening = generateChargedBoard(b, new Random(seed), 6, 6, density, false, [ball(RED), ball(BLUE)])!;
+      expect(opening, `seed ${seed}`).not.toBeNull();
+      const rows = Array.from({ length: 6 }, (_, row) => {
+        let n = 0;
+        for (let x = 0; x < b.width(6 + row); x++) if (isBall(b.get({ x, y: 6 + row }))) n++;
+        return n;
+      });
+      expect(rows.every(n => n > 0), `seed ${seed}: ${rows}`).toBe(true);
+      expect(rows.every((n, row) => n < b.width(6 + row)), `seed ${seed}: ${rows}`).toBe(true);
+      const centre = rows.reduce((sum, n, row) => sum + n * row, 0) / opening.filledSlots;
+      expect(centre, `seed ${seed}: ${rows}`).toBeGreaterThan(1.5);
+      expect(b.lowest()).toBe(11);
+      expect(floating(b)).toEqual([]);
+    }
+  });
+
+  it('keeps the older top-growth layout available for existing recorded generation commands', () => {
+    const old = emptyBoard(new Random(1)), spread = emptyBoard(new Random(1));
+    const legacy = generateChargedBoard(old, new Random(12), 6, 6, 35, false, [ball(RED), ball(BLUE)], 3, 0, false)!;
+    const current = generateChargedBoard(spread, new Random(12), 6, 6, 35, false, [ball(RED), ball(BLUE)])!;
+    expect(legacy).not.toBeNull(); expect(current).not.toBeNull();
+    expect(snapshotBoard(old)).not.toEqual(snapshotBoard(spread));
+    expect(spread.lowest()).toBe(11);
+  });
+
+  it('exposes the actual new-row bruise chance as clears and drop-off affect the counter', () => {
+    const b = emptyBoard(new Random(1));
+    expect(b.bruiseChance).toBe(0);
+    b.sent(3, 9, 30);
+    expect(b.bruiseChance).toBe(3);
+    b.sent(3, 9, 0);
+    expect(b.bruiseChance).toBe(2);
+    b.bruiseCounter = 100; expect(b.bruiseChance).toBe(40);
+    b.bruiseCounter = -20; expect(b.bruiseChance).toBe(0);
+  });
+
   it.each([false, true])('keeps the opening at three and drops the selected hanging balls (furball=%s)', werewolf => {
     for (let seed = 0; seed < 12; seed++) {
       const b = new Board(new Random(1), new Random(2), [new Random(3), new Random(4)], { startRows: 0, werewolf });
