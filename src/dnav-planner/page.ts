@@ -217,7 +217,7 @@ function lineCard(line: Line, best: boolean, fastest: number, total: number, tim
     `dp-line${best ? ' best' : ''}${line.special ? ' special' : ''}`,
     el('div', 'dp-line-top', el('span', 'dp-line-name', lineName(line)), tag),
     stepsTable(line, total),
-    el('div', `dp-spare ${leftClass(time - line.t)}`, `Done at ${mmss(line.t)} with ${mmss(time - line.t)} left of ${mmss(time)}`),
+    el('div', `dp-spare ${leftClass(time - line.t)}`, `Done at ${mmss(line.t)} with ${mmss(time - line.t)} left`),
   );
 }
 
