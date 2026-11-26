@@ -13,6 +13,7 @@ export function keyName(value: string): string {
   const key = value.trim().toLowerCase().replace(/\s+/g, '');
   if (key === 'spacebar') return 'space';
   if (key === 'esc') return 'escape';
+  if (key === 'ctrl') return 'control';
   if (key === 'left') return 'arrowleft';
   if (key === 'right') return 'arrowright';
   if (key === 'up') return 'arrowup';
@@ -26,6 +27,7 @@ export function keyLabel(value: string): string {
     arrowleft: 'ArrowLeft', arrowright: 'ArrowRight', arrowup: 'ArrowUp', arrowdown: 'ArrowDown',
     space: 'Space', escape: 'Escape', enter: 'Enter', pageup: 'PageUp', pagedown: 'PageDown',
     home: 'Home', end: 'End', clear: 'Clear',
+    control: 'Ctrl', alt: 'Alt', meta: 'Cmd',
   };
   return named[key] ?? (key.length === 1 ? key.toUpperCase() : value);
 }

@@ -49,6 +49,15 @@ vi.mock('../core/audio', async (original) => ({
   },
 }));
 
+/** A stand-in for any DOM node: every property and call gives another, and it iterates as empty. */
+function anyNode(own: Record<PropertyKey, unknown> = {}): any {
+  const node: any = new Proxy(function () {}, {
+    get: (_target, key) => key in own ? own[key] : key === Symbol.iterator ? function* () {} : key === Symbol.toPrimitive ? () => '' : key === 'then' ? undefined : node,
+    set: () => true,
+    apply: () => node,
+  });
+  return node;
+}
 function canvasContext() {
   return new Proxy({
     measureText: (text: string) => ({ width: text.length * 8 }),
@@ -98,6 +107,9 @@ function panelHarness(syncTableActions = false) {
       tables.push(sync);
       return group(page, title);
     };
+    // A group's element holds its buttons, each showing its label.
+    if (method === 'element') return anyNode({ querySelectorAll: () => [...buttons.keys()].filter(id => id.startsWith(page + ':' + title + ':'))
+      .map(id => anyNode({ textContent: id.slice(page.length + title.length + 2), disabled: false })) });
     return () => group(page, title);
   } });
   const panel = new Proxy({}, { get: (_target, method) => {
@@ -2031,6 +2043,109 @@ describe('Swordfight knockout messages', () => {
       .filter(([, text]) => text.includes('Wrathful') || text.includes('knocked'));
     expect(lines.map(([, text]) => text)).toEqual(expected.map((line) => line.replaceAll(' ', '')));
     expect(lines[1][0] - lines[0][0]).toBe(gameLineHeight({ px: 30 }));
+    instance.dispose?.();
+  });
+});
+
+describe('Navigation input during a move', () => {
+  const key = (k: string): InputEvent => ({ type: 'keydown', key: k });
+  const click = (pos: [number, number]): InputEvent => ({ type: 'mousedown', button: 1, pos });
+
+  it.each(['keyboard', 'pointer'] as const)('drops a %s turn made while a turn plays out, rather than playing it afterwards', async device => {
+    const { DEFAULT_SETTINGS, NavigationGame } = await import('./navigation/game');
+    const rotate = vi.spyOn(NavigationGame.prototype, 'rotate');
+    const store = new Store('navigation');
+    store.set('settings', playableSettings({ ...DEFAULT_SETTINGS, mode: 'normal', timerMs: 0, slowDrop: true }));
+    store.set('wwTimerDefault', true);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    instance.frame([]);
+    // Drop a star (it falls to the inner ring) so the inner ring, selected at the start, has something to turn.
+    now += 10; instance.frame([key('space')]);
+    for (let i = 0; i < 40; i++) { now += 50; instance.frame([]); }
+    // A pointer turn (a drag or a turn button) goes through the same commands as the Rotate right button.
+    const rotateRight = [...buttons].find(([name]) => name.endsWith(':Rotate right'))?.[1];
+    const turn = (): InputEvent[] => {
+      if (device === 'keyboard') return [key('arrowright')];
+      rotateRight!();
+      return [];
+    };
+    now += 10; instance.frame(turn());
+    const turns = rotate.mock.calls.length;
+    expect(turns).toBe(1);
+    // Just before the turn finishes: dropped, and it never plays later.
+    now += 90; instance.frame(turn());
+    for (let i = 0; i < 40; i++) { now += 50; instance.frame([]); }
+    expect(rotate.mock.calls.length).toBe(turns);
+    // Once the board is still, the same input turns the ring again.
+    now += 10; instance.frame(turn());
+    expect(rotate.mock.calls.length).toBe(turns + 1);
+    rotate.mockRestore();
+    instance.dispose?.();
+  });
+
+  it('After a triple drops a keyboard move made while one plays out', async () => {
+    const device = 'keyboard' as const;
+    const { AfterTriplePlay } = await import('./dennav-tutorial/after-triple');
+    const move = vi.spyOn(AfterTriplePlay.prototype, 'move');
+    const store = new Store('dennav-tutorial');
+    store.set('lesson', 'after-triple');
+    store.set('mode', 'aftertriple');
+    const { panel } = panelHarness();
+    let now = 0;
+    vi.stubGlobal('document', anyNode());
+    const canvas = { after() {}, addEventListener() {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 600 }), width: 450, height: 600, style: {} };
+    const screen = new Proxy({ ctx: canvasContext(), canvas }, { get: (target, key) => key === 'ctx' || key === 'canvas' ? target[key] : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./dennav-tutorial/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1], drain() {} }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    // The triple breaks on its own; let it play out.
+    for (let i = 0; i < 200; i++) { now += 50; instance.frame([]); }
+    // Ring 1 (innermost) has the board's stars after the break.
+    instance.frame([key('1')]);
+    const turn = device === 'keyboard' ? [key('arrowright')] : [click([225, 300 - 55])];
+    now += 10; instance.frame(turn);
+    expect(move).toHaveBeenCalledTimes(1);
+    now += 40; instance.frame(turn);
+    for (let i = 0; i < 100; i++) { now += 50; instance.frame([]); }
+    expect(move).toHaveBeenCalledTimes(1);
+    now += 10; instance.frame(turn);
+    expect(move).toHaveBeenCalledTimes(2);
+    move.mockRestore();
+    instance.dispose?.();
+  });
+
+  it('After a triple turns a ring by dragging it, as in Dennav', async () => {
+    const { AfterTriplePlay } = await import('./dennav-tutorial/after-triple');
+    const move = vi.spyOn(AfterTriplePlay.prototype, 'move');
+    const store = new Store('dennav-tutorial');
+    store.set('lesson', 'after-triple');
+    store.set('mode', 'aftertriple');
+    const { panel: basePanel } = panelHarness();
+    const syncs: Array<() => void> = [];
+    const panel = new Proxy({}, { get: (_target, method) => method === 'addSync' ? (sync: () => void) => { syncs.push(sync); } : (basePanel as any)[method] });
+    let now = 0;
+    vi.stubGlobal('document', anyNode());
+    const listeners = new Map<string, (event: unknown) => void>();
+    const canvas = { after() {}, insertAdjacentElement() {}, parentElement: anyNode(), focus() {}, hasPointerCapture: () => false, setPointerCapture() {}, releasePointerCapture() {},
+      addEventListener(type: string, handler: (event: unknown) => void) { listeners.set(type, handler); },
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 450, height: 600 }), width: 450, height: 600, style: {} };
+    const screen = new Proxy({ ctx: canvasContext(), canvas, width: 450, height: 600 }, { get: (target, key) => key === 'ctx' || key === 'canvas' || key === 'width' || key === 'height' ? target[key] : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./dennav-tutorial/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1], drain() {} }, panel, store, ticks: () => now } as unknown as PuzzleContext);
+    for (let i = 0; i < 200; i++) { now += 50; instance.frame([]); }
+    const pointer = (type: string, x: number, y: number) => listeners.get(type)!({ button: 0, isPrimary: true, pointerId: 1, pointerType: 'mouse', clientX: x, clientY: y, preventDefault() {} });
+    // Press on ring 1 (the innermost) straight above the centre, then drag a sixth of the way round clockwise.
+    pointer('pointerdown', 225, 300 - 55);
+    pointer('pointermove', 225 + 55 * Math.cos(-Math.PI / 6), 300 + 55 * Math.sin(-Math.PI / 6));
+    pointer('pointerup', 225 + 55 * Math.cos(-Math.PI / 6), 300 + 55 * Math.sin(-Math.PI / 6));
+    for (let i = 0; i < 3; i++) { syncs.forEach(sync => sync()); now += 10; instance.frame([]); }
+    expect(move).toHaveBeenCalledTimes(1);
+    move.mockRestore();
     instance.dispose?.();
   });
 });

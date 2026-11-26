@@ -32,7 +32,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
 function showLanding(): void {
   unsubscribeBackupStatus();
   document.title = 'Puzzle Practice';
-  const cards = puzzles.map(({ id, meta }) =>
+  const cards = puzzles.filter(({ meta }) => !meta.hidden).map(({ id, meta }) =>
     el(
       'a',
       { className: 'card', href: `#/${id}` },

@@ -56,10 +56,35 @@ describe('navigation create', () => {
     expect(boardCode(copy)).toBe(code);
   });
 
+  it('paints targets in the extra outer ring too, for tutorial boards', () => {
+    const game = new NavigationGame(ww, 3);
+    expect(game.board.rings).toBe(4);
+    expect(paintTarget(game, 0, 0, 2)).toBe(true);
+    expect(paintTarget(game, 1, 0, WILD)).toBe(true);
+    expect(paintTarget(game, 0, 4, 2)).toBe(false);
+    expect(boardIssues(game, true, true)).toContain('The game never deals targets in the extra outer ring.');
+    // The board's text keeps them.
+    const code = boardCode(game);
+    expect(code).toMatch(/(^|[:,])002[,:]/);
+    expect(code).toMatch(/[:,]01\*[,:]/);
+    const copy = new NavigationGame(ww, 1);
+    load(copy, readBoardCode(code)!);
+    expect(boardCode(copy)).toBe(code);
+    // Charting one counts it like any other target.
+    const solo = new NavigationGame(ww, 1);
+    solo.targets = [{ ring: 0, octant: 0, colour: 2, wild: false }];
+    solo.board.set(0, 0, 2);
+    expect(solo.board.matches(solo.targets)).toBe(true);
+    expect(solo.board.clearConstellation(solo.targets).cells).toHaveLength(1);
+    expect(solo.board.get(0, 0)).toBe(EMPTY);
+    expect(paintTarget(game, 0, 0, CLEAR)).toBe(true);
+    expect(paintTarget(game, 1, 0, CLEAR)).toBe(true);
+    expect(boardIssues(game, true, true)).not.toContain('The game never deals targets in the extra outer ring.');
+  });
+
   it('paints targets in the inner three rings', () => {
     const game = new NavigationGame(ww, 3);
     const before = game.targets.length;
-    expect(paintTarget(game, 0, 0, 2)).toBe(false);
     const free = [0, 1, 2, 3, 4, 5, 6, 7].find((o) => !game.targets.some((t) => t.ring === 3 && t.octant === o))!;
     expect(paintTarget(game, free, 3, 2)).toBe(true);
     expect(game.targets).toHaveLength(before + 1);

@@ -1,4 +1,4 @@
-// Navigation's Freeplay mode: painting stars and targets and reading the board as text. A board's text
+﻿// Navigation's Freeplay mode: painting stars and targets and reading the board as text. A board's text
 // is N and the ring count, then, separated by colons: a character a cell, ring by ring from the
 // outside and octant by octant from the east (. empty, 0-4 a star's colour); the targets, each its
 // ring, octant and colour (* for wild); and the incoming star's colour and octant.
@@ -8,6 +8,9 @@ import type { NavigationGame } from './game';
 export const COLOUR_NAMES = ['Blue', 'Orange', 'Red', 'White', 'Yellow'];
 /** Freeplay paints a colour, clears (-1), or for targets makes one wild (5). */
 export const CLEAR = -1, WILD = 5;
+/** Shared Freeplay painting bindings: hold a colour's initial over a cell, X clears, A makes targets wild. */
+export const PAINT_KEYS = [...COLOUR_NAMES.map((name, colour) => ({ id: `paint${name}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: name[0].toLowerCase(), colour })),
+  { id: 'paintClear', label: 'Clear (Freeplay)', defaultKey: 'x', colour: CLEAR }, { id: 'paintWild', label: 'Wild target (Freeplay)', defaultKey: 'a', colour: WILD }];
 export const OCTANT_NAMES = ['East', 'North-east', 'North', 'North-west', 'West', 'South-west', 'South', 'South-east'];
 
 /** Paints a star, or clears one, in the cell given. Stars can float: they settle inward at the next Drop. Returns false when nothing changed. */
@@ -20,10 +23,13 @@ export function paintStar(game: NavigationGame, octant: number, ring: number, co
   return true;
 }
 
-/** Paints a target in one of the three innermost rings, makes it wild, or takes it away. */
+/**
+ * Paints a target in any ring, makes it wild, or takes it away. The game only deals targets in the
+ * three innermost rings; Freeplay also allows the extra outer ring, for tutorial boards.
+ */
 export function paintTarget(game: NavigationGame, octant: number, ring: number, colour: number): boolean {
   const rings = game.board.rings;
-  if (ring < rings - 3 || ring >= rings || colour < CLEAR || colour > WILD) return false;
+  if (ring < 0 || ring >= rings || colour < CLEAR || colour > WILD) return false;
   const index = game.targets.findIndex((t) => t.octant === octant && t.ring === ring);
   if (colour === CLEAR) { if (index < 0) return false; game.targets.splice(index, 1); return true; }
   const old = game.targets[index];
@@ -52,7 +58,7 @@ export function readBoardCode(text: string): BoardText | null {
   const rings = Number(m[1]);
   if (m[2].length !== rings * 8) return null;
   const targets = m[3].split(',').filter(Boolean).map((t) => ({ ring: Number(t[0]), octant: Number(t[1]), colour: t[2] === '*' ? 0 : Number(t[2]), wild: t[2] === '*' }));
-  if (targets.some((t) => t.ring < rings - 3 || t.ring >= rings) || targets.length > MAX_TARGETS) return null;
+  if (targets.some((t) => t.ring >= rings) || targets.length > MAX_TARGETS) return null;
   if (new Set(targets.map((t) => t.ring * 8 + t.octant)).size !== targets.length) return null;
   return { rings, cells: [...m[2]].map((c) => (c === '.' ? EMPTY : Number(c))), targets, entry: { colour: Number(m[4]), octant: Number(m[5]) } };
 }
@@ -70,10 +76,11 @@ export function boardIssues(game: NavigationGame, ww: boolean, wild: boolean): s
   if (game.floating) issues.push('Some stars are floating. They settle inward when you press Drop.');
   if (board.findRuns().length) issues.push('Three or more stars in a row would already have cleared.');
   if (board.matches(game.targets)) issues.push('The constellation is already charted.');
-  if (!game.targets.length) issues.push('There’s no constellation to chart.');
+  if (!game.targets.length) issues.push('Thereâ€™s no constellation to chart.');
   const counts = [0, 1, 2].map((i) => game.targets.filter((t) => t.ring === rings - 1 - i).length);
   const wilds = game.targets.filter((t) => t.wild);
-  if (wilds.length && !wild) issues.push('Wild targets only come with Dennav or Old Dennav’s wild targets on.');
+  if (wilds.length && !wild) issues.push('Wild targets only come with Dennav or Old Dennavâ€™s wild targets on.');
+  if (game.targets.some((t) => t.ring < rings - 3)) issues.push('The game never deals targets in the extra outer ring.');
   if (ww) {
     const [inner, middle, outer] = DENSE_DISTRIBUTION;
     const opening = game.settings.mode === 'ww-test' && FIRST_TEST_DISTRIBUTION.every((n, i) => counts[i] === n);

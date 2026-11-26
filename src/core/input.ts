@@ -70,6 +70,7 @@ export class Input {
     listen(window, 'keydown', (event) => {
       // Typing in the settings panel isn't game input.
       if (event.metaKey || event.altKey || isTyping(event.target)) return;
+      unlockAudio();
       const key = keyName(event);
       if (event.ctrlKey && key !== 'control') {
         if (!this.allowControlKey?.(key)) return;

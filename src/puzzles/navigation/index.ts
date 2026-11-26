@@ -24,7 +24,7 @@ import { drawTarget, targetAppearance } from './appearance';
 import { mobileControls } from './mobile-controls';
 import { LEVEL_TARGETS } from './logic';
 import { copyText, pasteText } from '../../core/clipboard';
-import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
+import { boardCode, boardIssues, CLEAR, COLOUR_NAMES, load as loadBoard, OCTANT_NAMES, PAINT_KEYS, paintStar, paintTarget, readBoardCode, setEntry, WILD } from './create';
 
 const imageUrls = import.meta.glob<string>('./media/*.png', { eager: true, query: '?url', import: 'default' });
 const soundUrls = import.meta.glob<string>('./sounds/*.mp3', { eager: true, query: '?url', import: 'default' });
@@ -32,11 +32,7 @@ const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
 const CX = 225, CY = 300;
 const MODES = ['normal', 'ww-test'] as const;
 const RULE_OPTIONS = MODES.map(value => ({ value, label: modeLabel(value) }));
-const MODE_OPTIONS = [...RULE_OPTIONS, { value: 'create' as const, label: 'Freeplay' }];
-/** Freeplay mode paints with each colour's initial held over a cell, X to clear and A for a wild target. */
-const PAINT_KEYS = [...COLOUR_NAMES.map((name, colour) => ({ id: `paint${name}`, label: `Paint ${name.toLowerCase()} (Freeplay)`, defaultKey: name[0].toLowerCase(), colour })),
-  { id: 'paintClear', label: 'Clear (Freeplay)', defaultKey: 'x', colour: CLEAR }, { id: 'paintWild', label: 'Wild target (Freeplay)', defaultKey: 'a', colour: WILD }];
-
+const MODE_OPTIONS = [...RULE_OPTIONS, { value: 'create' as const, label: 'Freeplay' }, { value: 'tutorial' as const, label: 'Tutorial' }];
 export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplayTime: rawReplayTime }) => {
   const pause = new SessionPause(rawTicks, rawReplayTime);
   const { ticks, setReplayTime } = pause;
@@ -446,6 +442,8 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   const session = panel.session();
   // Freeplay keeps the last rule set chosen; the Rules setting changes it.
   session.select('Mode', MODE_OPTIONS, () => settings.create ? 'create' : settings.mode, value => {
+    // The Dennav tutorial is its own page; its Mode setting comes back here.
+    if (value === 'tutorial') { location.hash = '#/dennav-tutorial'; return; }
     settings.create = value === 'create'; if (value !== 'create') settings.mode = value; saveSettings(); selectInnerRing(settingsRings());
   }, { title: 'Freeplay lets you paint the stars, targets and incoming star' });
   session.button('Start', () => {
