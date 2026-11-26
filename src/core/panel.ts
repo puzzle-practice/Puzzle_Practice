@@ -35,6 +35,7 @@ type Get<T> = () => T;
 export interface Option<T> {
   value: T;
   label: string;
+  group?: string;
 }
 
 export interface GroupOptions extends ControlOptions {
@@ -72,6 +73,9 @@ export interface NumberOptions extends ControlOptions {
 }
 export interface RangeOptions extends NumberOptions {
   maxValue?: Get<number>;
+  /** Values past this threshold are marked in red. */
+  warningFrom?: Get<number>;
+  tooltip?: Get<string>;
   /** Formats the displayed value without changing the range's underlying precision. */
   formatValue?: (value: number) => string;
   /** Reserves a fixed output width so changing digits do not shift the range. */
@@ -580,6 +584,35 @@ export class Group {
     private readonly choices?: Group,
   ) {}
 
+  /** A compact row of fields with labels above their controls. */
+  row(columns = 2, options: ControlOptions = {}): Group {
+    const element = el('div', 'panel-fields-row');
+    element.style.setProperty('--columns', String(columns));
+    this.element.append(element);
+    this.panel.watch(element, options);
+    return new Group(this.panel, element);
+  }
+
+  /** A small set of choices, displayed as buttons with an explicit selected state. */
+  segmented<T extends string | number>(label: string, options: readonly Option<T>[], get: Get<T>, set: (value: T) => void, opts: ControlOptions = {}): this {
+    const row = el('div', 'panel-field is-segmented');
+    const controls = el('div', 'panel-segmented');
+    controls.setAttribute('role', 'group'); controls.setAttribute('aria-label', label);
+    for (const option of options) {
+      const button = el('button', 'panel-button', option.label); button.type = 'button';
+      button.addEventListener('click', () => {
+        this.panel.beforeChange(this.element, false, opts.stopsSession);
+        set(option.value); this.panel.used();
+      });
+      this.panel.watch(button, { disabled: opts.disabled }, button);
+      this.panel.addSync(() => button.setAttribute('aria-pressed', String(get() === option.value)));
+      controls.append(button);
+    }
+    row.append(el('span', 'panel-label', label), controls);
+    this.element.append(row); this.panel.watch(row, opts);
+    return this;
+  }
+
   private field(label: string, control: HTMLElement, options: ControlOptions, input?: HTMLInputElement | HTMLSelectElement): HTMLElement {
     const heading = this.element.querySelector(':scope > .panel-title');
     if (heading?.textContent === label) heading.remove();
@@ -600,16 +633,23 @@ export class Group {
       const next = choices();
       if (current === next) return;
       current = next;
-      select.replaceChildren(...next.map((option, i) => {
-        const node = el('option', '', option.label);
-        node.value = String(i);
-        return node;
-      }));
+      const nodes: Array<HTMLOptionElement | HTMLOptGroupElement> = [];
+      let group: HTMLOptGroupElement | null = null;
+      for (const [i, option] of next.entries()) {
+        const node = el('option', '', option.label); node.value = String(i);
+        if (option.group) {
+          if (!group || group.label !== option.group) {
+            group = el('optgroup'); group.label = option.group; nodes.push(group);
+          }
+          group.append(node);
+        } else { group = null; nodes.push(node); }
+      }
+      select.replaceChildren(...nodes);
     };
     syncOptions();
     select.addEventListener('change', () => {
-      this.panel.beforeChange(this.element, false, opts.stopsSession);
       const option = current?.[Number(select.value)];
+      this.panel.beforeChange(this.element, false, opts.stopsSession);
       if (option) set(option.value);
       this.panel.used();
     });
@@ -628,8 +668,9 @@ export class Group {
     const input = el('input', 'panel-switch');
     input.type = 'checkbox';
     input.addEventListener('change', () => {
+      const checked = input.checked;
       this.panel.beforeChange(this.element, false, opts.stopsSession);
-      set(input.checked);
+      set(checked);
       this.panel.used();
     });
     const row = el('label', 'panel-toggle');
@@ -656,6 +697,7 @@ export class Group {
     if (this.choices) { this.choices.range(label, get, set, opts); return this; }
     const input = el('input', 'panel-range');
     input.type = 'range';
+    if (opts.warningFrom) input.classList.add('has-warning-zone');
     input.min = String(opts.min ?? 0);
     input.max = String(opts.max ?? 100);
     input.step = String(opts.step ?? 1);
@@ -664,8 +706,9 @@ export class Group {
     const control = el('div', 'panel-range-control');
     control.append(input, output);
     input.addEventListener('input', () => {
+      const value = Number(input.value);
       this.panel.beforeChange(this.element, false, opts.stopsSession);
-      set(Number(input.value));
+      set(value);
       this.panel.sync();
     });
     input.addEventListener('change', () => {
@@ -675,8 +718,15 @@ export class Group {
     this.field(label, control, opts, input);
     this.panel.addSync(() => {
       if (opts.maxValue) input.max = String(opts.maxValue());
+      if (opts.tooltip) input.title = opts.tooltip();
       const value = String(get());
       input.value = value;
+      if (opts.warningFrom) {
+        const warning = opts.warningFrom();
+        const percent = (warning - Number(input.min)) / (Number(input.max) - Number(input.min)) * 100;
+        input.style.setProperty('--warning-start', `${Math.max(0, Math.min(100, percent))}%`);
+        input.classList.toggle('is-over-limit', Number(value) > warning);
+      }
       output.textContent = opts.formatValue?.(Number(value)) ?? value;
     });
     return this;
@@ -691,9 +741,10 @@ export class Group {
     if (opts.max !== undefined) input.max = String(opts.max);
     input.step = String(opts.step ?? 1);
     input.addEventListener('change', () => {
+      const text = input.value;
       this.panel.beforeChange(this.element, false, opts.stopsSession);
-      let value = Number(input.value);
-      if (input.value === '' || Number.isNaN(value)) value = get();
+      let value = Number(text);
+      if (text === '' || Number.isNaN(value)) value = get();
       if (opts.min !== undefined) value = Math.max(opts.min, value);
       if (opts.max !== undefined) value = Math.min(opts.max, value);
       set(value);
@@ -741,8 +792,9 @@ export class Group {
     if (opts.placeholder) input.placeholder = opts.placeholder;
     if (opts.inputMode) input.inputMode = opts.inputMode;
     input.addEventListener('change', () => {
+      const value = input.value;
       this.panel.beforeChange(this.element, false, opts.stopsSession);
-      set(input.value);
+      set(value);
       input.value = get();
       this.panel.used();
     });

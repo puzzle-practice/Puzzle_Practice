@@ -509,23 +509,32 @@ export class Fighter {
    * Freeplay mode: a punch lands now, between shots, as it would after one. The shot timer starts
    * over once it has landed. Returns the punch, or null if a ball or strike is still moving.
    */
-  strikeNow(s: Shaft, glove: Glove, now: number): PunchAnim | null {
+  strikeNow(s: Shaft, glove: Glove, now: number, allowExcessBruises = false): PunchAnim | null {
     if (!this.canFire || this.punch || this.sprinkle || this.flight) return null;
-    this.board.punched();
-    const result = this.board.punch(s, glove);
+    if (s.height > 0 && s.width > 0) this.board.punched();
+    const result = this.board.punch(s, glove, allowExcessBruises);
     const steps = result.columns.map(punchSteps);
     const end = now + Math.max(0, ...steps) * PUNCH_STEP_MS;
     this.punch = { result, side: s.side, start: now, steps, end };
     this.punchImpacts(result, s.side, now);
-    const landed = Math.min(s.width, 9) * Math.min(s.height, H - 1 - this.board.damage);
+    let landed = Math.min(s.width, 9) * Math.min(s.height, H - 1 - this.board.damage);
+    let settledAt = end;
+    if (s.count > 0 && s.height === 0) {
+      const balls = this.board.sprinkle(s, glove);
+      if (balls.length) {
+        settledAt = Math.max(end, ...balls.map(b => end + (H + 1 + b.depth - b.cell.y) * STEP_Y * SPRINKLE_MS_PER_PX));
+        this.sprinkle = { balls, start: end, end: settledAt };
+        landed += balls.length;
+      }
+    }
     this.stats.received += landed;
     this.stats.largestReceived = Math.max(this.stats.largestReceived, landed);
-    this.controlAt = end;
+    this.controlAt = settledAt;
     this.warned = false;
     this.charging = -1;
     this.phase = 'strike';
-    this.busyUntil = end;
-    if (this.board.isDead() && !this.sandbox.endless) this.knockOut(end);
+    this.busyUntil = settledAt;
+    if (this.board.isDead() && !this.sandbox.endless) this.knockOut(settledAt);
     return this.punch;
   }
 

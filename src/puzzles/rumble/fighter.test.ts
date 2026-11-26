@@ -49,6 +49,20 @@ describe('Rumble fire timing', () => {
     } else expect(heard.some(sound => sound.name === 'grape_fall')).toBe(false);
   });
 
+  it('lands and animates sprinkle from the calculated one-group clear', () => {
+    const { f } = setup();
+    f.board.shots = 5;
+    const hit = f.strikeNow(attack({ height: 0, width: 0, count: 6 }), new Glove(0), 100);
+    expect(hit).not.toBeNull();
+    expect(f.sprinkle?.balls).toHaveLength(6);
+    expect(f.stats.received).toBe(6);
+    expect(f.board.shots).toBe(5);
+    expect(f.board.count()).toBe(6);
+    f.update(f.sprinkle!.end + 1);
+    expect(f.sprinkle).toBeNull();
+    expect(f.canFire).toBe(true);
+  });
+
   it('ignores a complete click during flight', () => {
     const { f } = setup();
     const landed = shoot(f, 0);

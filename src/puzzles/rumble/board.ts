@@ -687,7 +687,7 @@ export class Board {
    * column without enough empty cells loses its topmost balls to make room. Nothing is pushed into
    * the bottom row.
    */
-  punch(shaft: Shaft, glove: Glove): PunchResult {
+  punch(shaft: Shaft, glove: Glove, allowExcessBruises = false): PunchResult {
     const result: PunchResult = { columns: [], bounces: [] };
     if (shaft.height <= 0 || shaft.width <= 0) return result;
     const bottom = H - 1;
@@ -705,7 +705,7 @@ export class Board {
     }
     if (length === 0) return result;
     const blacks = new Array<number>(length * width).fill(0);
-    const bruised = Math.min(shaft.blacks, Math.trunc((length * width) / 2));
+    const bruised = Math.min(shaft.blacks, allowExcessBruises ? length * width : Math.trunc((length * width) / 2));
     for (let i = 0; i < bruised; i++) blacks[i] = 1;
     shuffle(blacks, this.alt);
     let b = 0;

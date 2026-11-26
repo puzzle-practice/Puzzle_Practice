@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
-import { H } from './board';
+import { Board, H } from './board';
 import { colourMapping } from './gloves';
 import { BLUE, CYAN, FURBALL, ORANGE, RED, ball, charged, colourOf, dark, isBall, isCharged, isDark, light } from './pieces';
 import {
   MAX_LENGTH, MAX_WIDTH, SimGlove, ballCount, convertBoard, dealBoard, emptyBoard, floating, resetSparks, rollPunch, shaftOf,
   werewolfPiece, furballColours, furballSlots, viewerBoard, viewerBruises, dealInto, snapshotBoard, restoreBoard,
-  applyBoardCode, boardCode, readBoardCode,
+  applyBoardCode, boardCode, readBoardCode, generateChargedBoard, punchFromClear,
 } from './create';
 import { Match, type MatchSettings } from './match';
 import { DEFAULT_STYLE } from './npc';
@@ -17,6 +17,133 @@ describe('Create mode', () => {
     expect(ballCount(full)).toBe(10 + 9 + 10 + 9);
     expect(full.lowest()).toBe(3);
     expect(ballCount(dealBoard(new Random(1), 6, 0, false))).toBe(0);
+  });
+
+  it.each([false, true])('generates a reachable, supported charged chain beneath plain dense rows (werewolf=%s)', werewolf => {
+    for (let seed = 0; seed < 30; seed++) {
+      const normalRows = [1, 4, 6, 12][seed % 4], density = [5, 35, 65, 100][Math.floor(seed / 4) % 4];
+      const b = new Board(new Random(1), new Random(2), [new Random(3), new Random(4)], {
+        startRows: 0, werewolf, oneFisted: seed % 2 === 0, damageLevel: seed % 3 === 0 ? 10 : 0,
+      });
+      const hands = seed % 5 === 0 && werewolf ? [ball(FURBALL), ball(FURBALL)] : [ball(RED), ball(BLUE)];
+      const opening = generateChargedBoard(b, new Random(seed), normalRows, 6, density, werewolf, hands);
+      expect(opening, `seed ${seed}`).not.toBeNull();
+      const firstRow = b.damage + normalRows, lastRow = Math.min(firstRow + 6, H - 1);
+      let capacity = 0, filled = 0;
+      for (let y = b.damage; y < firstRow; y++) for (let x = 0; x < b.width(y); x++) {
+        expect(isBall(b.get({ x, y }))).toBe(true);
+        expect(isCharged(b.get({ x, y }))).toBe(false);
+      }
+      for (let y = firstRow; y < lastRow; y++) for (let x = 0; x < b.width(y); x++) {
+        capacity++;
+        if (isBall(b.get({ x, y }))) filled++;
+      }
+      expect(filled).toBe(opening!.filledSlots);
+      expect(opening!.availableSlots).toBeLessThan(capacity);
+      const wanted = Math.max(3, Math.round(opening!.availableSlots * density / 100));
+      expect(filled).toBeLessThanOrEqual(wanted);
+      expect(wanted - filled).toBeLessThanOrEqual(4);
+      if (density === 100) expect(filled).toBe(opening!.availableSlots);
+      expect(b.groupOf(b.sparks[0]).size).toBe(3);
+      expect(b.sparks.length).toBeGreaterThan(0);
+      expect(b.sparks[0].y).toBe(firstRow);
+      for (const spark of b.sparks) {
+        expect(spark.y).toBeGreaterThanOrEqual(firstRow);
+        expect(isCharged(b.get(spark))).toBe(true);
+        expect(colourOf(b.get(spark))).not.toBe(FURBALL);
+        expect(b.groupOf(spark).size).toBeGreaterThanOrEqual(3);
+      }
+      expect(floating(b)).toEqual([]);
+      const shot = b.shoot(b.path(opening!.fist, opening!.dir))!;
+      const copy = b.clone(); copy.set(shot.rest, ball(opening!.colour));
+      expect(copy.place(shot.rest)?.groups).toHaveLength(b.sparks.length);
+    }
+  });
+
+  it.each([false, true])('keeps the opening at three and drops the selected hanging balls (furball=%s)', werewolf => {
+    for (let seed = 0; seed < 12; seed++) {
+      const b = new Board(new Random(1), new Random(2), [new Random(3), new Random(4)], { startRows: 0, werewolf });
+      const dropOff = [0, 6, 20, 40][seed % 4];
+      const opening = generateChargedBoard(b, new Random(seed), 6, 6, 95, werewolf, [ball(RED), ball(BLUE)], 3, dropOff)!;
+      expect(opening, `seed ${seed}, drop-off ${dropOff}`).not.toBeNull();
+      expect(b.groupOf(b.sparks[0]).size).toBe(3);
+      expect(floating(b)).toEqual([]);
+      const distribution = new Map<number, number>();
+      for (const spark of b.sparks) {
+        const size = b.groupOf(spark).size, colour = colourOf(b.get(spark));
+        distribution.set(colour, (distribution.get(colour) ?? 0) + size);
+        expect(colour).not.toBe(FURBALL);
+      }
+      expect(distribution.size).toBeGreaterThanOrEqual(3);
+      expect(Math.max(...distribution.values()) / opening.filledSlots).toBeLessThan(0.6);
+      const shot = b.shoot(b.path(opening.fist, opening.dir))!;
+      const copy = b.clone(); copy.set(shot.rest, ball(opening.colour));
+      const clear = copy.place(shot.rest)!;
+      expect(clear.groups).toHaveLength(b.sparks.length);
+      expect(clear.grapes).toHaveLength(dropOff);
+      for (const p of clear.grapes) expect(b.groupOf(p).size).toBeLessThanOrEqual(colourOf(b.get(p)) === FURBALL ? 4 : 2);
+      if (werewolf) expect(clear.grapes.filter(p => colourOf(b.get(p)) === FURBALL).length).toBeGreaterThanOrEqual(Math.ceil(dropOff * 0.6));
+    }
+  });
+
+  it('fits a minimal charged state beneath dense rows even with maximum damage', () => {
+    const b = new Board(new Random(1), new Random(2), [new Random(3), new Random(4)], { startRows: 0, damageLevel: 100 });
+    const opening = generateChargedBoard(b, new Random(3), 1, 6, 100, false, [ball(RED), ball(BLUE)]);
+    expect(opening).not.toBeNull();
+    expect(b.sparks.every(p => p.y > b.damage && b.groupOf(p).size >= 3)).toBe(true);
+    expect(floating(b)).toEqual([]);
+  });
+
+  it('uses the requested average group size while preserving every group and its opening', () => {
+    const means: number[] = [];
+    for (const size of [3, 6, 10]) {
+      const averages: number[] = [];
+      for (let seed = 0; seed < 20; seed++) {
+        const b = emptyBoard(new Random(1));
+        const opening = generateChargedBoard(b, new Random(seed), 6, 6, 85, false, [ball(RED), ball(BLUE)], size)!;
+        expect(opening).not.toBeNull();
+        averages.push(opening.averageGroupSize);
+        const sizes = b.sparks.map(p => b.groupOf(p).size);
+        expect(sizes.every(n => n >= 3)).toBe(true);
+        expect(sizes.reduce((sum, n) => sum + n, 0) / sizes.length).toBe(opening.averageGroupSize);
+        const copy = b.clone(), shot = copy.shoot(copy.path(opening.fist, opening.dir))!;
+        copy.set(shot.rest, ball(opening.colour));
+        expect(copy.place(shot.rest)?.groups).toHaveLength(b.sparks.length);
+      }
+      const mean = averages.reduce((sum, n) => sum + n, 0) / averages.length;
+      expect(Math.abs(mean - size)).toBeLessThan(1.6);
+      means.push(mean);
+    }
+    expect(means[1]).toBeGreaterThan(means[0]);
+    expect(means[2]).toBeGreaterThan(means[1]);
+  });
+
+  it('keeps the normal bruise cap while permitting an explicit experimental override', () => {
+    const capped = emptyBoard(new Random(1)), experimental = emptyBoard(new Random(1));
+    const spec = { bludgeon: 127, colours: 0, length: 4, width: 6, side: 1, bruises: 24 };
+    capped.punch(shaftOf(spec), new SimGlove(127, 0, false));
+    experimental.punch(shaftOf(spec), new SimGlove(127, 0, false), true);
+    expect(capped.cells.filter(isDark)).toHaveLength(12);
+    expect(experimental.cells.filter(isDark)).toHaveLength(24);
+  });
+
+  it('calculates punch growth from time, groups, drop-off and extra matched balls', () => {
+    expect(punchFromClear(4, 0, 0, 0)).toMatchObject({ height: 3, width: 4, count: 0 });
+    expect(punchFromClear(4, 0, 0, 5)).toMatchObject({ height: 6, width: 4 });
+    expect(punchFromClear(4, 12, 0, 0)).toMatchObject({ height: 3, width: 8 });
+    expect(punchFromClear(4, 0, 12, 0)).toMatchObject({ height: 3, width: 9 });
+    expect(punchFromClear(1, 0, 6, 0)).toMatchObject({ height: 0, width: 0, count: 3 });
+    expect(punchFromClear(60, 200, 200, 30)).toMatchObject({ height: H, width: 9 });
+  });
+
+  it('repeats charged layouts and opening shots from the same seed, and leaves impossible boards untouched', () => {
+    const a = emptyBoard(new Random(1)), b = emptyBoard(new Random(1));
+    const opening = generateChargedBoard(a, new Random(12), 6, 6, 65, false, [ball(RED), ball(BLUE)]);
+    expect(generateChargedBoard(b, new Random(12), 6, 6, 65, false, [ball(RED), ball(BLUE)])).toEqual(opening);
+    expect(snapshotBoard(a)).toEqual(snapshotBoard(b));
+    const before = snapshotBoard(a);
+    expect(generateChargedBoard(a, new Random(3), H, 6, 65, false, [ball(RED)])).toBeNull();
+    expect(snapshotBoard(a)).toEqual(before);
   });
 
   it('never deals a ball that is not attached to the top', () => {
