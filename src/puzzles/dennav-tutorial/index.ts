@@ -37,6 +37,10 @@ const soundUrls = {
 };
 const imageUrls = import.meta.glob<string>('../navigation/media/*.png', { eager: true, query: '?url', import: 'default' });
 const COLOURS = ['blue', 'orange', 'red', 'white', 'yellow'];
+/** Off for now: the buzz when a board fails, to come back later. */
+const FAIL_BUZZ = false;
+/** Off for now: ringing stacked stars in Layer 2 while it is played; they're still ringed once submitted. */
+const LIVE_STACK_WARNINGS = false;
 const PLAN_WILD_OUTLINE = '#91bba6', PLAN_PROBLEM_OUTLINE = '#ce9c96', PLAN_WARNING_OUTLINE = '#d8c48e';
 const STRICTNESS: { value: Strictness; label: string }[] = [
   { value: 'lenient', label: 'Lenient: any working triple' },
@@ -608,7 +612,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     buildSubmitPending = false;
     marks = issue.cells.map((cell) => ({ cell, colour: PLAN_PROBLEM_OUTLINE }));
     captionText = issue.message; status = pauseBuildOnFail ? `${issue.message} Space: retry · Enter: next.` : issue.message;
-    sounds.play('buzz', 0.6);
+    if (FAIL_BUZZ) sounds.play('buzz', 0.6);
     buildResetPending = !pauseBuildOnFail;
     syncPlanDetails(); draw(ticks());
   }
@@ -693,7 +697,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     finishStopped = true; finishFailed = true;
     marks = issue.cells.map((cell) => ({ cell, colour: PLAN_PROBLEM_OUTLINE }));
     captionText = issue.message; status = `${issue.message} Space: retry · Enter: next.`;
-    sounds.play('buzz', 0.6);
+    if (FAIL_BUZZ) sounds.play('buzz', 0.6);
     syncPlanDetails(); draw(ticks());
   }
   function finishMove(action: Action): void {
@@ -1102,7 +1106,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     marks = cells.map((cell) => ({ cell, colour: PLAN_PROBLEM_OUTLINE }));
     captionText = message;
     status = pauseBuildOnFail ? `${message} Space: retry · Enter: next.` : message;
-    sounds.play('buzz', 0.6);
+    if (FAIL_BUZZ) sounds.play('buzz', 0.6);
     r3ResetPending = !pauseBuildOnFail;
     recordAttempt(false, since(r3FirstMove));
   }
@@ -1218,7 +1222,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     marks = cells.map((cell) => ({ cell, colour: PLAN_PROBLEM_OUTLINE }));
     captionText = message;
     status = pauseBuildOnFail ? `${message} Space: retry · Enter: next.` : message;
-    sounds.play('buzz', 0.6);
+    if (FAIL_BUZZ) sounds.play('buzz', 0.6);
     stageResetPending = !pauseBuildOnFail;
     recordAttempt(false, since(stageFirstMove));
   }
@@ -1227,7 +1231,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     if (!game || !stageDeal || stageStopped || busy()) return;
     const cells = game.board.cells;
     const judged = mode === 'donkeybase' ? judgeBasePosition(cells, game.targets) : judgeLayer2(cells, game.targets, stageDeal.base, stageTurns, final);
-    if (mode === 'donkeylayer' && judged.kind !== 'fail') {
+    if (mode === 'donkeylayer' && judged.kind !== 'fail' && (final || LIVE_STACK_WARNINGS)) {
       // Stacks are warned about, not failed: ringed softly, with the last one said.
       const warnings = layer2Warnings(cells, stageDeal.base, stageTurns);
       marks = warnings.flatMap((w) => w.cells.map((cell) => ({ cell, colour: PLAN_WARNING_OUTLINE })));
@@ -1315,7 +1319,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     marks = cells.map((cell) => ({ cell, colour: PLAN_PROBLEM_OUTLINE }));
     captionText = message;
     status = pauseBuildOnFail ? `${message} Space: retry · Enter: next.` : message;
-    sounds.play('buzz', 0.6);
+    if (FAIL_BUZZ) sounds.play('buzz', 0.6);
     ringResetPending = !pauseBuildOnFail;
     recordAttempt(false, since(ringFirstMove));
   }
@@ -1398,7 +1402,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     marks = issue.cells.map((cell) => ({ cell, colour: PLAN_PROBLEM_OUTLINE }));
     captionText = issue.message;
     status = reset ? '' : `${issue.message} Space: retry · Enter: next.`;
-    sounds.play('buzz', 0.6);
+    if (FAIL_BUZZ) sounds.play('buzz', 0.6);
     recordAttempt(false, since(trainingFirstMove));
     trainingNextAt = reset ? ticks() + 1 : 0;
   }
