@@ -167,6 +167,50 @@ a {
   outline: none;
 }
 
+.navigation-mobile-controls {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.navigation-mobile-rings {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.navigation-mobile-pad {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+  grid-template-areas: '. up .' 'left drop right' '. down .';
+  gap: 6px 8px;
+}
+
+.navigation-mobile-controls .panel-button {
+  min-width: 44px;
+  min-height: 44px;
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.navigation-mobile-controls [aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.navigation-mobile-up { grid-area: up; }
+.navigation-mobile-down { grid-area: down; }
+.navigation-mobile-left { grid-area: left; }
+.navigation-mobile-right { grid-area: right; }
+.navigation-mobile-drop { grid-area: drop; }
+
 .status {
   margin: 12px 0 0;
   text-align: center;

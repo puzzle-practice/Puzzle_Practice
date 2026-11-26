@@ -15,6 +15,7 @@ import { W as SWORD_COLUMNS } from './swordfight/board';
 import { COL_PX as SWORD_COLUMN_PX } from './swordfight/fighter';
 import { setWarningTimer } from '../core/audio';
 import { END_HOLD_MS } from '../core/end-hold';
+import { playableSettings } from './navigation/game';
 import { SailingGame } from './sailing/game';
 import { PatchingBoard, movable as patchingMovable } from './patching/logic';
 import { CELL as CARP_CELL, COLS as CARP_COLS, Game as CarpentryGame, ROWS as CARP_ROWS, VIEW_X as CARP_X, VIEW_Y as CARP_Y } from './vampire-carp/game';
@@ -2035,9 +2036,38 @@ describe('Swordfight knockout messages', () => {
 });
 
 describe('Navigation sessions and replay', () => {
+  it.each(['ww', 'ww-test'] as const)('keeps %s wild-target appearance out of game state and score settings', async mode => {
+    const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
+    const settings = playableSettings({ ...DEFAULT_SETTINGS, mode, timerMs: 0, slowDrop: true });
+    const store = new Store('navigation');
+    store.set('settings', settings);
+    store.set('wwTimerDefault', true);
+    const { panel, buttons, toggles } = panelHarness();
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => 0 } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    instance.frame([]);
+    const recorder = captured.recorders[0];
+    const before = recorder.fingerprint!();
+    const key = settingsKey(settings);
+    const history = store.history(key);
+    const toggle = toggles.get('Settings:Appearance:Match wild targets to pieces')!;
+    for (const on of [true, false]) {
+      toggle(on);
+      instance.frame([]);
+      expect(recorder.fingerprint!()).toBe(before);
+      expect(store.get('settings', null)).toEqual(settings);
+      expect(store.get('matchWildTargetColour', null)).toBe(on);
+      expect(store.history(key)).toEqual(history);
+      expect(settingsKey(settings)).toBe(key);
+    }
+    instance.dispose?.();
+  });
+
   it.each(['ww', 'ww-test'] as const)('keeps the %s score and countdown across repeated Dismiss, excludes pauses and replays the whole run', async mode => {
     const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
-    const settings = { ...DEFAULT_SETTINGS, mode, timerMs: 120000 };
+    const settings = playableSettings({ ...DEFAULT_SETTINGS, mode, timerMs: 120000 });
     const store = new Store('navigation');
     store.set('settings', settings);
     const { panel, buttons, buttonStates, clocks, results } = panelHarness();
@@ -2194,7 +2224,7 @@ describe('Navigation sessions and replay', () => {
 
   it.each(['normal', 'ww', 'ww-test'] as const)('%s Dismiss restarts a paused board and a finished board without duplicating history', async mode => {
     const { DEFAULT_SETTINGS, settingsKey } = await import('./navigation/game');
-    const settings = { ...DEFAULT_SETTINGS, mode, timerMs: 120000, dismissDelayMs: 0 };
+    const settings = playableSettings({ ...DEFAULT_SETTINGS, mode, timerMs: 120000, dismissDelayMs: 0 });
     const store = new Store('navigation');
     store.set('settings', settings);
     const { panel, buttons, buttonStates, stats, results } = panelHarness();
@@ -2324,8 +2354,9 @@ describe('Navigation sessions and replay', () => {
     ['Normal', { mode: 'normal' as const, extraRing: false }, 3],
     ['WW with the extra ring', { mode: 'ww' as const, extraRing: true }, 4],
     ['Freeplay', { mode: 'ww' as const, extraRing: true, create: true }, 4],
-  ])('%s: the first click on a new board only focuses it', async (_name, overrides, rings) => {
-    const { DEFAULT_SETTINGS } = await import('./navigation/game');
+  ])('%s: clicks select a ring immediately without rotating it', async (_name, overrides, rings) => {
+    const { DEFAULT_SETTINGS, NavigationGame } = await import('./navigation/game');
+    const rotate = vi.spyOn(NavigationGame.prototype, 'rotate');
     const settings = { ...DEFAULT_SETTINGS, ...overrides, timerMs: 120000, dismissDelayMs: 0 };
     const store = new Store('navigation');
     store.set('settings', settings);
@@ -2343,10 +2374,56 @@ describe('Navigation sessions and replay', () => {
     const click = () => { now += 100; frame = -1; instance.frame([outer, { ...outer, type: 'mouseup' } as InputEvent]); return frame; };
     for (const restart of [() => buttons.get('Play::Start')!(), () => buttons.get('Play::Dismiss')!()]) {
       restart();
-      expect(click()).toBe(0);
       expect(click()).toBe(rings - 1);
+      expect(click()).toBe(rings - 1);
+      instance.frame([{ ...outer, button: 3 } as InputEvent]);
+      expect(rotate).not.toHaveBeenCalled();
     }
     instance.dispose?.();
+  });
+
+  it('preserves click-to-turn in historical replays while new clicks only select', async () => {
+    const { DEFAULT_SETTINGS, NavigationGame } = await import('./navigation/game');
+    const { readReplayFile, saveReplayFile } = await import('../core/replay-storage');
+    const { decodeReplayBlob, encodeReplayBlob, replayMetadata } = await import('../core/replay');
+    const rotate = vi.spyOn(NavigationGame.prototype, 'rotate');
+    const store = new Store('navigation');
+    store.set('settings', { ...DEFAULT_SETTINGS, timerMs: 0, slowDrop: true, extraRing: true });
+    store.set('wwTimerDefault', true);
+    const { panel, buttons } = panelHarness();
+    let now = 0;
+    const screen = new Proxy({ ctx: canvasContext() }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
+    const factory = (await import('./navigation/index')).default;
+    const instance = await factory({ screen, input: { mouse: [-1, -1] }, panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    buttons.get('Play::Start')!();
+    for (const [at, button] of [[100, 1], [200, 1], [300, 1], [10000, 3]]) {
+      now = at; instance.frame([{ type: 'mousedown', button, pos: [225, 104] }]);
+    }
+    expect(rotate).not.toHaveBeenCalled();
+    now = 20000; instance.frame([]);
+    buttons.get('Play::Start')!();
+    await replayWrites.idle();
+    const [file] = await listReplayFiles('navigation');
+    const tape = (await decodeReplayBlob((await readReplayFile(file))!))!;
+    expect(tape.simulatorVersion).toBe(5);
+    // The same raw click sequence in rules 3: focus, select, turn right, turn left.
+    tape.simulatorVersion = 3;
+    tape.at++;
+    delete tape.checks;
+    const blob = await encodeReplayBlob(tape);
+    await saveReplayFile({ blob, metadata: replayMetadata(tape, blob.size) });
+    instance.dispose?.();
+    const reloaded = await factory({ screen, input: { mouse: [-1, -1] }, panel: panelHarness().panel, store, ticks: () => now,
+      setReplayTime: (time: number | null) => { if (time !== null) now = time; } } as unknown as PuzzleContext);
+    const recorder = captured.recorders.at(-1)!;
+    await vi.waitFor(() => expect(recorder.hasPlayableAt(tape.at, tape.runId)).toBe(true));
+    const perf = vi.spyOn(performance, 'now').mockReturnValue(0);
+    expect(await recorder.playAt(tape.at, tape.runId)).toBe(true);
+    perf.mockReturnValue(tape.duration); reloaded.frame([]);
+    expect(rotate.mock.calls).toEqual([[0, true], [0, false]]);
+    perf.mockRestore();
+    reloaded.dispose?.();
   });
 
   it.each(['normal', 'ww', 'ww-test'] as const)('Freeplay under %s rules keeps the 5-minute timer, and a booch deals a fresh board', async (mode) => {
@@ -2498,7 +2575,8 @@ describe('Navigation sessions and replay', () => {
     ['ww-test',false,false], ['ww-test',false,true], ['ww-test',true,false], ['ww-test',true,true],
   ] as const)('%s extraRing=%s wildTargets=%s preserves results through pause, playback, seeking and Stop', async (mode,extraRing,wildTargets) => {
     const store = new Store('navigation');
-    const settings = { mode,difficulty:4,extraRing,wildTargets,timerMs:120000 };
+    const { DEFAULT_SETTINGS } = await import('./navigation/game');
+    const settings = playableSettings({ ...DEFAULT_SETTINGS, mode,difficulty:4,extraRing,wildTargets,timerMs:120000 });
     store.set('settings',settings);
     const { panel,buttons,buttonStates,setters,stats,results } = panelHarness();
     let now=0;
@@ -2527,7 +2605,7 @@ describe('Navigation sessions and replay', () => {
     expect(expected.rows.some(([name])=>name==='Boards')).toBe(mode !== 'normal');
     // The report's brackets always run up to a triple, even with no chains.
     if (mode !== 'normal') expect(expected.report.cleared[0].items.length).toBeGreaterThanOrEqual(3);
-    expect(expected.report.mode).toBe(mode === 'ww-test' ? 'Dennav' : mode === 'ww' ? 'Old Dennav' : 'Normal');
+    expect(expected.report.mode).toBe(mode === 'normal' ? 'Normal' : 'Dennav');
     await replayWrites.idle();
     const data=JSON.parse(exportAll()).data;
     const files=await listReplayFiles('navigation');expect(files).toHaveLength(1);
