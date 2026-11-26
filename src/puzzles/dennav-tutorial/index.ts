@@ -69,12 +69,12 @@ const MODES: { value: Mode; label: string }[] = [
   { value: 'plan', label: '2. Plan Position' },
   { value: 'build', label: '3. Build Ring 1' }, { value: 'finish', label: '4. Finish the Combo' },
   { value: 'practise', label: '5. Practice' }, { value: 'donkey', label: '5. Practice' },
-  { value: 'aftertriple', label: '1. Vertical triple' },
+  { value: 'aftertriple', label: '6. After a triple' },
 ];
 /** Topic-specific lessons; Example and Practice are available for every topic. */
 function modeFits(mode: Mode, lesson: string): boolean {
-  // After a triple is a lesson of its own, with none of the strategy topics' modes.
-  if (lesson === 'after-triple' || mode === 'aftertriple') return lesson === 'after-triple' && mode === 'aftertriple';
+  // After a triple: a vertical triple breaks, then the board plays on (Vertical triple's last lesson).
+  if (mode === 'aftertriple') return lesson === 'vertical-triple';
   if (mode.startsWith('cascade-')) return lesson === 'cascade-single';
   // The donkey and vegas practise from scratch with Donkey from scratch's flow, listed as their Practice.
   if (mode === 'practise' && (lesson === 'cascade-single' || lesson === 'donkey' || lesson === 'vegas')) return false;
@@ -135,8 +135,10 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   });
   const matchWildColour = targetAppearance(panel);
   const rng = new Random();
-  let lessonIndex = Math.max(0, TOPICS.findIndex((l) => l.id === store.get('lesson', TOPICS[0].id)));
-  let mode: Mode = store.get<Mode>('mode', 'learn');
+  // After a triple used to be a topic of its own; it is now Vertical triple's last lesson.
+  const storedLesson = store.get('lesson', TOPICS[0].id);
+  let lessonIndex = Math.max(0, TOPICS.findIndex((l) => l.id === (storedLesson === 'after-triple' ? 'vertical-triple' : storedLesson)));
+  let mode: Mode = storedLesson === 'after-triple' ? 'aftertriple' : store.get<Mode>('mode', 'learn');
   if (!MODES.some((m) => m.value === mode)) mode = 'learn';
   let stage = store.get<number>('stage', 0);
   let slow = store.get<boolean>('slow', true);
@@ -150,7 +152,6 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   const lesson = (): Lesson => TOPICS[lessonIndex];
 
   // What's on the board.
-  // A standalone lesson has no example boards: start from the first topic's until it deals its own.
   const firstMoment = lesson().moments[0] ?? LESSONS[0].moments[0];
   let shown: Position = firstMoment.position;
   let example: Example = firstMoment;

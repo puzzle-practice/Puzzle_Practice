@@ -206,21 +206,5 @@ export const LESSONS: Lesson[] = [
 /** The vegas example with the orange target filled correctly, so it charts a link early, as a donkey. */
 export const VEGAS_AS_PLAYED = moment('Vegas example, one link short', 'N4:..34...1100203243042114144033221:353,272,201,134:26', rotate(2, false));
 
-/**
- * After a triple: a standalone lesson, not a strategy. It deals a board a turn away from a vertical triple,
- * plays the break, then the player plays on from the board it leaves as normal until they ask for a new
- * board (see after-triple.ts), so it has no example boards.
- */
-export const AFTER_TRIPLE: Lesson = {
-  id: 'after-triple',
-  title: 'After a triple',
-  intro: [],
-  goal: '',
-  lookFor: [],
-  accepts: LESSONS.find((l) => l.id === 'vertical-triple')!.accepts,
-  success: '',
-  moments: [],
-};
-
-/** The tutorial's topic list: the strategies, then the standalone lessons. */
-export const TOPICS: Lesson[] = [...LESSONS, AFTER_TRIPLE];
+/** The tutorial's topic list. After a triple is a lesson of Vertical triple (see after-triple.ts). */
+export const TOPICS: Lesson[] = LESSONS;
