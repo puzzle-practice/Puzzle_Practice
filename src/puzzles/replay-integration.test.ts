@@ -6,7 +6,7 @@ import { Store, exportAll } from '../core/storage';
 import { replayWrites, listReplayFiles } from '../core/replay-storage';
 import type { PuzzleReplay, ReplayRecorder } from '../core/replay';
 import type { PuzzleContext, PuzzleFactory } from '../core/puzzle';
-import type { InputEvent } from '../core/input';
+import type { Input, InputEvent } from '../core/input';
 import { createDrill } from './treasure-haul/training';
 import { HaulBoard, isChestOrigin, RUBY, EMERALD } from './treasure-haul/logic';
 import { FOUR, IronBoard } from './blacksmithing/logic';
@@ -22,6 +22,7 @@ import { AIM_HISTORY, AIM_LANDING_MS, AIM_MS, AimTrainer } from './rumble/aim';
 import { Match as RumbleMatch } from './rumble/match';
 import { Glove as RumbleGlove } from './rumble/gloves';
 import type { Board, Point } from './rumble/board';
+import { ball, charged, EMPTY, FURBALL, ORANGE } from './rumble/pieces';
 import { GunningGame } from './gunning/game';
 import { LOOP, LOOP_SIDES, POWDER, SHOT, WAD } from './gunning/board';
 
@@ -141,20 +142,31 @@ function misses(b: Board, fist: number, dir: number, cells: Point[]): boolean {
   return !!shot && !cells.some(p => b.adjacent(shot.rest, p));
 }
 
-describe('Rumble fire inputs', () => {
-  async function setup() {
+describe('Rumble inputs', () => {
+  async function setup(werewolf = false) {
     const updates = vi.spyOn(RumbleMatch.prototype, 'update');
     const store = new Store('rumble'); store.set('mode', 'Create');
     const harness = panelHarness();
     let now = 100;
+    const paletteClicks: (() => void)[] = [];
+    const createElement = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation(((tag: string) => {
+      const element = createElement(tag);
+      if (tag === 'button') element.addEventListener = ((type: string, callback: () => void) => {
+        if (type === 'click') paletteClicks.push(callback);
+      }) as typeof element.addEventListener;
+      return element;
+    }) as typeof document.createElement);
     const factory = (await import('./rumble/index')).default;
     const ctx = canvasContext() as unknown as CanvasRenderingContext2D;
     const draws = vi.fn();
     ctx.drawImage = draws;
     const screen = new Proxy({ ctx }, { get: (target, key) => key === 'ctx' ? target.ctx : () => ({ width: 0, height: 0 }) });
-    const instance = await factory({ screen, input: { mouse: [-1, -1] },
+    const input = { mouse: [-1, -1] } as Input;
+    const instance = await factory({ screen, input,
       panel: harness.panel, store, ticks: () => now,
     } as unknown as PuzzleContext);
+    harness.toggles.get('Play:Board:Werewolf (orange is furball)')!(werewolf);
     harness.buttons.get('Play::Start')!();
     instance.frame([]);
     const f = (updates.mock.contexts.at(-1)! as RumbleMatch).player;
@@ -162,8 +174,42 @@ describe('Rumble fire inputs', () => {
     f.board.cells.fill(0);
     f.board.sparks = [];
     const frame = (at: number, events: InputEvent[] = []) => { now = at; instance.frame(events); };
-    return { instance, f, frame, draws };
+    return { instance, f, frame, draws, input, paletteClicks, ...harness };
   }
+
+  it.each([false, true])('paints charged balls with Control using keys and palette strokes (werewolf=%s)', async werewolf => {
+    const h = await setup(werewolf), b = h.f.board;
+    const first: [number, number] = [140, 90], second: [number, number] = [170, 90];
+    const cell = (pos: [number, number]) => b.cellAt(pos[0] - 93, pos[1] - 41);
+    const piece = ball(werewolf ? FURBALL : ORANGE);
+    expect(h.input.allowControlKey?.('3')).toBe(true);
+    expect(h.input.allowControlKey?.('c')).toBe(false);
+    h.input.mouse = first;
+    h.frame(110, [{ type: 'keydown', key: 'control' }, { type: 'keydown', key: '3' }]);
+    expect(b.get(cell(first))).toBe(charged(piece));
+    h.input.mouse = second; h.frame(120);
+    expect(b.get(cell(second))).toBe(charged(piece));
+    // Releasing the modifier over the same cell paints a normal ball there.
+    h.frame(130, [{ type: 'keyup', key: 'control' }]);
+    expect(b.get(cell(second))).toBe(piece);
+    h.frame(140, [{ type: 'keyup', key: '3' }]);
+    h.buttons.get('Play:Board:Clear')!(); h.frame(150);
+    h.paletteClicks[2](); h.frame(160);
+    h.input.mouse = first;
+    h.frame(170, [{ type: 'keydown', key: 'control' }, { type: 'mousedown', button: 1, pos: first }]);
+    h.input.mouse = second; h.frame(180);
+    h.frame(190, [{ type: 'mouseup', button: 1, pos: second }]);
+    expect(b.get(cell(first))).toBe(charged(piece));
+    expect(b.get(cell(second))).toBe(charged(piece));
+    h.buttons.get('Play:Board:Undo (U)')!(); h.frame(200);
+    expect(b.get(cell(first))).toBe(EMPTY);
+    expect(b.get(cell(second))).toBe(EMPTY);
+    h.frame(210, [{ type: 'mousedown', button: 1, pos: second }, { type: 'mouseup', button: 1, pos: second }]);
+    h.frame(220, [{ type: 'mousedown', button: 3, pos: second }, { type: 'mouseup', button: 3, pos: second }]);
+    expect(b.get(cell(second))).toBe(EMPTY);
+    h.instance.dispose();
+    expect(h.input.allowControlKey).toBeUndefined();
+  });
 
   it('draws a full board before the punch reaches balls it will destroy', async () => {
     const h = await setup(), b = h.f.board;
@@ -3566,6 +3612,10 @@ describe('untimed and Freeplay sessions keep their replays', () => {
     for (let shot = 0; shot < 4; shot++) advance(3000, [{ type: 'mousedown', button: shot % 2 ? 3 : 1, pos: [200, 300] }, { type: 'mouseup', button: shot % 2 ? 3 : 1, pos: [200, 300] }]);
     harness.toggles.get('Settings:Freeplay:Board drops a row every 8 shots')!(false);
     advance(500, [{ type: 'keydown', key: 'g' }, { type: 'keyup', key: 'g' }]);
+    input.mouse = [140, 90];
+    advance(50, [{ type: 'keydown', key: 'control' }, { type: 'keydown', key: '1' }]);
+    advance(50, [{ type: 'keyup', key: '1' }, { type: 'keyup', key: 'control' }]);
+    expect(match().player.board.get(match().player.board.cellAt(140 - 93, 90 - 41))).toBe(charged(ball(0)));
     const played = { cells: [...match().player.board.cells], shots: match().player.stats.shots };
     harness.buttons.get('Play::Start')!();
     await replayWrites.idle();

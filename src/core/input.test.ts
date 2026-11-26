@@ -56,3 +56,30 @@ describe('page scrolling', () => {
   });
 });
 
+
+describe('Control painting shortcuts', () => {
+  it('records Control and claimed paint keys while preserving other browser shortcuts', () => {
+    const browser = new EventTarget(); vi.stubGlobal('window', browser);
+    const canvas = Object.assign(new EventTarget(), { focus() {} });
+    const input = new Input({ canvas } as unknown as Screen, () => 0);
+    const press = (key: string, extra = {}) => {
+      const event = Object.assign(new Event('keydown', { cancelable: true }), { key, ctrlKey: true, ...extra });
+      browser.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(press('1')).toBe(false);
+    expect(input.drain()).toEqual([]);
+    input.allowControlKey = key => key === '1';
+    expect(press('Control')).toBe(false);
+    expect(press('1')).toBe(true);
+    expect(press('1', { repeat: true })).toBe(true);
+    expect(press('c')).toBe(false);
+    expect(press('1', { metaKey: true })).toBe(false);
+    expect(press('1', { altKey: true })).toBe(false);
+    browser.dispatchEvent(Object.assign(new Event('keyup'), { key: 'Control' }));
+    expect(input.drain()).toEqual([
+      { type: 'keydown', key: 'control' }, { type: 'keydown', key: '1' }, { type: 'keyup', key: 'control' },
+    ]);
+    input.dispose();
+  });
+});

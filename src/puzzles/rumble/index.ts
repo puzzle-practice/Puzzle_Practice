@@ -434,6 +434,9 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   let palette: number | null = null;
   /** A paint key held down paints the cell under the mouse: a colour, or -1 to erase. */
   let paintKey: number | null = null;
+  let chargePaint = false;
+  input.allowControlKey = (pressed) => running && creating() && !viewer.on && !replays.isPlaying &&
+    (PAINT_NAMES.some((_, i) => key(pressed, `paint${i + 1}`)) || key(pressed, 'erase'));
   /** The mouse button painting a stroke (1 paints, 3 erases), and the last cell it painted. */
   let stroke = 0;
   let lastPainted = -1;
@@ -498,6 +501,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     carry = null;
     legacyStart = false;
     palette = paintKey = null;
+    chargePaint = false;
     stroke = 0;
     strokeStart = null;
     spec = roll();
@@ -774,7 +778,10 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
     edited();
   }
 
-  const paintPiece = (colour: number) => (colour < 0 ? EMPTY : werewolfPiece(ball(colour), settings.werewolf));
+  const paintPiece = (colour: number) => {
+    const piece = colour < 0 ? EMPTY : werewolfPiece(ball(colour), settings.werewolf);
+    return chargePaint ? charged(piece) : piece;
+  };
 
   /** Paints the cell under the mouse once per cell as a stroke or a held key moves over it. */
   function paintAtMouse(colour: number, inStroke: boolean): void {
@@ -813,6 +820,11 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       }
       // The viewer covers the board, so nothing reaches the game while it's open.
       return event.type === 'keydown' || event.type === 'keyup' || event.type === 'mousedown' || event.type === 'mouseup';
+    }
+    if ((event.type === 'keydown' || event.type === 'keyup') && event.key === 'control') {
+      chargePaint = event.type === 'keydown';
+      lastPainted = -1;
+      return true;
     }
     if (event.type === 'keydown') {
       const paint = PAINT_NAMES.findIndex((_, i) => key(event.key, `paint${i + 1}`));
@@ -1633,7 +1645,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
       'Freeplay: a board of your own that never ends.',
       '',
       'Start gives you a fight’s starting board. Shoot it as in a fight, or change it between shots on the Play tab:',
-      'hold 1–5 to paint red, yellow, orange, cyan or blue under the mouse and 0 to erase, or pick a colour in the panel and click or drag. The wheel changes a ball’s colour, C charges it and B bruises it.',
+      'hold 1–5 to paint red, yellow, orange, cyan or blue under the mouse and 0 to erase, or pick a colour in the panel and click or drag. The wheel changes a ball’s colour, C toggles its charge and B bruises it. Hold Control while painting to place charged balls.',
       '',
       'Pick a bludgeon, its colours and a punch’s size, or leave them random, and press Punch! (P) to land it on your board. Preview on board (V) shows where it will land first.',
     ] : [
@@ -1881,7 +1893,7 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
   });
   paletteRow.append(eraseButton);
   boardGroup.append(paletteRow);
-  boardGroup.hint(() => 'Hold 1–5 to paint under the mouse and 0 or Delete to erase, or pick a colour or Erase above: then the left button paints and the right erases. Pick it again to fire again. The wheel changes a ball’s colour, C charges it and B bruises it. U undoes.');
+  boardGroup.hint(() => 'Hold 1–5 to paint under the mouse and 0 or Delete to erase, or pick a colour or Erase above: then the left button paints and the right erases. Pick it again to fire again. The wheel changes a ball’s colour, C toggles its charge and B bruises it. Hold Control while painting to place charged balls. U undoes.');
   boardGroup
     .button('Drop a row (D)', () => freeplay('fp-droprow'), { disabled: createOff, title: 'The board drops a row now, as it does every eighth shot, with a new row at the top.' })
     .button('Undo (U)', () => freeplay('fp-undo'), { disabled: () => createOff() || !undo.length })
@@ -2196,5 +2208,5 @@ export default (async ({ screen, input, panel, store, ticks: rawTicks, setReplay
 
   // Opening a replay file ends a game in progress, as its Stop button would.
   replays.setStopLive(() => { if (running) stop(); });
-  return { frame, dispose: () => { rumbleAudio.sync(null); replays.dispose(); sounds.dispose(); } };
+  return { frame, dispose: () => { input.allowControlKey = undefined; rumbleAudio.sync(null); replays.dispose(); sounds.dispose(); } };
 }) satisfies PuzzleFactory;
