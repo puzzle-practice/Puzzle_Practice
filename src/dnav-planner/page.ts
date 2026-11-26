@@ -68,7 +68,7 @@ export function showDnavPlanner(app: HTMLElement): void {
   // Ctrl-click (or Cmd-click) also brings back the frays marked done, for a new run.
   reset.addEventListener('click', (event) => {
     deaths = 0;
-    if (event.ctrlKey || event.metaKey) done.clear();
+    if (event.ctrlKey || event.metaKey) doneUpTo = 1;
     render();
   });
   const deathsGroup = el('div', 'dp-crew dp-deaths', fewer, deathCount, more, reset);
@@ -77,16 +77,16 @@ export function showDnavPlanner(app: HTMLElement): void {
   const deathsLabel = el('span', 'dp-label', 'Deaths');
   deathsLabel.id = 'dp-deaths-label';
 
-  // Frays already played, hidden so the next one is near the top. Not saved, like deaths.
-  const done = new Set<number>();
-  const frayName = (fray: number) => (fray === 6 ? 'Lair' : String(fray));
-  const doneButtons = [2, 3, 4, 5, 6].map((fray) => {
-    const b = el('button', '', frayName(fray));
+  // Frays are played in order, so every fray up to doneUpTo is done and hidden, putting the next one
+  // near the top. Marking a fray done marks the ones before it too; undoing one undoes the ones after.
+  // The lair is never hidden, since nothing comes after it. Not saved, like deaths.
+  let doneUpTo = 1;
+  const doneButtons = [2, 3, 4, 5].map((fray) => {
+    const b = el('button', '', String(fray));
     b.type = 'button';
-    b.setAttribute('aria-label', fray === 6 ? 'Before the lair' : `Before fray ${fray}`);
+    b.setAttribute('aria-label', `Before fray ${fray}`);
     b.addEventListener('click', () => {
-      if (done.has(fray)) done.delete(fray);
-      else done.add(fray);
+      doneUpTo = fray <= doneUpTo ? fray - 1 : fray;
       render();
     });
     return b;
@@ -156,9 +156,9 @@ export function showDnavPlanner(app: HTMLElement): void {
     deaths = Math.min(Math.max(0, deaths), crew - 1);
     deathCount.textContent = String(deaths);
     fewer.disabled = deaths === 0;
-    reset.disabled = deaths === 0 && done.size === 0;
+    reset.disabled = deaths === 0 && doneUpTo === 1;
     more.disabled = deaths >= crew - 1;
-    doneButtons.forEach((b, i) => b.setAttribute('aria-pressed', String(done.has(i + 2))));
+    doneButtons.forEach((b, i) => b.setAttribute('aria-pressed', String(i + 2 <= doneUpTo)));
     const times = {} as Times;
     for (const [id, input] of timeInputs) {
       const value = Number.parseInt(input.value, 10);
@@ -196,7 +196,7 @@ export function showDnavPlanner(app: HTMLElement): void {
         });
       }
       const card = el('section', 'dp-fray', head, options);
-      card.hidden = done.has(fray);
+      card.hidden = fray <= doneUpTo;
       cards.push(card);
     }
     frays.replaceChildren(...cards);
