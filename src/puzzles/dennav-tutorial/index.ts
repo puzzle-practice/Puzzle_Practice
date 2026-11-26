@@ -148,7 +148,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   const HIGHLIGHTS: { value: Highlight; label: string }[] = [{ value: 'links', label: 'Colour by link' }, { value: 'gold', label: 'All gold' }, { value: 'next', label: 'Next link only' }];
   let highlight: Highlight = store.get<Highlight>('chainHighlight', 'links');
   if (!HIGHLIGHTS.some((h) => h.value === highlight)) highlight = 'links';
-  let debugMode = store.get<boolean>('debugMode', true), exportNotice = '';
+  let debugMode = store.get<boolean>('debugMode', false), exportNotice = '';
   const lesson = (): Lesson => TOPICS[lessonIndex];
 
   // What's on the board.
