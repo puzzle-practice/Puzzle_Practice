@@ -5,6 +5,7 @@ import { runPuzzle, type RunningPuzzle } from './core/host';
 import { puzzles } from './core/registry';
 import { setNoIndex, showVoyageRecords } from './voyage-records/page';
 import { showShipwideRecords } from './voyage-records/shipwide-page';
+import { showDnavPlanner } from './dnav-planner/page';
 import {
   chooseBackupFolder,
   exportCompleteBackup,
@@ -47,6 +48,13 @@ function showLanding(): void {
       { className: 'records-link', href: '#/voyage-records' },
       el('strong', {}, 'Voyage Records'),
       el('span', {}, 'Your personal bests and the global records for Woodhallow, Cursed Isles and Vampire Lairs'),
+      el('span', { className: 'records-link-arrow' }, '→'),
+    ),
+    el(
+      'a',
+      { className: 'records-link', href: '#/dnav-planner' },
+      el('strong', {}, 'Solo Dnav Planner'),
+      el('span', {}, 'The fastest lines to clear each Woodhallow werewolf wave on your own'),
       el('span', { className: 'records-link-arrow' }, '→'),
     ),
     backupFooter(),
@@ -188,6 +196,7 @@ function route(): void {
   // Only reached by its address; nothing on the site links here.
   else if (id === 'death-rates') showVoyageRecords(app, 'deaths');
   else if (id === 'records') showShipwideRecords(app);
+  else if (id === 'dnav-planner') showDnavPlanner(app);
   else if (id) void showPuzzle(id);
   else showLanding();
 }
