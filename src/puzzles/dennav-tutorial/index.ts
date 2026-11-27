@@ -2055,7 +2055,8 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     const list = document.createElement('ul');
     for (const item of l.lookFor) { const li = document.createElement('li'); li.textContent = item; list.append(li); }
     const heading = document.createElement('p'); heading.className = 'tutorial-heading'; heading.textContent = 'Before the move, check:';
-    text.replaceChildren(...l.intro.map((p) => { const node = document.createElement('p'); node.textContent = p; return node; }), heading, list);
+    // Not yet rewritten for this lesson: the topic's general text, marked as still to write.
+    text.replaceChildren(...l.intro.map((p, i) => para(i ? p : `[TODO:AI] ${p}`)), heading, list);
   }
   renderText();
 
@@ -2310,7 +2311,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
 
   panel.controls('dennav-tutorial', [{ id: 'newBoard', label: 'New board (without judging this one)', defaultKey: NEW_BOARD_KEY }]);
 
-  panel.group('About this strategy', { collapsed: true, hidden: () => !notesFor(lesson().id, mode) && (mode === 'plan' || mode === 'build' || mode === 'aftertriple') }).append(text);
+  panel.group('About this strategy', { collapsed: true }).append(text);
 
   setMode(mode);
 
