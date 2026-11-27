@@ -2094,7 +2094,7 @@ describe('Navigation input during a move', () => {
     const { AfterTriplePlay } = await import('./dennav-tutorial/after-triple');
     const move = vi.spyOn(AfterTriplePlay.prototype, 'move');
     const store = new Store('dennav-tutorial');
-    store.set('lesson', 'after-triple');
+    store.set('lesson', 'vertical-triple');
     store.set('mode', 'aftertriple');
     const { panel } = panelHarness();
     let now = 0;
@@ -2123,6 +2123,7 @@ describe('Navigation input during a move', () => {
     const { AfterTriplePlay } = await import('./dennav-tutorial/after-triple');
     const move = vi.spyOn(AfterTriplePlay.prototype, 'move');
     const store = new Store('dennav-tutorial');
+    // Saved before After a triple moved into Vertical triple: still opens it.
     store.set('lesson', 'after-triple');
     store.set('mode', 'aftertriple');
     const { panel: basePanel } = panelHarness();

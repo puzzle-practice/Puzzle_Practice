@@ -1,9 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { Random } from '../../core/random';
-import { LESSONS, VEGAS_AS_PLAYED } from './lessons';
+import { LESSONS, VEGAS_AS_PLAYED, noStrayStacks, twoColoursUnderTop } from './lessons';
+import { EMPTY } from '../navigation/logic';
 import { act, dealtConstellation, gameAt, generate, innerFromBag, outcome, play, positionOf, readPosition, scramble, settled } from './engine';
 
 describe('Dennav tutorial lessons', () => {
+  it('Ring 3 double boards, given and generated, have no pair stacked in rings 1 and 2 unless both are targets of its colour', () => {
+    const lesson = LESSONS.find((l) => l.id === 'top-double')!;
+    const rng = new Random(3);
+    for (const m of lesson.moments) {
+      expect(noStrayStacks(m.position) && twoColoursUnderTop(m.position), m.label).toBe(true);
+      for (let i = 0; i < 5; i++) {
+        const p = generate(m, lesson.accepts, rng, lesson.keep).position;
+        expect(noStrayStacks(p) && twoColoursUnderTop(p), m.label).toBe(true);
+      }
+    }
+    const cells = Array<number>(32).fill(EMPTY);
+    cells[3 * 8 + 2] = 1; cells[2 * 8 + 2] = 1;
+    const target = (ring: number) => ({ ring, octant: 2, colour: 1, wild: false });
+    expect(noStrayStacks({ cells, targets: [], entry: { octant: 0, colour: 0 } })).toBe(false);
+    expect(noStrayStacks({ cells, targets: [target(3), target(2)], entry: { octant: 0, colour: 0 } })).toBe(true);
+    // Under a ring 3 target at octant 2: ring 2 octants 1, 2 and 3.
+    const top = [{ ring: 1, octant: 2, colour: 0, wild: false }];
+    cells[2 * 8 + 1] = 0; cells[2 * 8 + 3] = 4;
+    expect(twoColoursUnderTop({ cells, targets: top, entry: { octant: 0, colour: 0 } })).toBe(false);
+    cells[2 * 8 + 3] = 0;
+    expect(twoColoursUnderTop({ cells, targets: top, entry: { octant: 0, colour: 0 } })).toBe(true);
+  });
+
   it.each(LESSONS.map((l) => [l.id, l] as const))('%s: every board sets off its strategy', (_id, lesson) => {
     for (const m of lesson.moments) {
       expect(settled(m.position), m.label).toBe(true);

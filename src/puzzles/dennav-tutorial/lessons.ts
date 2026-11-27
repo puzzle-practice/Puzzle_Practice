@@ -1,6 +1,7 @@
 // The Dennav tutorial's lessons: what each kind of clear is, how to recognise it from what a move
 // sets off, and the boards it starts from (most of them from real sessions).
-import { INNER, TOP, freeEntry, dealtConstellation, horizontalIn, innerFromBag, verticalThroughInner, readPosition, type Action, type Example, type Outcome, type Position } from './engine';
+import { EMPTY } from '../navigation/logic';
+import { INNER, MIDDLE, TOP, freeEntry, dealtConstellation, horizontalIn, innerFromBag, verticalThroughInner, readPosition, type Action, type Example, type Outcome, type Position } from './engine';
 
 export interface Moment extends Example { label: string }
 
@@ -25,6 +26,30 @@ export interface Lesson {
 
 const rotate = (ring: number, clockwise: boolean): Action => ({ kind: 'rotate', ring, clockwise });
 const moment = (label: string, code: string, action: Action): Moment => ({ label, position: freeEntry(readPosition(code)), action });
+
+/**
+ * No column with one colour in both rings 1 and 2, unless both cells are targets of that colour: such a
+ * pair is one star away from a vertical clear.
+ */
+export function noStrayStacks(p: Position): boolean {
+  const target = (ring: number, octant: number, colour: number) => p.targets.some((t) => t.ring === ring && t.octant === octant && !t.wild && t.colour === colour);
+  return [0, 1, 2, 3, 4, 5, 6, 7].every((o) => {
+    const colour = p.cells[INNER * 8 + o];
+    if (colour === EMPTY || colour !== p.cells[MIDDLE * 8 + o]) return true;
+    return target(INNER, o, colour) && target(MIDDLE, o, colour);
+  });
+}
+
+/** The three ring 2 stars under the ring 3 target (under it and either side of that) hold at most two colours. */
+export function twoColoursUnderTop(p: Position): boolean {
+  const top = p.targets.find((t) => t.ring === TOP);
+  if (!top) return true;
+  const colours = [-1, 0, 1].map((d) => p.cells[MIDDLE * 8 + (top.octant + d + 8) % 8]).filter((c) => c !== EMPTY);
+  return new Set(colours).size <= 2;
+}
+
+/** What every Ring 3 double board keeps: no stray stacks, and two colours at most under the ring 3 target. */
+export const ring3DoubleBoard = (p: Position) => noStrayStacks(p) && twoColoursUnderTop(p);
 
 const first = (o: Outcome) => o.links.find((l) => l.kind === 'target');
 const before = (o: Outcome) => o.links.filter((l) => l.kind === 'run' && !l.afterChart);
@@ -71,11 +96,12 @@ export const LESSONS: Lesson[] = [
       'Every other target is filled or wild.',
     ],
     accepts: (o) => o.charted === 2 && before(o).length === 1 && horizontalIn(before(o)[0], TOP) && !first(o)!.scene.targets.some((t) => t.ring === TOP && t.wild),
+    keep: ring3DoubleBoard,
     success: 'Ring 3 cleared through the target and the right colour dropped in: a double.',
     moments: [
-      moment('Example 1', 'N4:.301.....33220144011342021144112:31*,30*,36*,270,210,121:44', rotate(0, true)),
-      moment('Example 2', 'N4:.20......224....4041134140144122:30*,35*,32*,231,204,110:26', rotate(0, true)),
-      moment('Example 3', 'N4:...420..11.441440132100333032211:30*,31*,32*,273,241,142,33*:35', rotate(1, false)),
+      moment('Example 1', 'N4:.301.....33220144011342021044112:31*,30*,36*,270,210,121:44', rotate(0, true)),
+      moment('Example 2', 'N4:.20......224....4041134101144122:30*,35*,32*,231,204,110:26', rotate(0, true)),
+      moment('Example 3', 'N4:...420..11.441440130100333032211:30*,31*,32*,273,241,142,33*:35', rotate(1, false)),
     ],
   },
   {
@@ -191,21 +217,5 @@ export const LESSONS: Lesson[] = [
 /** The vegas example with the orange target filled correctly, so it charts a link early, as a donkey. */
 export const VEGAS_AS_PLAYED = moment('Vegas example, one link short', 'N4:..34...1100203243042114144033221:353,272,201,134:26', rotate(2, false));
 
-/**
- * After a triple: a standalone lesson, not a strategy. It deals a board a turn away from a vertical triple,
- * plays the break, then the player plays on from the board it leaves as normal until they ask for a new
- * board (see after-triple.ts), so it has no example boards.
- */
-export const AFTER_TRIPLE: Lesson = {
-  id: 'after-triple',
-  title: 'After a triple',
-  intro: [],
-  goal: '',
-  lookFor: [],
-  accepts: LESSONS.find((l) => l.id === 'vertical-triple')!.accepts,
-  success: '',
-  moments: [],
-};
-
-/** The tutorial's topic list: the strategies, then the standalone lessons. */
-export const TOPICS: Lesson[] = [...LESSONS, AFTER_TRIPLE];
+/** The tutorial's topic list. After a triple is a lesson of Vertical triple (see after-triple.ts). */
+export const TOPICS: Lesson[] = LESSONS;

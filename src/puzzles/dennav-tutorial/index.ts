@@ -20,6 +20,7 @@ import {
 } from './engine';
 import { LESSONS, TOPICS, VEGAS_AS_PLAYED, type Lesson } from './lessons';
 import { AfterTriplePlay, dealAfterTriple } from './after-triple';
+import { notesFor } from './lesson-notes';
 import { besideTop, checkPlan, dealPlanningBoard, paintPlan, planningOptions, type PlanCheck, type PlanningOption } from './planning';
 import { builtComboIssue, buildOptionsFor, checkBuildTurned, solutionsFor, unturnedCell, type BuildIssue, type Strictness } from './build-position';
 import { boardExport } from './board-export';
@@ -69,12 +70,12 @@ const MODES: { value: Mode; label: string }[] = [
   { value: 'plan', label: '2. Plan Position' },
   { value: 'build', label: '3. Build Ring 1' }, { value: 'finish', label: '4. Finish the Combo' },
   { value: 'practise', label: '5. Practice' }, { value: 'donkey', label: '5. Practice' },
-  { value: 'aftertriple', label: '1. Vertical triple' },
+  { value: 'aftertriple', label: '6. After a triple' },
 ];
 /** Topic-specific lessons; Example and Practice are available for every topic. */
 function modeFits(mode: Mode, lesson: string): boolean {
-  // After a triple is a lesson of its own, with none of the strategy topics' modes.
-  if (lesson === 'after-triple' || mode === 'aftertriple') return lesson === 'after-triple' && mode === 'aftertriple';
+  // After a triple: a vertical triple breaks, then the board plays on (Vertical triple's last lesson).
+  if (mode === 'aftertriple') return lesson === 'vertical-triple';
   if (mode.startsWith('cascade-')) return lesson === 'cascade-single';
   // The donkey and vegas practise from scratch with Donkey from scratch's flow, listed as their Practice.
   if (mode === 'practise' && (lesson === 'cascade-single' || lesson === 'donkey' || lesson === 'vegas')) return false;
@@ -135,8 +136,10 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   });
   const matchWildColour = targetAppearance(panel);
   const rng = new Random();
-  let lessonIndex = Math.max(0, TOPICS.findIndex((l) => l.id === store.get('lesson', TOPICS[0].id)));
-  let mode: Mode = store.get<Mode>('mode', 'learn');
+  // After a triple used to be a topic of its own; it is now Vertical triple's last lesson.
+  const storedLesson = store.get('lesson', TOPICS[0].id);
+  let lessonIndex = Math.max(0, TOPICS.findIndex((l) => l.id === (storedLesson === 'after-triple' ? 'vertical-triple' : storedLesson)));
+  let mode: Mode = storedLesson === 'after-triple' ? 'aftertriple' : store.get<Mode>('mode', 'learn');
   if (!MODES.some((m) => m.value === mode)) mode = 'learn';
   let stage = store.get<number>('stage', 0);
   let slow = store.get<boolean>('slow', true);
@@ -146,11 +149,10 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   const HIGHLIGHTS: { value: Highlight; label: string }[] = [{ value: 'links', label: 'Colour by link' }, { value: 'gold', label: 'All gold' }, { value: 'next', label: 'Next link only' }];
   let highlight: Highlight = store.get<Highlight>('chainHighlight', 'links');
   if (!HIGHLIGHTS.some((h) => h.value === highlight)) highlight = 'links';
-  let debugMode = store.get<boolean>('debugMode', true), exportNotice = '';
+  let debugMode = store.get<boolean>('debugMode', false), exportNotice = '';
   const lesson = (): Lesson => TOPICS[lessonIndex];
 
   // What's on the board.
-  // A standalone lesson has no example boards: start from the first topic's until it deals its own.
   const firstMoment = lesson().moments[0] ?? LESSONS[0].moments[0];
   let shown: Position = firstMoment.position;
   let example: Example = firstMoment;
@@ -1089,7 +1091,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
       // Ring 3 into a vertical needs a column beside the ring 3 target with no target in it.
       if (lesson().id === 'drop-in-vertical' && !verticalColumns(fresh.targets).length) continue;
       // Build the combo starts from rings 1 and 2 already built; the others from an empty board.
-      const position = mode === 'r3build' ? dealFilled(rng, fresh, lesson().id === 'drop-in-vertical') : fresh;
+      const position = mode === 'r3build' ? dealFilled(rng, fresh, lesson().id === 'drop-in-vertical', lesson().id === 'top-double') : fresh;
       if (!position) continue;
       r3Deal = { position, seed };
       r3Board++;
@@ -1964,6 +1966,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     if (!modesFor(lesson().id).some((m) => m.value === next)) next = modesFor(lesson().id)[0].value;
     endStats();
     mode = next; store.set('mode', mode);
+    renderText();
     sceneMarks = null; donkeyBreak = null; donkeyEnded = false; replaying = false; stepping = false;
     scenes = []; marks = []; status = ''; mistake = null; bad = null; game = null; start = null;
     waiting = false; afterScenes = null; afterTripleAt = 0; planNextAt = 0; planPaintWith = null; planPainting = false;
@@ -2042,10 +2045,18 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   text.className = 'tutorial-text';
   function renderText(): void {
     const l = lesson();
+    const para = (p: string) => { const node = document.createElement('p'); node.textContent = p; return node; };
+    const notes = notesFor(l.id, mode);
+    if (notes) {
+      const tips = document.createElement('p'); tips.className = 'tutorial-heading'; tips.textContent = 'Jice’s Tips';
+      text.replaceChildren(...notes.about.map(para), ...(notes.tips.length ? [tips, ...notes.tips.map(para)] : []));
+      return;
+    }
     const list = document.createElement('ul');
     for (const item of l.lookFor) { const li = document.createElement('li'); li.textContent = item; list.append(li); }
     const heading = document.createElement('p'); heading.className = 'tutorial-heading'; heading.textContent = 'Before the move, check:';
-    text.replaceChildren(...l.intro.map((p) => { const node = document.createElement('p'); node.textContent = p; return node; }), heading, list);
+    // Not yet rewritten for this lesson: the topic's general text, marked as still to write.
+    text.replaceChildren(...l.intro.map((p, i) => para(i ? p : `[TODO:AI] ${p}`)), heading, list);
   }
   renderText();
 
@@ -2136,7 +2147,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     if (!controlsHelp.hidden) {
       const keys = document.createElement('p'), pointer = document.createElement('p');
       keys.textContent = building
-        ? `${[1, 2, 3, 4].map((n) => keyLabel(keyFor('navigation', `selectRing${n}`, String(n)))).join('/')} Rings · ${keyLabel(keyFor('navigation', 'ccw', 'arrowleft'))}/${keyLabel(keyFor('navigation', 'cw', 'arrowright'))} Turn · ${keyLabel(keyFor('navigation', 'drop', 'space'))} Drop${submit ? ' · Enter Submit' : ''}`
+        ? `${[1, 2, 3, 4].map((n) => keyLabel(keyFor('navigation', `selectRing${n}`, String(n)))).join('/')} or ${keyLabel(keyFor('navigation', 'ringOut', 'arrowup'))}/${keyLabel(keyFor('navigation', 'ringIn', 'arrowdown'))} Rings · ${keyLabel(keyFor('navigation', 'ccw', 'arrowleft'))}/${keyLabel(keyFor('navigation', 'cw', 'arrowright'))} Turn · ${keyLabel(keyFor('navigation', 'drop', 'space'))} Drop${submit ? ' · Enter Submit' : ''}`
         : PLAN_PAINT_KEYS.map(({ id, defaultKey, colour }) => `${keyLabel(keyFor('navigation', id, defaultKey))} ${colour === EMPTY ? 'Erase' : COLOUR_NAMES[colour]}`).join(' · ');
       pointer.textContent = building ? 'Click a ring to select it; drag it to turn. After a fail: Space retries, Enter skips.' : 'Hold a key and move to paint. Click/drag also paints; right-click erases.';
       controlsHelp.replaceChildren(keys, pointer);
@@ -2300,7 +2311,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
 
   panel.controls('dennav-tutorial', [{ id: 'newBoard', label: 'New board (without judging this one)', defaultKey: NEW_BOARD_KEY }]);
 
-  panel.group('About this strategy', { collapsed: true, hidden: () => mode === 'plan' || mode === 'build' || mode === 'aftertriple' }).append(text);
+  panel.group('About this strategy', { collapsed: true }).append(text);
 
   setMode(mode);
 
