@@ -45,6 +45,10 @@ export const LESSON_NOTES: Record<string, LessonNotes> = {
     about: ['Test your speed and consistency by building the combo over and over.'],
     tips: [],
   },
+  'vertical-triple:aftertriple': {
+    about: ['Practise setting up the next triple after one has already been cleared.'],
+    tips: ['I like to break the board down such that I have about 10–12 pieces. This usually allows you to position for the next triple.'],
+  },
   'donkey:learn': {
     about: ['The easiest way to build a donkey is from a fresh board. You start pairing up the pieces, with the two remaining colours side by side. Notice how some of the columns drop down once, some twice and one not at all. It is important that the ring 3 target is in one of the columns that only drops down once.'],
     tips: ['I first check for an open column two columns away from the ring 3 target in either direction. If this is open, the order of the pairs in ring 1 doesn’t matter at all, and we combo in the rotation away from the ring 3 target. If this is not possible, my next plan is to do the same thing but 3 columns away from the ring 3 target, then go away from the ring 3 target again. The reason I like these is that we will always drop into ring 3 at the end; this ensures that accidentally matching targets around the end of the combo will not clear it prematurely.'],
