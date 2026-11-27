@@ -2137,7 +2137,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     if (!controlsHelp.hidden) {
       const keys = document.createElement('p'), pointer = document.createElement('p');
       keys.textContent = building
-        ? `${[1, 2, 3, 4].map((n) => keyLabel(keyFor('navigation', `selectRing${n}`, String(n)))).join('/')} Rings · ${keyLabel(keyFor('navigation', 'ccw', 'arrowleft'))}/${keyLabel(keyFor('navigation', 'cw', 'arrowright'))} Turn · ${keyLabel(keyFor('navigation', 'drop', 'space'))} Drop${submit ? ' · Enter Submit' : ''}`
+        ? `${[1, 2, 3, 4].map((n) => keyLabel(keyFor('navigation', `selectRing${n}`, String(n)))).join('/')} or ${keyLabel(keyFor('navigation', 'ringOut', 'arrowup'))}/${keyLabel(keyFor('navigation', 'ringIn', 'arrowdown'))} Rings · ${keyLabel(keyFor('navigation', 'ccw', 'arrowleft'))}/${keyLabel(keyFor('navigation', 'cw', 'arrowright'))} Turn · ${keyLabel(keyFor('navigation', 'drop', 'space'))} Drop${submit ? ' · Enter Submit' : ''}`
         : PLAN_PAINT_KEYS.map(({ id, defaultKey, colour }) => `${keyLabel(keyFor('navigation', id, defaultKey))} ${colour === EMPTY ? 'Erase' : COLOUR_NAMES[colour]}`).join(' · ');
       pointer.textContent = building ? 'Click a ring to select it; drag it to turn. After a fail: Space retries, Enter skips.' : 'Hold a key and move to paint. Click/drag also paints; right-click erases.';
       controlsHelp.replaceChildren(keys, pointer);
