@@ -20,6 +20,7 @@ import {
 } from './engine';
 import { LESSONS, TOPICS, VEGAS_AS_PLAYED, type Lesson } from './lessons';
 import { AfterTriplePlay, dealAfterTriple } from './after-triple';
+import { notesFor } from './lesson-notes';
 import { besideTop, checkPlan, dealPlanningBoard, paintPlan, planningOptions, type PlanCheck, type PlanningOption } from './planning';
 import { builtComboIssue, buildOptionsFor, checkBuildTurned, solutionsFor, unturnedCell, type BuildIssue, type Strictness } from './build-position';
 import { boardExport } from './board-export';
@@ -1965,6 +1966,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
     if (!modesFor(lesson().id).some((m) => m.value === next)) next = modesFor(lesson().id)[0].value;
     endStats();
     mode = next; store.set('mode', mode);
+    renderText();
     sceneMarks = null; donkeyBreak = null; donkeyEnded = false; replaying = false; stepping = false;
     scenes = []; marks = []; status = ''; mistake = null; bad = null; game = null; start = null;
     waiting = false; afterScenes = null; afterTripleAt = 0; planNextAt = 0; planPaintWith = null; planPainting = false;
@@ -2043,6 +2045,13 @@ export default (async ({ screen, input, panel, store, ticks }) => {
   text.className = 'tutorial-text';
   function renderText(): void {
     const l = lesson();
+    const para = (p: string) => { const node = document.createElement('p'); node.textContent = p; return node; };
+    const notes = notesFor(l.id, mode);
+    if (notes) {
+      const tips = document.createElement('p'); tips.className = 'tutorial-heading'; tips.textContent = 'Jice’s Tips';
+      text.replaceChildren(...notes.about.map(para), ...(notes.tips.length ? [tips, ...notes.tips.map(para)] : []));
+      return;
+    }
     const list = document.createElement('ul');
     for (const item of l.lookFor) { const li = document.createElement('li'); li.textContent = item; list.append(li); }
     const heading = document.createElement('p'); heading.className = 'tutorial-heading'; heading.textContent = 'Before the move, check:';
@@ -2301,7 +2310,7 @@ export default (async ({ screen, input, panel, store, ticks }) => {
 
   panel.controls('dennav-tutorial', [{ id: 'newBoard', label: 'New board (without judging this one)', defaultKey: NEW_BOARD_KEY }]);
 
-  panel.group('About this strategy', { collapsed: true, hidden: () => mode === 'plan' || mode === 'build' || mode === 'aftertriple' }).append(text);
+  panel.group('About this strategy', { collapsed: true, hidden: () => !notesFor(lesson().id, mode) && (mode === 'plan' || mode === 'build' || mode === 'aftertriple') }).append(text);
 
   setMode(mode);
 
